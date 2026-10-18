@@ -9,10 +9,10 @@
 |---|---|
 | cwd | `<workspace.root>/<ITEM-KEY>/` |
 | prompt | rule 的範本展開後的文字 |
-| env `SDD_RUN_ID` | Run id |
-| env `SDD_TARGET` | item 的 ref |
-| env `SDD_MODE` | `split` / `execute` / `rework` |
-| env `SDD_WORKSPACE` | 同 cwd |
+| env `TASUKI_RUN_ID` | Run id |
+| env `TASUKI_TARGET` | item 的 ref |
+| env `TASUKI_MODE` | `split` / `execute` / `rework` |
+| env `TASUKI_WORKSPACE` | 同 cwd |
 | MCP | 指向 engine 的 MCP facade，帶 run token。由 runner 在 spawn 時注入，做法依 CLI 而定（待驗證） |
 | session | rule 的 `session` 是 `per-item` 且找得到舊 session 時，runner 用 resume。找不到或 resume 失敗就開新的 |
 

@@ -56,6 +56,18 @@
 | 訂閱帳號用在雲端服務的條款 | 帳號風險 | 雲端預設 API key，README 寫清楚 |
 | 改到一半的 workspace | 續跑時狀態髒 | agent 要能接受，見 stop-and-recovery.md |
 
+## 動工前要先定的
+
+先記在這裡，做到對應里程碑再回來決定。
+
+| 里程碑 | 要先定 | 為什麼卡 |
+|---|---|---|
+| M1 | `config-and-rules.md` 與 `agent-contract.md` 還是草稿 | config 驗證與 verdict 驗證的測試要照它們寫，欄位沒確認就寫等於寫兩次 |
+| M2 | `attempt` 的歸零規則（待釐清 3） | `max_attempts` 會把 item 送進 `blocked`。人手動拉回來之後 attempt 要不要繼續累計，沒定就沒辦法寫那條復原測試 |
+| M2 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。用假 clock 測得出邏輯，但預設值要有依據 |
+| M3 | 「待驗證」裡 headless CLI 那幾項：session resume、http MCP、取得 session id | 結果可能讓 runner 設計大改，例如只支援 stdio 時要加 shim |
+| M4 | sqlite 模式下 refine 階段的互動式 agent 怎麼寫回 tracker（待釐清 5） | 要另外一個綁使用者身分的 MCP 入口，目前完全沒設計 |
+
 ## 待釐清（設計）
 
 1. 規則 schema 的最終欄位（config-and-rules.md 是草稿）。
@@ -66,7 +78,7 @@
 6. splitter 遇到 item 底下已經有 task（refine 階段建的 manual task、被打回後重拆）時的冪等準則，要寫進預設 prompt。
 7. `Run` 是否要記 pid 或 process group，供 engine 重啟後清理殘留的 CLI process。
 8. UI 的細節範圍（kanban 能不能直接改 status、能不能編輯 task）。
-9. 專案名稱與 license。
+9. license。
 10. webhook 驅動端。
 
 ## 待驗證（動手前對現行文件確認）

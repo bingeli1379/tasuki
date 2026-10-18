@@ -98,3 +98,15 @@
 ## D22 文件的寫法
 - 決定：mermaid 圖、單一術語表、一個決定一條紀錄、程式碼出現後 schema 以程式碼為準。
 - 理由：文件要給人看，也要給 AI 看。
+
+## D23 專案名稱 Tasuki
+- 決定：叫 Tasuki（襷）。
+- 理由：駅伝的接力帶，跑完一段交給下一個人，下一個可以是 agent 也可以是人，對應 status 之間的交接與人工放行。
+- 注意：npm 上已有同名的 multi-agent 框架，發佈時要用 scope 或加後綴。GitHub 與網域尚未查。
+- 重新檢視：發佈前查出撞名或商標問題時。
+
+## D24 對外介面的識別字跟著專案名
+- 決定：傳給 agent 的 env 前綴用 `TASUKI_`（`TASUKI_RUN_ID`、`TASUKI_TARGET`、`TASUKI_MODE`、`TASUKI_WORKSPACE`），config 的 schema 檔名是 `tasuki.config.schema.json`。
+- 理由：D23 改名之前用的是 `SDD_` 與 `sdd.config.*`。這些會變成 agent prompt 與使用者 config 的一部分，發佈之後再改就是 breaking change。
+- 注意：文件裡「SDD 流程」指的是 spec-driven development 這個方法，不是識別字，不用改。
+- 重新檢視：D23 的名字因撞名而換掉時，這一條跟著換。

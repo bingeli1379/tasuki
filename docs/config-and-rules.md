@@ -10,7 +10,7 @@
 
 ```jsonc
 {
-  "$schema": "./sdd.config.schema.json",
+  "$schema": "./tasuki.config.schema.json",
   "version": 1,
 
   "tracker": {
@@ -97,7 +97,7 @@
 | `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複 |
 | `role` | `splitter` 或 `orchestrator`，決定 MCP tool 權限 |
 | `agent` | 用哪個 agent（agents 裡的 key） |
-| `mode` | `split` / `execute` / `rework`，以 `SDD_MODE` 傳給 agent |
+| `mode` | `split` / `execute` / `rework`，以 `TASUKI_MODE` 傳給 agent |
 | `prompt` / `promptFile` | 給 agent 的指令範本 |
 | `session` | `fresh` 或 `per-item`（續用這個 item 在同一個 agent 上最近的 session） |
 | `timeoutMinutes` | 覆寫 `limits.runTimeoutMinutes` |

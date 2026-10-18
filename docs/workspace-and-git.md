@@ -9,7 +9,7 @@ git 策略算實作，會因人而異，所以 engine 不管 git。engine 只負
 | | engine | agent / skill |
 |---|---|---|
 | 建立 `<workspace.root>/<ITEM-KEY>/` | ✓ | |
-| 當成 Run 的 cwd，並用 `SDD_WORKSPACE` 傳給 agent | ✓ | |
+| 當成 Run 的 cwd，並用 `TASUKI_WORKSPACE` 傳給 agent | ✓ | |
 | 記錄在 `Run.workspace` | ✓ | |
 | item 完成後依 `workspace.cleanup` 決定要不要刪 | ✓ | |
 | 決定要改哪些 repo | | ✓（refine 階段的 item 內容會寫） |

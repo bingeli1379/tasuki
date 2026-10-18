@@ -1,4 +1,4 @@
-# SDD flow framework (working title)
+# Tasuki
 
 設計階段的文件，目前沒有程式碼。寫給作者自己在實作時查閱。
 內文用繁體中文，識別字、status key、config key 一律英文。

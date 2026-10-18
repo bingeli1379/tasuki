@@ -1,4 +1,4 @@
-# SDD flow framework (working title)
+# Tasuki
 
 後端 engine 定時檢查 tracker（sqlite 或 Jira Cloud），命中規則就派 agent（claude / codex CLI）做事，結果寫回。規則、status 對照、agent 都在一份 config 裡。目前是設計階段，還沒有程式碼。
 
