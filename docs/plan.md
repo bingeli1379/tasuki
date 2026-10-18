@@ -29,7 +29,7 @@
 
 | # | 內容 | 驗收 |
 |---|---|---|
-| M0 | pnpm workspace、TypeScript、lint、vitest、CI | `pnpm test` 能跑，各 package 能 build |
+| M0 | pnpm workspace、TypeScript、Vite+（lint、format、type check、vitest、tsdown build）、CI | `pnpm test` 能跑，各 package 能 build |
 | M1 | core：domain（WorkUnit、狀態機、規則比對、verdict 驗證）與 use case，搭配 in-memory 的假 adapter | state-machine.md 的每一列轉移、六條不變量都有測試；config 驗證規則都有測試 |
 | M2 | sqlite tracker store、runtime store、Poller、假 runner | 端到端測試：item 從 `ready-to-split` 走到 `done`，用假 clock；lease 過期復原、hold、Stop、pause 都有測試 |
 | M3 | claude-cli runner、MCP facade、run token | 在玩具 repo 上用真的 claude 手動煙霧測試；session resume 失敗會退回新 session；run token 的範圍有測試 |

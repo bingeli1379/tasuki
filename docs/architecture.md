@@ -173,6 +173,7 @@ Jira 模式下 ticket 在 Jira，Run 在本機，兩邊靠 key 互指。
 - engine：單一 monolith process，同時 serve REST、MCP、靜態前端。
 - 前端：Vue 3 + Vite SPA，打包成靜態檔由 engine serve。不用 Nuxt，因為是 API 後面的管理介面，不需要 SSR。
 - repo：pnpm workspace。
+- 工具鏈：Vite+（`vp`），lint、format、type check、測試、build 都走它，見 D27、D28。library 用 `vp pack`（tsdown）打包。
 
 ```
 packages/
