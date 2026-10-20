@@ -37,14 +37,20 @@ interface AuthPort {
 - 有效期由 `auth.session.ttl` 設定，吃時間長度（`"24h"`）或 `"never"`。預設 24 小時。
 - `never` 允許，但不建議：有登入的情況下 token 洩漏等於永久通行證。
 - 測試過期機制不實際等待，時間從可注入的 `Clock` 取，測試裡直接撥快。
-- v1 的授權：登入成功就有完整權限。身分只用來記錄操作者（`cancelRequestedBy`、`system` comment）。角色與權限之後再說。
+- 目前的授權：登入成功就有完整權限。身分只用來記錄操作者（`cancelRequestedBy`、`system` comment）。角色與權限之後再說。
 
 ## Run token（agent 用的 MCP token）
 
 - 每個 Run 發一個，跟人登入的 token 是兩套，互不相干。
-- 綁定該 item 與它底下的 task，能用的 tool 由 rule 的 `role` 決定（見 agent-contract.md）。
+- 綁定該 item 與它底下的 task，能用的 tool 由 rule 的 `mode` 決定（見 agent-contract.md）。
 - Run 結束、取消、`abandoned` 時立刻失效。
 - agent 拿不到 tracker 的 token。Jira 的 token 只存在 engine 裡。
+
+## Plugin 的信任範圍
+
+- plugin 是 in-process 的 npm 套件，與 engine 同一個 process、同樣的權限。它是受信任的程式碼，信任程度等同 `package.json` 裡的其他相依。
+- 所以 plugin 能讀到 process 的環境變數與檔案系統。只裝信任的來源，沒有沙箱可以擋。
+- `doctor` 與啟動 log 要列出載入了哪些 plugin 與版本，讓人看得出實際跑的是什麼。
 
 ## Secret 處理
 

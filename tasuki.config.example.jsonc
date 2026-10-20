@@ -1,0 +1,15 @@
+{
+  // Copy this file to tasuki.config.jsonc and edit it.
+  // Relative paths in this file resolve against the folder this file lives in.
+  "version": 1,
+
+  // Where this instance keeps its state: tracker.db, runtime.db, logs/, workspaces/.
+  "dataDir": "./data",
+
+  "server": { "host": "127.0.0.1", "port": 8787, "allowInsecure": false },
+
+  "auth": { "kind": "none" },
+
+  // tracker, agents and rules are not final yet.
+  // See docs/plugins.md and docs/config-and-rules.md.
+}

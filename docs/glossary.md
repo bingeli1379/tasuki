@@ -31,7 +31,7 @@
 | outcome | Run 的結果，七種：`succeeded`、`needs_input`、`blocked_manual`、`failed`、`max_attempts`、`cancelled`、`abandoned`。 |
 | verdict | agent 用 `report_result` 回報的結論，四種：`succeeded`、`needs_input`、`blocked_manual`、`failed`。engine 驗證過才換算成 outcome。 |
 | lease | Run 的存活租約，定期續約。同一張 item 同時最多一個存活的 Run，防重複派發和當機復原都靠它。 |
-| attempt | 同一張 item 在同一條 rule 上的第幾次 Run。 |
+| attempt | 同一張 item 在同一條 rule 上的第幾次 Run。只有前一次 Run 是 `abandoned` 才往上加，其他結果之後都從 1 重新算（見 D38）。 |
 | workspace | engine 給每張 item 的工作目錄，Run 的 cwd。 |
 
 ## Agent
@@ -44,13 +44,15 @@
 | runner | RunnerPort 的實作，spawn 某個 agent CLI。 |
 | MCP facade | engine 提供給 agent 的 MCP 入口，背後呼叫 use case。 |
 | run token | 每個 Run 發一個的 token，綁定該 item 與底下的 task，Run 結束就失效。 |
-| M1 / M2 | M1 是 task 只是紀錄、由 orchestrator 自己排程。M2 是 engine 依賴圖排程 task，每個 task 一次 Run。v1 做 M1。 |
+| M1 / M2 | M1 是 task 只是紀錄、由 orchestrator 自己排程。M2 是 engine 依賴圖排程 task，每個 task 一次 Run。先做 M1，M2 排在後面的切片（plan.md）。 |
 
 ## 架構
 
 | 名詞 | 意思 |
 |---|---|
 | port | application 層定義的介面，例如 StoragePort。 |
+| plugin | 提供 tracker、runner、auth 其中一個以上角色的 npm 套件，與 engine 同一個 process。內建的與第三方的走同一條載入路徑。 |
+| testkit | 契約測試套件。任何 tracker、runner、auth 實作都要通過同一組，才算遵守 port。 |
 | adapter | port 的實作。 |
 | driving adapter | 從外面呼叫 use case 的入口：REST、MCP、Poller。 |
 | driven adapter | use case 往外呼叫的實作：storage、runtime store、runner、auth、clock。 |

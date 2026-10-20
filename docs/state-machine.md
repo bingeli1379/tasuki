@@ -17,7 +17,7 @@ stateDiagram-v2
     state "split-review" as SplitReview
     state "in-progress" as InProgress
     state "in-review" as InReview
-    state "needs-rework" as NeedsRework
+    state "ready-to-rework" as ReadyToRework
     state "blocked" as Blocked
     state "done" as Done
 
@@ -27,7 +27,8 @@ stateDiagram-v2
     Splitting --> SplitReview: succeeded (rule A or C)
     Splitting --> NeedsAnswers: needs_input (rule A)
     Splitting --> Blocked: failed or max_attempts
-    Splitting --> ReadyToSplit: lease expired, attempt + 1
+    Splitting --> ReadyToSplit: lease expired (rule A), attempt + 1
+    Splitting --> ReadyToRework: lease expired (rule C), attempt + 1
     NeedsAnswers --> ReadyToSplit: human answers
     SplitReview --> InProgress: human approves
     SplitReview --> Refining: human sends back
@@ -35,12 +36,12 @@ stateDiagram-v2
     InProgress --> Blocked: blocked_manual, needs_input, failed, max_attempts
     Blocked --> InProgress: auto-resume or human
     InReview --> Done: human accepts
-    InReview --> NeedsRework: human, feedback in comment
-    NeedsRework --> Splitting: rule C claims
+    InReview --> ReadyToRework: human, feedback in comment
+    ReadyToRework --> Splitting: rule C claims
     Done --> [*]
 ```
 
-人可以把 item 從任何狀態移到任何狀態。特別注意 `blocked` 的出口不限於 `in-progress`，補完資料後可以直接拉去 `needs-rework`。
+人可以把 item 從任何狀態移到任何狀態。特別注意 `blocked` 的出口不限於 `in-progress`，補完資料後可以直接拉去 `ready-to-rework`。
 
 ### Auto-resume (`blocked` -> `in-progress`)
 
@@ -56,7 +57,7 @@ stateDiagram-v2
 |---|---|---|---|---|---|---|
 | A split | ready-to-split | splitting | split-review | needs-answers | n/a | blocked |
 | B execute | in-progress | none (lease dedupes) | in-review | blocked | blocked | blocked |
-| C rework | needs-rework | splitting | split-review | blocked | n/a | blocked |
+| C rework | ready-to-rework | splitting | split-review | blocked | n/a | blocked |
 
 - `cancelled` 的 Run 不動 status。item 停在原地，由人決定下一步。
 - 規則 A 要能容忍 item 底下已經有 task（refine 階段建立的 manual task）。

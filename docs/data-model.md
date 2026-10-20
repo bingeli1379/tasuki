@@ -51,6 +51,7 @@ interface Run {                         // runtime store only
   outcome?: Outcome
   leaseUntil: string
   startedAt: string
+  lastActivityAt: string
   finishedAt?: string
   cancelRequestedAt?: string
   cancelMode?: 'soft' | 'hard'
@@ -75,6 +76,7 @@ type Outcome =
 - `hold` 是 label，不是 status。
 - 狀態對照、規則、agent registry 都在 config，不在資料庫。資料模型只放會變動的東西。
 - `produced` 是 use case 在處理 agent 的 MCP 呼叫時累加的計數，engine 驗證 verdict 時用它（見 agent-contract.md）。
+- `lastActivityAt` 是 agent 最後一次有動靜的時間，建立 Run 時等於 `startedAt`。CLI 有輸出或 agent 呼叫 MCP tool 都算動靜。engine 在記憶體裡記最新值，隨每次 `renewLease` 一起寫入，不是每次動靜都寫。用途是 UI 顯示與 `idleTimeoutMinutes`（見 stop-and-recovery.md）。
 
 ## tracker 對照
 
@@ -93,6 +95,8 @@ item 與 task 各有自己的 workflow，所以 Jira 的 status mapping 要兩�
 engine 用的 token 是誰，engine 寫的東西就顯示成誰。用專用 bot 帳號或個人 token 都可以，comment 一律帶標記，所以兩種情況都分得出來是人還是 engine 寫的。
 
 ## DDL 草稿
+
+實作時每個切片用到哪張表，才把那張表的 DDL 寫成一支 migration（見 D42），不一次建完。
 
 sqlite tracker store：
 
@@ -144,6 +148,7 @@ CREATE TABLE run (
     ('succeeded','needs_input','blocked_manual','failed','max_attempts','cancelled','abandoned')),
   lease_until         TEXT NOT NULL,
   started_at          TEXT NOT NULL,
+  last_activity_at    TEXT NOT NULL,
   finished_at         TEXT,
   cancel_requested_at TEXT,
   cancel_mode         TEXT CHECK (cancel_mode IN ('soft','hard')),

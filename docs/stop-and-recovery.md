@@ -74,8 +74,10 @@ item 在 Run 被 `abandoned` 之後怎麼處理：
 
 - `maxAttempts` 以（item, rule）為單位計算，超過就走該規則 `on.max_attempts` 的出口，預設是 `blocked`。
 - 每個 Run 有 `runTimeoutMinutes`，逾時視為 `failed` 並 hard stop。
-- 人在 loop 裡的來回（`needs-answers` 與 `ready-to-split`、`needs-rework` 與 `in-review`）由人控制，engine 不設上限。
-- 待定：attempt 的歸零規則、item 層的成本上限（見 plan.md）。
+- `limits.idleTimeoutMinutes` 不是 `null` 時，Run 的 `lastActivityAt` 距今超過它，處理方式與逾時相同：`failed` 並 hard stop，原因記為「沒有動靜」。預設 `null`（關閉）。lease 只證明 process 活著，這一條才抓得到「活著但卡死」。
+- 預設關閉的原因：agent 執行長時間的工具呼叫（例如跑一輪測試）期間，CLI 可能完全沒有輸出，會被誤殺。實際行為待 M3 驗證（見 plan.md 待驗證），之後再決定預設值。
+- 人在 loop 裡的來回（`needs-answers` 與 `ready-to-split`、`ready-to-rework` 與 `in-review`）由人控制，engine 不設上限。
+- attempt 怎麼累計見 D38。item 層的成本上限還沒定（見 plan.md）。
 
 ## 人與 engine 同時改
 

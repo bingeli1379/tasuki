@@ -54,7 +54,7 @@ engine 不直接相信 verdict，先驗證再換算成 outcome：
 
 | verdict | engine 檢查 | 檢查失敗 |
 |---|---|---|
-| `succeeded`（split） | item 底下至少有一個 task | `failed` |
+| `succeeded`（split） | item 底下至少有一個 task（不論是這次建的或先前就有的，見 D30） | `failed` |
 | `succeeded`（rework） | 這次 Run 至少建了一個 task（`produced.tasks`） | `failed` |
 | `succeeded`（execute） | item 底下所有 task 都 `done` | `failed` |
 | `needs_input` | 這次 Run 至少留了一則 `question`（`produced.questions`） | `failed` |
