@@ -14,7 +14,13 @@
   // refPrefix: sqlite refs become TSK-1, TSK-2... Default "TSK".
   "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
 
+  // Logical status -> the tracker's status key. Omitted, each status maps to its
+  // display name ("refining" -> "Refining"), which only suits sqlite.
+  // refining is required: new items start there. Unmapped statuses are not on the board.
+  // "statuses": { "item": { "refining": "Refining", "in-progress": "In Progress" } },
+
   // Jira Cloud instead; put JIRA_EMAIL and JIRA_API_TOKEN in .env.
+  // Every Jira value below is an id, not a name, and ids differ per project.
   // "tracker": {
   //   "plugin": "@tasuki/jira-cloud",
   //   "options": {
@@ -22,10 +28,12 @@
   //     "email": "${JIRA_EMAIL}",
   //     "apiToken": "${JIRA_API_TOKEN}",
   //     "project": "PROJ",
-  //     "issueTypes": { "item": "10009", "task": "10007" },   // ids, not names
-  //     "dependencyLinkType": "Blocks"
+  //     "issueTypes": { "item": "10009", "task": "10007" },
+  //     "dependencyLinkType": "10000"
   //   }
   // },
+  // Jira needs statuses: the display-name default does not match any Jira status id.
+  // "statuses": { "item": { "refining": "10003" } },
 
   // agents and rules are not final yet.
   // See docs/plugins.md and docs/config-and-rules.md.

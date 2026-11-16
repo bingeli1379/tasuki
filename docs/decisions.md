@@ -294,8 +294,8 @@
 - 理由：文件定了 `${VAR}` 展開，但沒定變數從哪來。本機開發每次在 shell export token 很煩，`.env` 是大家預期的位置。Node 24 內建讀取，不用加 dotenv。container 與 CI 直接給環境變數，不受影響。
 - 重新檢視：需要從 secret manager（Vault、1Password CLI）取值時。
 
-## D50 Jira 的 issue type 與 status 在 config 裡用 id
-- 決定：`jira-cloud` 的 `issueTypes` 與 `statuses` 對照的值寫 Jira 的 id，不寫名稱。sqlite 照舊寫名稱，`statuses` 的值對 engine 是不透明的 tracker 端識別。id 由 `init` 向 Jira 查出來再寫進 config；S1 到 S11 先手寫。
+## D50 Jira 的 issue type、status、link type 在 config 裡用 id
+- 決定：`jira-cloud` 的 `issueTypes`、`dependencyLinkType` 與 `statuses` 對照的值寫 Jira 的 id，不寫名稱。link type 一開始寫成名稱 `Blocks`，比照 issue type 改成 id，KAN 上是 `10000`；link type 名稱會不會翻譯還沒驗過，改 id 是為了同一份 config 只有一種寫法。sqlite 照舊寫名稱，`statuses` 的值對 engine 是不透明的 tracker 端識別。id 由 `init` 向 Jira 查出來再寫進 config；S1 到 S11 先手寫。
 - 理由：在測試 site（KAN，team-managed）上實測。名稱會依 token 擁有者的語言設定翻譯，而且不同 endpoint 給的不一樣：同一個 `10009`，`/project/{key}/statuses` 回 `Story`，`/issuetype/project` 回 `故事`，`Accept-Language` header 沒有作用。id 也不是全域固定的：team-managed 的 issue type scope 是 `PROJECT`，status 除了內建的 `3`（進行中）以外也是 `PROJECT`，換一個 project 就是另一組 id，所以不能寫死在預設值裡。
 - 代價：config 裡的 id 人看不懂，`init` 寫入時要附上名稱當註解，UI 顯示的名稱向 Jira 取。
 - 重新檢視：支援 company-managed project，或 Jira 提供不翻譯的穩定 key 時。

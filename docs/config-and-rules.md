@@ -26,11 +26,12 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
       "apiToken": "${JIRA_API_TOKEN}",
       "project": "PROJ",
       "issueTypes": { "item": "10009", "task": "10007" },   // ids, see D50
-      "dependencyLinkType": "Blocks"
+      "dependencyLinkType": "10000"            // issue link type id, see D50
     }
   },
 
-  // logical name -> the tracker's status key: the name for sqlite, the status id for Jira (D50)
+  // logical name -> the tracker's status key: the name for sqlite, the status id for Jira (D50).
+  // Values below are the sqlite form; with jira-cloud each one is an id such as "10003".
   "statuses": {
     "item": {
       "refining": "Refining",

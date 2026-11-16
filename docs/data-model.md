@@ -84,7 +84,7 @@ type Outcome =
 |---|---|---|
 | item | `work_unit` 一列 | Issue（type 可設定，例如 Story） |
 | task | `work_unit` 一列，帶 `parent` | Sub-task |
-| Dependency | `dependency` 表 | issue link（預設 `Blocks`） |
+| Dependency | `dependency` 表 | issue link（type 可設定，例如 Blocks，config 寫 id） |
 | Comment | `comment` 表 | comment |
 | labels | JSON 欄位 | labels |
 | assignee | 欄位 | assignee |
