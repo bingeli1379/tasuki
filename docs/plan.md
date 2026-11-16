@@ -33,14 +33,14 @@
 
 文件描述整體設計，切片只決定做的順序。做法：一次做一個功能，從畫面一路做到 DB（web、REST、use case、port、sqlite），做完作者能在瀏覽器裡操作，再做下一個。core 只長出該切片需要的型別與規則，不預先寫整層。順序的原因與 M1 水平切層被丟掉的經過見 D41。
 
-順序的原因：先把 sqlite 做到能完整跑，不依賴 Jira；Jira adapter 放在 sqlite 的行為穩定之後，用同一組場景驗證。
+每個切片的 tracker 部分 sqlite 與 Jira Cloud 一起做，用同一組契約測試驗兩邊，兩邊都能在瀏覽器操作才算完成（D47）。
 
 切片清單是草稿，做到再調。
 
 | # | 切片 | 作者能看到的 |
 |---|---|---|
 | S0 | 骨架：web、server、sqlite、CI（已完成） | 瀏覽器開頁面，顯示 server 回報的 DB schema 版本 |
-| S1 | 建立 item，在看板上看到。含最小的 config 載入與 plugin 載入（tracker 角色），內建 sqlite 也走這條路 | 新增 item，重新整理後還在，出現在 `refining` 欄 |
+| S1 | 建立 item，在看板上看到。含最小的 config 載入、`.env`、plugin 載入（tracker 角色），內建的 `sqlite` 與 `jira-cloud` 都走這條路 | 新增 item，重新整理後還在，出現在 `refining` 欄；sqlite 與 Jira 測試 project 各做一次 |
 | S2 | 人移動 item 的 status | 拖拉或按鈕移動；兩邊同時改時顯示衝突 |
 | S3 | item 詳情與 comment | 點開 item 看內容，留言 |
 | S4 | 規則命中，假 runner 跑 split | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
@@ -49,7 +49,7 @@
 | S7 | hold、Stop、pause、blocked 自動接回、rework | 對應的按鈕與狀態變化 |
 | S8 | 真的 claude runner（plugin）、MCP facade、run token | 在玩具 repo 上用真的 claude 跑一次 |
 | S9 | auth（`none`、`static`、`http`） | 登入畫面、ttl 過期 |
-| S10 | Jira Cloud tracker（plugin）、`doctor` | 同一組場景在 Jira 測試 project 上跑 |
+| S10 | `doctor` | 啟動前列出 config、plugin、Jira workflow 的問題 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
 | S12 | codex runner、npm CLI 打包、container image、預設 prompt | `init`、`doctor`、`start` 可用 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |
@@ -79,6 +79,7 @@
 
 | 切片 | 要先定 | 為什麼卡 |
 |---|---|---|
+| S1 | Jira Cloud 測試 site 與 project | 每個切片都要在 Jira 上驗（D47），沒有能隨意建 issue 的環境就做不了 |
 | S4 | `config-and-rules.md` 與 `agent-contract.md` 還是草稿 | 作者決定先寫 code，兩份文件等看過 code 再改成「已確認」。S4 是第一次真的讀規則，欄位在這時一定會被碰到 |
 | S4 | `attempt` 的歸零規則（待釐清 3） | `max_attempts` 會把 item 送進 `blocked`。人手動拉回來之後 attempt 要不要繼續累計，沒定就沒辦法寫那條復原測試 |
 | S4 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。用假 clock 測得出邏輯，但預設值要有依據 |
@@ -100,6 +101,7 @@
 11. 不變量 3（`in-progress` 的 task 只有 item 有存活 Run 時才可信）目前只靠 agent 遵守，engine 端沒有對應程式碼，測試只留了 `it.todo`。要不要由 engine 在 Run 結束時把殘留的 `in-progress` task 改回 `to-do`，或維持由 agent 處理？
 12. 人能不能把 `done` 的 task 重開。task 圖沒有 `done` 的出口，實作時照圖，所有人都不行。
 13. config 的 JSON Schema 怎麼產生。D28 的 `isolatedDeclarations` 要求每個 export 有明確型別，zod 這類 schema 物件很難滿足，所以傾向型別手寫。要補 `$schema` 給編輯器用時再決定（手寫、或從型別產生）。
+14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。
 
 ## 待驗證（動手前對現行文件確認）
 
@@ -112,7 +114,8 @@
 - runner 怎麼取得 session id。
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
 - agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。
-- Jira Cloud：JQL 搜尋的現行 endpoint（這兩年改過版）、ADF 轉換的函式庫、comment property 是否可用、transitions API 的行為、API token 的 rate limit。
+- Jira Cloud：JQL 搜尋的現行 endpoint（這兩年改過版）、ADF 轉換的函式庫、comment property 是否可用、transitions API 的行為、API token 的 rate limit。S1 開始就要用到（D47）。
+- Jira Cloud：寫入後 JQL 搜尋要多久才查得到（印象是搜尋索引有延遲）。有延遲的話 Poller 會讀到舊 status，S4 認領之前要確定。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
 - Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。

@@ -4,11 +4,12 @@
 
 使用者只需要改這一份檔案，就能換 tracker、對應 status、換 agent、改規則。格式用 JSONC（JSON 加註解），再提供 `$schema` 讓編輯器自動補全。
 熱重載：新的 Run 用新 config，執行中的 Run 沿用啟動時的快照。新 config 驗證失敗就保留舊的，並在 API 與 log 上回報。
-`${VAR}` 會展開成環境變數，找不到就報錯。config 裡不放明文 token。
+`${VAR}` 會展開成環境變數，找不到就報錯。config 裡不放明文 token，所以 config 可以進 git。
+config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建的 `process.loadEnvFile`），已經存在的環境變數不被覆蓋。`.env` 不進 git（D49）。
 
 ## 形狀
 
-`tracker` 與 `agents` 裡的 `kind` 會改成指定 plugin，實際形狀等 plugins.md 定案後再改這裡。
+`tracker` 用 `plugin` 加 `options` 指定（D48，見 plugins.md）。省略 `tracker` 時是 `@tasuki/sqlite`（D1）。`agents` 裡的 `kind` 也會改成指定 plugin，S8 做 runner 時再定。
 
 ```jsonc
 {
@@ -16,19 +17,20 @@
   "version": 1,
   "dataDir": "./data",                         // relative to the folder this file lives in
 
+  // sqlite: { "plugin": "@tasuki/sqlite", "options": {} }
   "tracker": {
-    "kind": "sqlite",                          // "sqlite" | "jira-cloud"
-    "jira": {
+    "plugin": "@tasuki/jira-cloud",
+    "options": {                               // handed to the plugin as-is, after ${VAR} expansion
       "baseUrl": "https://example.atlassian.net",
       "email": "${JIRA_EMAIL}",
       "apiToken": "${JIRA_API_TOKEN}",
       "project": "PROJ",
-      "issueTypes": { "item": "Story", "task": "Sub-task" },
+      "issueTypes": { "item": "10009", "task": "10007" },   // ids, see D50
       "dependencyLinkType": "Blocks"
     }
   },
 
-  // logical name -> actual name in the tracker
+  // logical name -> the tracker's status key: the name for sqlite, the status id for Jira (D50)
   "statuses": {
     "item": {
       "refining": "Refining",
@@ -108,6 +110,7 @@
 ```
 my-instance/
   tasuki.config.jsonc      你寫的
+  .env                     選用，放 token，不進 git
   data/                    第一次啟動時建立，不進 git
     tracker.db             tracker 是 sqlite 時才有
     runtime.db             Run 與 lease，永遠有
@@ -117,7 +120,7 @@ my-instance/
 
 資料夾放哪裡都可以，用 `tasuki start --config <路徑>` 指定，或先 `cd` 進去直接 `tasuki start`。container 裡把 `dataDir` 設成 `/data` 再掛 volume。
 
-範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。現在還沒有任何程式讀它，server 仍吃環境變數 `TASUKI_DATA_DIR`、`TASUKI_PORT`，S1 才會接上。`tracker`、`agents`、`rules` 的形狀還沒定，範例裡先不寫。
+範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。現在還沒有任何程式讀它，server 仍吃環境變數 `TASUKI_DATA_DIR`、`TASUKI_PORT`，S1 才會接上。範例只寫了 `tracker`，`agents`、`rules` 的形狀還沒定，先不寫。
 
 ## Rule 欄位
 

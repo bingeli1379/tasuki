@@ -275,3 +275,27 @@
 - 取代：`config-and-rules.md` 原本的 `tracker.sqlite.path` 與 `workspace.root: ./workspaces`。
 - 待定：config 檔名 `tasuki.config.jsonc` 沿用 D23 改名後的命名，沒有另外討論過。
 - 重新檢視：出現多個 instance 想共用同一份 data 的需求時。
+
+## D47 每個切片 sqlite 與 Jira Cloud 一起做、一起驗
+- 決定：從 S1 開始，每個切片同時實作 `sqlite` 與 `jira-cloud` 兩個 tracker，用同一組 StoragePort 契約測試驗兩邊，作者在兩邊都能從瀏覽器操作才算做完。S10 只剩 `doctor`。use case 不能假設多次 StoragePort 呼叫是原子的，每一步中途失敗後都要能重跑。
+- 理由：作者擔心做到後面才發現 Jira 的形狀跟 sqlite 不同，要整個打掉。設計本來就以 Jira 的限制為準（`ref` 不透明、status 用邏輯名、Run 放本機、轉移用 compare-and-set），整個打掉的機率低，真正會分岔的是幾個簽名與行為：多步寫入的原子性、寫入後搜尋的延遲、看板一次讀多個 status 的成本、comment 的 author / kind、markdown 與 ADF 的互轉。只做 sqlite，port 會被 sqlite 的形狀養歪，這些到 S10 才一起爆。每個切片兩邊都做，分岔在當下就看得到。
+- 代價：每個切片的工作量變多；`plan.md` 待驗證裡 Jira 的項目提前到 S1；需要一個可以隨意建 issue 的 Jira Cloud 測試 site 與 project。
+- 取代：`plan.md` 原本「先把 sqlite 做到能完整跑，Jira adapter 放在 sqlite 的行為穩定之後」的順序。
+- 重新檢視：Jira 的測試環境拖慢每個切片到不能接受，或某個切片的行為確定只屬於 sqlite 時。
+
+## D48 plugin 的匯出形狀、config 寫法、載入失敗
+- 決定：plugin 的 default export 是 `definePlugin({ name, apiVersion, tracker?, runner?, auth? })`，每個角色是工廠函式 `(ctx, options) => 實例`，`ctx` 帶 `Clock`、logger、`dataDir`。config 用 `{ "plugin": "<npm 套件名>", "options": {...} }` 指定，`options` 原封不動交給工廠。`statuses` 留在 config 最外層。任何載入失敗都拒絕啟動。
+- 理由：engine 要在建立實例時注入 `Clock` 等東西，工廠的參數就是注入點，第三方不用繼承 `core` 的 class，和 Vite、ESLint 的 plugin 同一種形狀。`statuses` 是 engine 在讀的邏輯名對照，不是 tracker 私有的設定。少了 tracker 或 runner engine 無事可做，跳過只會讓人以為它在跑。
+- 取代：`config-and-rules.md` 原本的 `tracker.kind` 加 `tracker.jira`。plugins.md 待定的 1、2、8 結案。
+- 重新檢視：plugin 需要在 engine 啟動後動態載入或卸載時。
+
+## D49 本機的 secret 放 config 旁邊的 `.env`
+- 決定：啟動時，config 檔所在資料夾有 `.env` 就用 Node 內建的 `process.loadEnvFile` 讀進環境變數，已經存在的環境變數優先。`.env` 列進 `.gitignore`。config 裡照舊只寫 `${VAR}`。
+- 理由：文件定了 `${VAR}` 展開，但沒定變數從哪來。本機開發每次在 shell export token 很煩，`.env` 是大家預期的位置。Node 24 內建讀取，不用加 dotenv。container 與 CI 直接給環境變數，不受影響。
+- 重新檢視：需要從 secret manager（Vault、1Password CLI）取值時。
+
+## D50 Jira 的 issue type 與 status 在 config 裡用 id
+- 決定：`jira-cloud` 的 `issueTypes` 與 `statuses` 對照的值寫 Jira 的 id，不寫名稱。sqlite 照舊寫名稱，`statuses` 的值對 engine 是不透明的 tracker 端識別。id 由 `init` 向 Jira 查出來再寫進 config；S1 到 S11 先手寫。
+- 理由：在測試 site（KAN，team-managed）上實測。名稱會依 token 擁有者的語言設定翻譯，而且不同 endpoint 給的不一樣：同一個 `10009`，`/project/{key}/statuses` 回 `Story`，`/issuetype/project` 回 `故事`，`Accept-Language` header 沒有作用。id 也不是全域固定的：team-managed 的 issue type scope 是 `PROJECT`，status 除了內建的 `3`（進行中）以外也是 `PROJECT`，換一個 project 就是另一組 id，所以不能寫死在預設值裡。
+- 代價：config 裡的 id 人看不懂，`init` 寫入時要附上名稱當註解，UI 顯示的名稱向 Jira 取。
+- 重新檢視：支援 company-managed project，或 Jira 提供不翻譯的穩定 key 時。

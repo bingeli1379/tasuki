@@ -60,6 +60,8 @@ flowchart LR
 
 草稿，簽名之後以程式碼為準。adapter 的建構子注入 `Clock`，`createdAt`、`finishedAt`、`cancelRequestedAt` 這類時間由 adapter 蓋章，use case 只傳業務欄位。
 
+StoragePort 的每個方法各自生效，兩次呼叫之間沒有 transaction。Jira 做不到跨呼叫的原子性，所以 sqlite adapter 也不提供，use case 不能假設一連串寫入「全成功或全失敗」，中途失敗後重跑要能接著做（D47）。
+
 ```ts
 interface StoragePort {
   list(kind: Kind, status: string): Promise<WorkUnit[]>
@@ -67,6 +69,7 @@ interface StoragePort {
   children(item: Ref): Promise<WorkUnit[]>
   dependencies(item: Ref): Promise<Dependency[]>
   comments(target: Ref): Promise<Comment[]>
+  createItem(i: NewItem): Promise<WorkUnit>
   // compare-and-set: throws StatusConflict if current status != expectedFrom
   transition(ref: Ref, expectedFrom: string, to: string, actor: Actor): Promise<void>
   addComment(c: NewComment): Promise<void>

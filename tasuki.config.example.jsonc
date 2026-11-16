@@ -1,6 +1,7 @@
 {
   // Copy this file to tasuki.config.jsonc and edit it.
   // Relative paths in this file resolve against the folder this file lives in.
+  // ${VAR} expands from the environment; a .env next to this file is loaded first.
   "version": 1,
 
   // Where this instance keeps its state: tracker.db, runtime.db, logs/, workspaces/.
@@ -10,6 +11,21 @@
 
   "auth": { "kind": "none" },
 
-  // tracker, agents and rules are not final yet.
+  "tracker": { "plugin": "@tasuki/sqlite", "options": {} },
+
+  // Jira Cloud instead; put JIRA_EMAIL and JIRA_API_TOKEN in .env.
+  // "tracker": {
+  //   "plugin": "@tasuki/jira-cloud",
+  //   "options": {
+  //     "baseUrl": "https://example.atlassian.net",
+  //     "email": "${JIRA_EMAIL}",
+  //     "apiToken": "${JIRA_API_TOKEN}",
+  //     "project": "PROJ",
+  //     "issueTypes": { "item": "10009", "task": "10007" },   // ids, not names
+  //     "dependencyLinkType": "Blocks"
+  //   }
+  // },
+
+  // agents and rules are not final yet.
   // See docs/plugins.md and docs/config-and-rules.md.
 }

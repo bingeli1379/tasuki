@@ -54,7 +54,7 @@ interface AuthPort {
 
 ## Secret 處理
 
-- config 不放明文，使用 `${ENV_VAR}`。
+- config 不放明文，使用 `${ENV_VAR}`。本機開發可以放在 config 旁邊的 `.env`，它不進 git（D49）。
 - `agents.<name>.env` 只傳給被 spawn 的那個 CLI，engine 自己不用。
 - engine 不把 secret 寫進 log、`system` comment 或 API 回應。
 

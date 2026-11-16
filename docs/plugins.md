@@ -1,6 +1,6 @@
 # Plugins
 
-狀態：草稿。只有方向確認（見 D44），形狀與欄位都還沒定，下面「待定」一節列出缺什麼。
+狀態：草稿。方向已確認（D44），匯出形狀、config 寫法、載入失敗的行為已確認（D48），其餘列在「待定」。
 
 tracker、runner、auth 三個角色都可以由第三方寫成 npm 套件。內建的 sqlite、Jira Cloud、claude-cli、codex-cli 與第三方走同一條路，內建的沒有任何第三方拿不到的東西。
 
@@ -35,16 +35,48 @@ flowchart LR
 
 實線是編譯時的相依，虛線是執行時才載入或只在測試用到。`server` 不在編譯時相依任何 plugin。
 
+## 匯出形狀
+
+套件的 default export 是 `core` 提供的 `definePlugin(...)` 的結果。每個角色是一個工廠函式，engine 呼叫它建立實例。簽名細節以程式碼為準。
+
+```ts
+// packages/sqlite/src/index.ts
+export default definePlugin({
+  name: '@tasuki/sqlite',
+  apiVersion: 1,
+  tracker: (ctx, options) => createSqliteTracker(ctx, options),
+})
+```
+
+- 有提供的角色才寫那個 key（`tracker`、`runner`、`auth`），一個套件可以寫多個。
+- `ctx` 是 engine 注入的東西：`Clock`、logger、解析成絕對路徑的 `dataDir`。plugin 不自己取時間，也不自己決定資料放哪裡。
+- `options` 是 config 裡該 plugin 的 `options`，`${VAR}` 已經展開。
+- 工廠用函式而不是 class，因為注入點就是參數，第三方不用繼承 `core` 的任何東西。
+
+## config 怎麼指定
+
+config 用 npm 套件名指定 plugin，engine 用 `import()` 載入。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
+
+```jsonc
+"tracker": {
+  "plugin": "@tasuki/jira-cloud",
+  "options": { "baseUrl": "https://example.atlassian.net", "apiToken": "${JIRA_API_TOKEN}" }
+}
+```
+
+`statuses` 不放進 `options`。規則比對與自動復原是 engine 在讀邏輯名，不是 tracker 私有的設定。
+
+## 載入失敗
+
+套件找不到、default export 不是 `definePlugin` 的結果、`apiVersion` 不相容、缺少 config 要求的角色、工廠丟錯，任何一種都拒絕啟動，錯誤訊息指出是哪個 plugin、哪一步。不跳過，因為少了 tracker 或 runner，engine 沒有任何事可做，跳過只會讓人以為它在跑。
+
 ## 待定
 
 這些文件裡完全沒有，也沒有被確認過，實作前要先問作者。
 
-1. plugin 匯出的物件長什麼樣子：怎麼宣告提供哪些角色、怎麼建立實例、拿到哪些東西（Clock、logger）。
-2. config 怎麼指定要用哪個 plugin，以及 plugin 自己的 options 放哪裡。
-3. plugin 的 options 怎麼驗證，以及 JSON Schema 由誰提供給編輯器補全。
-4. `doctor` 怎麼把檢查委派給 plugin（Jira 的 workflow 轉移檢查、CLI preflight 都是 plugin 才知道的事）。
-5. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。
-6. 第三方套件的命名慣例。
-7. `auth` 的三個內建實作怎麼分套件。
-8. plugin 載入失敗時 engine 的行為：拒絕啟動，還是跳過並報警。
-9. plugin 的錯誤怎麼回報成 `system` comment 或 log，哪些資訊不能外洩（secret）。
+1. plugin 的 options 怎麼驗證，以及 JSON Schema 由誰提供給編輯器補全。
+2. `doctor` 怎麼把檢查委派給 plugin（Jira 的 workflow 轉移檢查、CLI preflight 都是 plugin 才知道的事）。
+3. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。
+4. 第三方套件的命名慣例。
+5. `auth` 的三個內建實作怎麼分套件。
+6. plugin 的錯誤怎麼回報成 `system` comment 或 log，哪些資訊不能外洩（secret）。
