@@ -329,3 +329,10 @@
   - content-mapper：官方下一代，TS 與 mapper 都是預覽版，選它是因為正式版出來只要升版本。
 - 風險：`typescript` 目前只有這條檢查會用到（`vp check` 用 Vite+ 自帶的 tsgo，`vp pack` 用 oxc），預覽版壞掉影響範圍只到這一步。編輯器的 Vue 擴充還是用它自帶的 TS，與 CI 的結果可能不一樣。
 - 重新檢視：TS 7.1 與 Vue Language Tools v4 出正式版時改成 `^`；mapper 壞掉又一時修不好時，退回 vue-tsc 配 TS 6。
+
+## D54 `StoragePort.list` 可以落後寫入
+- 決定：`list` 不保證馬上看得到剛寫入的東西。剛寫完的呼叫端用寫入回傳的結果：看板新增後把 POST 回來的 item 直接放進欄位，不重新讀取。契約測試建完之後在 10 秒內重試 `list`。
+- 理由：Jira 的搜尋索引有延遲。2026-11-16 在 KAN 實測，建完 338ms 搜不到、1740ms 搜得到；同時間 `key = X` 的 JQL 與 `GET /issue` 都馬上查得到。S1 的契約測試建完馬上搜，同一天連跑 3 次都失敗。
+- 沒選的做法：讓 Jira adapter 記住剛寫入的 key，`list` 時補撈。轉 status 也有同樣的延遲，要記的東西會一路變多，換到的只是 `list` 看起來即時。
+- 影響：Poller 可能晚一輪才看到 item 進入觸發 status，不影響正確性，因為認領走 `transition` 的 compare-and-set，讀的是 issue 本身。
+- 重新檢視：出現「寫完馬上要 list 才正確」的 use case 時。

@@ -62,6 +62,8 @@ flowchart LR
 
 StoragePort 的每個方法各自生效，兩次呼叫之間沒有 transaction。Jira 做不到跨呼叫的原子性，所以 sqlite adapter 也不提供，use case 不能假設一連串寫入「全成功或全失敗」，中途失敗後重跑要能接著做（D47）。
 
+`list` 可能比寫入晚幾秒才反映出來。Jira 的 `list` 走搜尋索引，實測建完 338ms 搜不到、1740ms 搜得到；`get` 與寫入本身是即時的。剛寫完的呼叫端要用寫入回傳的結果，不要馬上重新 `list`。Poller 下一輪自然會讀到，認領用的 compare-and-set 直接讀那張 issue，不受影響（D54）。
+
 ```ts
 interface StoragePort {
   list(kind: Kind, status: string): Promise<WorkUnit[]>

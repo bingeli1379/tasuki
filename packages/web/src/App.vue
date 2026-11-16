@@ -37,14 +37,15 @@ async function load(): Promise<void> {
 async function create(): Promise<void> {
   saving.value = true
   try {
-    await call('/api/items', {
+    const item = await call<Item & { status: string }>('/api/items', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: title.value, body: body.value }),
     })
+    // Not a reload: the board may lag behind writes (Jira search index).
+    columns.value.find((c) => c.status === item.status)?.items.push(item)
     title.value = ''
     body.value = ''
-    await load()
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {

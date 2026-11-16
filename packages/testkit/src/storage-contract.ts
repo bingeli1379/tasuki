@@ -35,14 +35,20 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       })
     })
 
-    it('a created item is listed under its status', async () => {
+    // list may lag behind writes (StoragePort), so wait for the item to appear.
+    it('a created item is listed under its status', { timeout: 15_000 }, async () => {
       const item = await fixture.storage.createItem({
         title: 'contract: list',
         body: '',
         status: 'refining',
       })
-      const listed = await fixture.storage.list('item', 'refining')
-      expect(listed.find((u) => u.ref === item.ref)).toEqual(item)
+      await expect
+        .poll(
+          async () =>
+            (await fixture.storage.list('item', 'refining')).find((u) => u.ref === item.ref),
+          { timeout: 10_000, interval: 500 },
+        )
+        .toEqual(item)
     })
   })
 }

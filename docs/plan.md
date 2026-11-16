@@ -114,7 +114,6 @@
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
 - agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。
 - Jira Cloud：ADF 轉換的函式庫、comment property 是否可用、transitions API 的行為（S1 寫了建立後轉移的程式，但 KAN 的初始 status 就是 `refining`，沒有實際走到）、API token 的 rate limit。
-- Jira Cloud：寫入後 JQL 搜尋要多久才查得到（印象是搜尋索引有延遲）。有延遲的話 Poller 會讀到舊 status，S4 認領之前要確定。S1 的契約測試建完馬上搜，連跑 3 次都查得到，次數太少不算結論。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
 - Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。
