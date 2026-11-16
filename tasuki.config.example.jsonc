@@ -11,7 +11,8 @@
 
   "auth": { "kind": "none" },
 
-  "tracker": { "plugin": "@tasuki/sqlite", "options": {} },
+  // refPrefix: sqlite refs become TSK-1, TSK-2... Default "TSK".
+  "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
 
   // Jira Cloud instead; put JIRA_EMAIL and JIRA_API_TOKEN in .env.
   // "tracker": {

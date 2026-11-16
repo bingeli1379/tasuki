@@ -12,11 +12,18 @@ export * from './tracker-migrations'
 const plugin: Plugin = definePlugin({
   name: '@tasuki/sqlite',
   apiVersion: API_VERSION,
-  tracker: (ctx) => {
-    // The file is fixed under dataDir (D46), so the plugin takes no options yet.
+  tracker: (ctx, options) => {
+    const refPrefix = (options as { refPrefix?: unknown }).refPrefix ?? 'TSK'
+    // Same shape as a Jira project key, so refs stay safe in URLs and JQL-like filters.
+    if (typeof refPrefix !== 'string' || !/^[A-Z][A-Z0-9]*$/.test(refPrefix)) {
+      throw new Error(
+        'options.refPrefix must be uppercase letters and digits, starting with a letter',
+      )
+    }
+    // The file is fixed under dataDir (D46).
     const db = openDatabase(join(ctx.dataDir, 'tracker.db'))
     migrate(db, TRACKER_MIGRATIONS)
-    return createSqliteTracker(ctx, db)
+    return createSqliteTracker(ctx, db, refPrefix)
   },
 })
 

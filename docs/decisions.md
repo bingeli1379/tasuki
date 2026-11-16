@@ -302,7 +302,7 @@
 
 ## D51 S1 實作時補的假設
 - 狀態：暫行，等作者確認。文件沒寫，S1 為了能寫程式先這樣定。
-- sqlite 的 ref 是 `TSK-<n>`，n 是流水號，在同一個 INSERT 裡算出來，兩個同時建立也不會撞號。
+- sqlite 的 ref 格式已由 D52 定案。
 - 省略 `statuses` 時，每個邏輯名對到顯示名；`statuses.item` 一定要對照 `refining`，否則拒絕啟動。
 - 看板只顯示 config 有對照的 item status，順序照 state-machine.md。Jira 的 KAN 目前只對照 `refining`，所以只有一欄。
 - plugin 從 config 所在的資料夾解析。本機開發的 config 在 repo 根目錄，所以根目錄的 `package.json` 把 `@tasuki/sqlite`、`@tasuki/jira-cloud` 列成 devDependencies。
@@ -311,3 +311,10 @@
 - 建 Jira issue 之後，如果落在的初始 status 不是要的 status，再做一次轉移。兩次呼叫不是原子的（D47），轉移失敗時 issue 留在初始 status，錯誤照樣丟出來。
 - `server.host` 先不讀，一律綁 `127.0.0.1`，等 S9 有 auth。
 - 重新檢視：作者確認或推翻任何一項時，改這條並更新對應文件。
+
+## D52 sqlite 的 ref 前綴由使用者在 config 設定
+- 決定：sqlite 的 ref 是 `<refPrefix>-<n>`。`refPrefix` 放在 `@tasuki/sqlite` 的 `options`，預設 `TSK`，只能是大寫英文字母開頭的大寫字母與數字（跟 Jira 的 project key 同一種形狀），不合格就拒絕啟動。n 是流水號，和前綴無關，在同一個 INSERT 裡算出來，兩個同時建立也不會撞號。
+- 理由：ref 是人每天在看板上看到的名字，前綴應該是使用者的專案名，不是 tasuki 的。只有 sqlite 需要前綴，Jira 的 key 由 Jira 決定，所以放 plugin 自己的 options，不放 config 最外層（D48）。限制成 key 的形狀，ref 之後放進 URL、filter 都不用跳脫。
+- 改前綴：已經存在的 item 保留原本的 ref，新建的才用新前綴，流水號繼續往下數。不回頭改名，因為 runtime store 的 Run 用 ref 指向 item，改名會斷掉。
+- 取代：D51 裡「sqlite 的 ref 是 `TSK-<n>`」那一項。
+- 重新檢視：出現要把舊 item 一起改名的需求時。

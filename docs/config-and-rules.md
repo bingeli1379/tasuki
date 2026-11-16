@@ -17,7 +17,7 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
   "version": 1,
   "dataDir": "./data",                         // relative to the folder this file lives in
 
-  // sqlite: { "plugin": "@tasuki/sqlite", "options": {} }
+  // sqlite: { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } }   // refs become TSK-1, TSK-2...
   "tracker": {
     "plugin": "@tasuki/jira-cloud",
     "options": {                               // handed to the plugin as-is, after ${VAR} expansion

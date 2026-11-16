@@ -17,7 +17,11 @@ function toWorkUnit(ctx: PluginContext, row: Row): WorkUnit {
 }
 
 // Status is stored as the tracker key from the mapping, the same way Jira holds its own status.
-export function createSqliteTracker(ctx: PluginContext, db: DatabaseSync): StoragePort {
+export function createSqliteTracker(
+  ctx: PluginContext,
+  db: DatabaseSync,
+  refPrefix: string,
+): StoragePort {
   return {
     list(kind, status) {
       const rows = db
@@ -31,10 +35,17 @@ export function createSqliteTracker(ctx: PluginContext, db: DatabaseSync): Stora
       const row = db
         .prepare(
           `INSERT INTO work_unit (ref, kind, title, body, status, created_at, updated_at)
-           VALUES ('TSK-' || (SELECT COALESCE(MAX(rowid), 0) + 1 FROM work_unit), 'item', ?, ?, ?, ?, ?)
+           VALUES (? || '-' || (SELECT COALESCE(MAX(rowid), 0) + 1 FROM work_unit), 'item', ?, ?, ?, ?, ?)
            RETURNING *`,
         )
-        .get(item.title, item.body, ctx.statuses.toTracker('item', item.status), now, now)
+        .get(
+          refPrefix,
+          item.title,
+          item.body,
+          ctx.statuses.toTracker('item', item.status),
+          now,
+          now,
+        )
       if (row === undefined) throw new Error('insert returned no row')
       return Promise.resolve(toWorkUnit(ctx, row))
     },
