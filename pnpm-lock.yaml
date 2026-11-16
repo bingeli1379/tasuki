@@ -182,6 +182,16 @@ importers:
 
   packages/core: {}
 
+  packages/jira-cloud:
+    dependencies:
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@tasuki/testkit':
+        specifier: workspace:*
+        version: link:../testkit
+
   packages/server:
     dependencies:
       '@hono/node-server':
