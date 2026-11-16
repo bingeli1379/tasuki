@@ -83,7 +83,6 @@
 | S4 | `attempt` 的歸零規則（待釐清 3） | `max_attempts` 會把 item 送進 `blocked`。人手動拉回來之後 attempt 要不要繼續累計，沒定就沒辦法寫那條復原測試 |
 | S4 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。用假 clock 測得出邏輯，但預設值要有依據 |
 | S8 | 「待驗證」裡 headless CLI 那幾項：session resume、http MCP、取得 session id | 結果可能讓 runner 設計大改，例如只支援 stdio 時要加 shim |
-| S9 之前 | sqlite 模式下 refine 階段的互動式 agent 怎麼寫回 tracker（待釐清 5） | 要另外一個綁使用者身分的 MCP 入口，目前完全沒設計 |
 
 ## 待釐清（設計）
 
@@ -91,7 +90,7 @@
 2. Jira 上 comment 的 author、kind 標記方式。
 3. `attempt` 的歸零規則。D38 是當時的暫行做法，程式碼已隨 M1 丟掉，做到 S4 時重新確認。
 4. item 層的成本上限怎麼算、放哪裡。
-5. sqlite 模式下，互動式 agent（refine 階段）怎麼寫回 tracker：需要 engine 另外提供綁使用者身分的 MCP 入口。
+5. （已定，D57）sqlite 模式下，互動式 agent（refine 階段）怎麼寫回 tracker：engine 在 `/mcp` 提供綁使用者身分的 MCP，Claude Code 與 Codex 都能接。
 6. splitter 遇到 item 底下已經有 task（refine 階段建的 manual task、被打回後重拆）時的冪等準則，要寫進預設 prompt。方向已定（D30）：engine 不判斷，由 agent 讀 item 裡的 task 與 comment 記錄自己決定有沒有拆過，prompt 的措辭 S8 再寫。
 7. `Run` 是否要記 pid 或 process group，供 engine 重啟後清理殘留的 CLI process。
 8. UI 的細節範圍（kanban 能不能直接改 status、能不能編輯 task）。

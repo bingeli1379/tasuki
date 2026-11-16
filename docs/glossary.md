@@ -43,6 +43,7 @@
 | subagent | orchestrator 自己派的子 agent，engine 看不到。 |
 | runner | RunnerPort 的實作，spawn 某個 agent CLI。 |
 | MCP facade | engine 提供給 agent 的 MCP 入口，背後呼叫 use case。 |
+| 使用者 MCP | engine 在 `/mcp` 提供給使用者自己的 AI client（Claude Code、Codex）的 MCP 入口，身分是使用者，能做的事跟看板一樣（D57）。 |
 | run token | 每個 Run 發一個的 token，綁定該 item 與底下的 task，Run 結束就失效。 |
 | M1 / M2 | M1 是 task 只是紀錄、由 orchestrator 自己排程。M2 是 engine 依賴圖排程 task，每個 task 一次 Run。先做 M1，M2 排在後面的切片（plan.md）。 |
 

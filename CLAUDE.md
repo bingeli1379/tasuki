@@ -28,6 +28,7 @@
 
 - 文件描述整體設計，不分版本（D45）。實作順序只看 `plan.md` 的切片。
 - 一次做一個功能（切片），從畫面一路做到 DB，做完能在瀏覽器操作再做下一個，不先寫完整層（D41）。
+- 每個切片的人操作，看板與使用者 MCP（`packages/server/src/mcp.ts`）都要有，兩邊呼叫同一個 use case（D57）。
 - 切片開始前先講清楚這個功能的場景（誰做什麼、畫面看到什麼、資料怎麼變），再往下實作。
 - core 只長出該切片需要的型別與規則。DB 的表在用到的切片才寫成 migration。
 - 本機跑：`pnpm build`，然後 `node packages/server/dist/index.mjs`（讀根目錄的 `tasuki.config.jsonc`，另一份用 `--config <路徑>` 指定；8787，資料在 config 的 `dataDir`）與在 `packages/web` 跑 `pnpm exec vp dev`（5173，要用 `localhost`）。
@@ -66,7 +67,7 @@
 
 - 文件的內文是繁體中文，識別字、status key、config key 是英文。程式碼註解用英文。
 - 所有用到現在時間的地方從 `Clock` 取，不直接呼叫 `Date.now()`。
-- item 的 status 只有人、規則的 outcome、自動復原三種來源能改，agent 沒有任何改 item status 的 tool。
+- item 的 status 只有人、規則的 outcome、自動復原三種來源能改，engine 派出的 agent 沒有任何改 item status 的 tool。使用者透過使用者 MCP 操作的 AI 算是人（D57）。
 - 不要把 Jira 或 sqlite 的細節漏進 domain 或 MCP tool 的名稱。
 - 檔案依概念命名（`work-unit.ts`、`run.ts`），不放 `types.ts`、`utils.ts` 這類依技術分類的雜物間。依賴只往內，`domain` 不 import `application`。
 - 相對路徑 import 不寫副檔名（D43）。

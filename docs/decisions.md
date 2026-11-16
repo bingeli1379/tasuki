@@ -356,3 +356,11 @@
 - 安裝時的供應鏈設定：4.12.1 與 4.12.2 都在當天發布，被 pnpm 的 `minimumReleaseAge` 擋下。不加例外，改用 `^4.12.0` 讓 pnpm 選過了冷卻期的版本（目前鎖 4.12.0）。`esbuild` 與 `vue-demi` 的 build script 在 `allowBuilds` 設為不執行：esbuild 的平台 binary 由 optionalDependencies 裝好，vue-demi 預設就是 Vue 3。
 - 已知限制：template 型別檢查抓得到不存在的 prop，但 Nuxt UI 的 variant 類 prop（例如 `size`）型別是放寬的，給錯值不會報錯。
 - 重新檢視：UI SDK 出正式版且有預設樣式時，或 Nuxt UI 跟 TS、Vite+ 版本卡住時。
+
+## D57 使用者的 AI client 用 engine 的 `/mcp` 操作 tasuki
+- 決定：engine 在 `/mcp` 提供 MCP（Streamable HTTP，無狀態，每個請求開新的 server）。身分是使用者，能做的事跟看板一樣，背後呼叫同一個 use case，之後每個切片的人操作在看板與 `/mcp` 都要有。Claude Code 與 Codex 都要能接，用 http 設定 `http://127.0.0.1:<port>/mcp`。
+- 能改 item status：使用者叫自己的 AI 改，跟自己點按鈕一樣，算「人」。「agent 不能改 item status」限制的是 engine 派出、沒人盯著的 agent，它們走另一個入口（MCP facade，帶 run token，D3）。代價是使用者的 AI 把 item 拉進觸發 status，就會真的開始派 agent。操作者記成使用者並標 `via mcp`，等有記錄操作者的切片時實作。
+- 理由：sqlite 模式下 refine 階段的 AI 原本沒有地方寫回 tracker（待釐清 5）。Jira 模式雖然有 Atlassian MCP，但它不知道 tasuki 的 status 對照與規則，走 tasuki 才會過同一套驗證。
+- tool 名稱是中性的，不帶 Jira 或 sqlite（CLAUDE.md）。
+- 安全：與 REST 同一個威脅面，見 security-and-auth.md。
+- 重新檢視：MCP facade（S8）做出來後，兩個入口的 tool 有大量重複時，看要不要共用定義。

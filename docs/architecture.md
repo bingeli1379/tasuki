@@ -17,10 +17,12 @@ Clean Architecture / ports and adapters。Domain 不認識 Jira、sqlite、claud
 flowchart LR
   FE["Frontend (Vue SPA)"] --> REST
   AG["Agent CLI"] --> MCP
+  UA["User AI client (Claude Code, Codex)"] --> UMCP
 
   subgraph Driving["Driving adapters"]
     REST["REST API"]
     MCP["MCP facade (http)"]
+    UMCP["User MCP (/mcp)"]
     POLL["Poller"]
   end
 
@@ -39,6 +41,7 @@ flowchart LR
 
   REST --> UC
   MCP --> UC
+  UMCP --> UC
   POLL --> UC
   UC --> DOM
   UC --> ST
@@ -52,6 +55,7 @@ flowchart LR
 要點：
 
 - 狀態轉移、權限、驗證只寫在 use case 與 domain 一處，REST、MCP、Poller 進來都過同一關。
+- MCP 有兩個入口：MCP facade 給 engine 派出的 agent，帶 run token，只能碰被派的那張 item；使用者 MCP（`/mcp`）給使用者自己的 AI client，身分是使用者，能做的事跟看板一樣（D57）。
 - port 的介面定義在 application 層，adapter 去實作它。
 - 真正需要寫成程式介面的只有三個：Storage、Runner、Auth，它們也是 plugin 的三個角色（D44）。RuntimeStore 是 engine 內部的 port，不開放給 plugin。stage 是 config，model 是 agent 的參數，前端是 API 的 client。
 - 所有用到現在時間的地方都從 `Clock` 拿，不直接呼叫 `Date.now()`。

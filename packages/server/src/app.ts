@@ -1,6 +1,8 @@
+import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import { createItem, InvalidInput, listBoard, type StatusMap, type StoragePort } from '@tasuki/core'
 import { Hono } from 'hono'
 import type { DatabaseSync } from 'node:sqlite'
+import { createMcpServer } from './mcp'
 import { schemaVersion } from './runtime-store/migrate'
 
 export interface AppDeps {
@@ -27,6 +29,13 @@ export function createApp({ db, storage, statuses }: AppDeps): Hono {
       body: typeof body.body === 'string' ? body.body : '',
     })
     return c.json(item, 201)
+  })
+  // Stateless (no sessionIdGenerator): a fresh server and transport per request, as the SDK
+  // recommends for that mode.
+  app.all('/mcp', async (c) => {
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
+    await createMcpServer({ storage, statuses }).connect(transport)
+    return transport.handleRequest(c.req.raw)
   })
   return app
 }
