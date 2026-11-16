@@ -112,6 +112,7 @@
 - runner 怎麼取得 session id。
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
 - agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。
+- 使用者 MCP 接 Codex（D57）：2026-11-16 用 codex-cli 0.169.0 驗過 `initialize` 與 `tools/list`（中間放 proxy 記錄請求），`tools/call` 沒驗，因為手上沒有 Codex 帳號，模型叫不起來。Claude Code 2.1.311 已實際呼叫 `create_item` 與 `list_board` 成功。
 - Jira Cloud：ADF 轉換的函式庫、comment property 是否可用、transitions API 的行為（S1 寫了建立後轉移的程式，但 KAN 的初始 status 就是 `refining`，沒有實際走到）、API token 的 rate limit。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
