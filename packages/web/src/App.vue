@@ -14,6 +14,7 @@ interface Column {
 
 const columns = ref<Column[]>([])
 const error = ref('')
+const open = ref(false)
 const title = ref('')
 const body = ref('')
 const saving = ref(false)
@@ -46,6 +47,8 @@ async function create(): Promise<void> {
     columns.value.find((c) => c.status === item.status)?.items.push(item)
     title.value = ''
     body.value = ''
+    error.value = ''
+    open.value = false
   } catch (e) {
     error.value = e instanceof Error ? e.message : String(e)
   } finally {
@@ -57,72 +60,57 @@ onMounted(load)
 </script>
 
 <template>
-  <main>
-    <h1>Tasuki</h1>
+  <UApp>
+    <div class="flex min-h-screen flex-col bg-muted">
+      <header
+        class="flex items-center justify-between border-b border-default bg-default px-6 py-3"
+      >
+        <h1 class="text-lg font-semibold">Tasuki</h1>
+        <UModal v-model:open="open" title="New item">
+          <UButton label="New item" />
+          <template #body>
+            <form class="flex flex-col gap-4" @submit.prevent="create">
+              <UFormField label="Title" required>
+                <UInput v-model="title" required autofocus class="w-full" />
+              </UFormField>
+              <UFormField label="Body">
+                <UTextarea v-model="body" :rows="4" autoresize class="w-full" />
+              </UFormField>
+              <UButton type="submit" label="Create" :loading="saving" class="self-end" />
+            </form>
+          </template>
+        </UModal>
+      </header>
 
-    <form class="new-item" @submit.prevent="create">
-      <input v-model="title" placeholder="Title" required />
-      <textarea v-model="body" placeholder="Body" rows="3" />
-      <button type="submit" :disabled="saving">{{ saving ? 'Creating…' : 'New item' }}</button>
-    </form>
+      <main class="flex-1 p-6">
+        <UAlert v-if="error" color="error" variant="subtle" :title="error" class="mb-4" />
 
-    <p v-if="error" class="error">{{ error }}</p>
-
-    <section class="board">
-      <div v-for="column in columns" :key="column.status" class="column">
-        <h2>{{ column.displayName }} ({{ column.items.length }})</h2>
-        <article v-for="item in column.items" :key="item.ref" class="card">
-          <small>{{ item.ref }}</small>
-          <strong>{{ item.title }}</strong>
-          <p v-if="item.body">{{ item.body }}</p>
-        </article>
-      </div>
-    </section>
-  </main>
+        <div class="flex items-start gap-4 overflow-x-auto pb-4">
+          <section
+            v-for="column in columns"
+            :key="column.status"
+            :aria-labelledby="`column-${column.status}`"
+            class="flex w-72 shrink-0 flex-col gap-2 rounded-lg bg-elevated p-3"
+          >
+            <h2
+              :id="`column-${column.status}`"
+              class="flex items-center justify-between px-1 text-sm font-medium"
+            >
+              {{ column.displayName }}
+              <UBadge :label="column.items.length" color="neutral" variant="subtle" size="sm" />
+            </h2>
+            <article v-for="item in column.items" :key="item.ref" :aria-label="item.title">
+              <UCard :ui="{ body: 'p-3 sm:p-3' }">
+                <p class="text-xs text-muted">{{ item.ref }}</p>
+                <p class="font-medium">{{ item.title }}</p>
+                <p v-if="item.body" class="mt-1 text-sm whitespace-pre-wrap text-toned">
+                  {{ item.body }}
+                </p>
+              </UCard>
+            </article>
+          </section>
+        </div>
+      </main>
+    </div>
+  </UApp>
 </template>
-
-<style scoped>
-main {
-  font-family: system-ui, sans-serif;
-  padding: 16px;
-}
-.new-item {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-width: 480px;
-  margin-bottom: 16px;
-}
-.error {
-  color: #b00020;
-}
-.board {
-  display: flex;
-  gap: 12px;
-  overflow-x: auto;
-}
-.column {
-  flex: 0 0 240px;
-  background: #f4f5f7;
-  border-radius: 6px;
-  padding: 8px;
-}
-.column h2 {
-  font-size: 14px;
-  margin: 4px 0 8px;
-}
-.card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  background: #fff;
-  border-radius: 4px;
-  padding: 8px;
-  margin-bottom: 8px;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.15);
-}
-.card p {
-  margin: 0;
-  white-space: pre-wrap;
-}
-</style>

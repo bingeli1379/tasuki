@@ -1,3 +1,5 @@
+/// <reference types="vite-plus/client" />
+
 // vp check does not run the content mapper, so it still needs this to resolve .vue imports.
 declare module '*.vue' {
   import type { DefineComponent } from 'vue'

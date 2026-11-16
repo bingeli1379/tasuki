@@ -17,24 +17,25 @@ test.afterAll(async () => {
 test('a new item shows up in Refining and is still there after a reload', async ({ page }) => {
   const title = `e2e ${Date.now()}`
   await page.goto('/')
-  const refining = page.locator('.column', {
-    has: page.getByRole('heading', { name: /^Refining/ }),
-  })
+  const refining = page.getByRole('region', { name: /^Refining/ })
   await expect(refining).toBeVisible()
 
-  await page.getByPlaceholder('Title').fill(title)
-  await page.getByPlaceholder('Body').fill('first line\nsecond line')
   await page.getByRole('button', { name: 'New item' }).click()
+  const dialog = page.getByRole('dialog', { name: 'New item' })
+  await dialog.getByLabel('Title').fill(title)
+  await dialog.getByLabel('Body').fill('first line\nsecond line')
+  await dialog.getByRole('button', { name: 'Create' }).click()
+  await expect(dialog).toBeHidden()
 
-  const card = refining.locator('.card', { hasText: title })
+  const card = refining.getByRole('article', { name: title })
   await expect(card).toContainText('first line\nsecond line')
-  const ref = (await card.locator('small').textContent()) ?? ''
+  const ref = (await card.getByText(/^[A-Z][A-Z0-9]*-\d+$/).textContent()) ?? ''
   expect(ref).not.toBe('')
   created.push(ref)
 
   // The board may lag behind writes (D54), so reload until the item is listed.
   await expect(async () => {
     await page.reload()
-    await expect(refining.locator('.card', { hasText: title })).toBeVisible({ timeout: 1_000 })
+    await expect(refining.getByRole('article', { name: title })).toBeVisible({ timeout: 1_000 })
   }).toPass({ timeout: 15_000 })
 })

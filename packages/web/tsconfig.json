@@ -9,5 +9,5 @@
   "contentMappers": [
     { "package": "@vue/content-mapper", "extensions": [".vue"], "options": { "target": 3.5 } }
   ],
-  "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"]
+  "include": ["src", "e2e", "*.d.ts", "vite.config.ts", "playwright.config.ts"]
 }

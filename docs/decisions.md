@@ -346,3 +346,13 @@
 - 理由：作者大量用 AI 改程式，要靠測試確定功能沒壞。三層各自抓不同的錯：單元抓規則寫錯，整合抓兩個 tracker 行為不一致與載入失敗，E2E 抓前後端接不起來。
 - CI：build、check、test 之後裝 chromium 跑 `pnpm e2e`，CI 沒有 Jira 的 secret，只跑 sqlite。
 - 重新檢視：E2E 跑太久，或某層一直抓不到真正的錯時。
+
+## D56 前端元件用 Nuxt UI
+- 決定：`web` 用 `@nuxt/ui`（v4，Reka UI 加 Tailwind 4），以 `@nuxt/ui/vite` 外掛在純 Vue + Vite 底下使用，`router: false`，不裝 vue-router。元件自動匯入，產生的 `components.d.ts`、`auto-imports.d.ts` 不進 git，`web` 的 tsconfig 把它們納入 template 型別檢查。
+- 理由：之後要有 modal、下拉、toast、表單驗證，自己刻的話 focus 與鍵盤操作要自己顧。Nuxt UI 的 peer 支援 TS 7，不跟 D27、D53 的工具鏈衝突。
+- 沒選的：
+  - UI SDK（Vercel，2026-11-12 發表）：`@ui-sdk/vue` 還是 `0.1.0-beta.3`，而且只給行為不給樣式，畫面仍然要自己刻。
+  - PrimeVue 很完整但很重；Vuetify 是 Material 外觀；Element Plus 適合後台但外觀偏舊。
+- 安裝時的供應鏈設定：4.12.1 與 4.12.2 都在當天發布，被 pnpm 的 `minimumReleaseAge` 擋下。不加例外，改用 `^4.12.0` 讓 pnpm 選過了冷卻期的版本（目前鎖 4.12.0）。`esbuild` 與 `vue-demi` 的 build script 在 `allowBuilds` 設為不執行：esbuild 的平台 binary 由 optionalDependencies 裝好，vue-demi 預設就是 Vue 3。
+- 已知限制：template 型別檢查抓得到不存在的 prop，但 Nuxt UI 的 variant 類 prop（例如 `size`）型別是放寬的，給錯值不會報錯。
+- 重新檢視：UI SDK 出正式版且有預設樣式時，或 Nuxt UI 跟 TS、Vite+ 版本卡住時。
