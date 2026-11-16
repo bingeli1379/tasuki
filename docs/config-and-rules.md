@@ -120,7 +120,9 @@ my-instance/
 
 資料夾放哪裡都可以，用 `tasuki start --config <路徑>` 指定，或先 `cd` 進去直接 `tasuki start`。container 裡把 `dataDir` 設成 `/data` 再掛 volume。
 
-範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。現在還沒有任何程式讀它，server 仍吃環境變數 `TASUKI_DATA_DIR`、`TASUKI_PORT`，S1 才會接上。範例只寫了 `tracker`，`agents`、`rules` 的形狀還沒定，先不寫。
+範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例只寫了 `tracker`，`agents`、`rules` 的形狀還沒定，先不寫。
+
+目前 server 實際讀的欄位（S1）：`dataDir`、`server.port`、`tracker`、`statuses.item`。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。
 
 ## Rule 欄位
 

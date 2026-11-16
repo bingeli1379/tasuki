@@ -49,13 +49,13 @@ export default definePlugin({
 ```
 
 - 有提供的角色才寫那個 key（`tracker`、`runner`、`auth`），一個套件可以寫多個。
-- `ctx` 是 engine 注入的東西：`Clock`、logger、解析成絕對路徑的 `dataDir`。plugin 不自己取時間，也不自己決定資料放哪裡。
+- `ctx` 是 engine 注入的東西：`Clock`、解析成絕對路徑的 `dataDir`、`statuses`（邏輯名與 tracker 端 status key 的雙向對照）。plugin 不自己取時間，也不自己決定資料放哪裡。port 進出的 status 一律是邏輯名，翻成 tracker 的 key 是 plugin 的事。logger 等第一個需要它的切片再加。
 - `options` 是 config 裡該 plugin 的 `options`，`${VAR}` 已經展開。
 - 工廠用函式而不是 class，因為注入點就是參數，第三方不用繼承 `core` 的任何東西。
 
 ## config 怎麼指定
 
-config 用 npm 套件名指定 plugin，engine 用 `import()` 載入。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
+config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），再用 `import()` 載入。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
 
 ```jsonc
 "tracker": {
@@ -76,7 +76,7 @@ config 用 npm 套件名指定 plugin，engine 用 `import()` 載入。plugin �
 
 1. plugin 的 options 怎麼驗證，以及 JSON Schema 由誰提供給編輯器補全。
 2. `doctor` 怎麼把檢查委派給 plugin（Jira 的 workflow 轉移檢查、CLI preflight 都是 plugin 才知道的事）。
-3. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。
+3. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。程式目前要求完全相等。
 4. 第三方套件的命名慣例。
 5. `auth` 的三個內建實作怎麼分套件。
 6. plugin 的錯誤怎麼回報成 `system` comment 或 log，哪些資訊不能外洩（secret）。

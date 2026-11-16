@@ -40,7 +40,7 @@
 | # | 切片 | 作者能看到的 |
 |---|---|---|
 | S0 | 骨架：web、server、sqlite、CI（已完成） | 瀏覽器開頁面，顯示 server 回報的 DB schema 版本 |
-| S1 | 建立 item，在看板上看到。含最小的 config 載入、`.env`、plugin 載入（tracker 角色），內建的 `sqlite` 與 `jira-cloud` 都走這條路 | 新增 item，重新整理後還在，出現在 `refining` 欄；sqlite 與 Jira 測試 project 各做一次 |
+| S1 | 建立 item，在看板上看到。含最小的 config 載入、`.env`、plugin 載入（tracker 角色），內建的 `sqlite` 與 `jira-cloud` 都走這條路（已完成） | 新增 item，重新整理後還在，出現在 `refining` 欄；sqlite 與 Jira 測試 project 各做一次 |
 | S2 | 人移動 item 的 status | 拖拉或按鈕移動；兩邊同時改時顯示衝突 |
 | S3 | item 詳情與 comment | 點開 item 看內容，留言 |
 | S4 | 規則命中，假 runner 跑 split | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
@@ -79,7 +79,6 @@
 
 | 切片 | 要先定 | 為什麼卡 |
 |---|---|---|
-| S1 | Jira Cloud 測試 site 與 project | 每個切片都要在 Jira 上驗（D47），沒有能隨意建 issue 的環境就做不了 |
 | S4 | `config-and-rules.md` 與 `agent-contract.md` 還是草稿 | 作者決定先寫 code，兩份文件等看過 code 再改成「已確認」。S4 是第一次真的讀規則，欄位在這時一定會被碰到 |
 | S4 | `attempt` 的歸零規則（待釐清 3） | `max_attempts` 會把 item 送進 `blocked`。人手動拉回來之後 attempt 要不要繼續累計，沒定就沒辦法寫那條復原測試 |
 | S4 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。用假 clock 測得出邏輯，但預設值要有依據 |
@@ -114,8 +113,8 @@
 - runner 怎麼取得 session id。
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
 - agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。
-- Jira Cloud：JQL 搜尋的現行 endpoint（這兩年改過版）、ADF 轉換的函式庫、comment property 是否可用、transitions API 的行為、API token 的 rate limit。S1 開始就要用到（D47）。
-- Jira Cloud：寫入後 JQL 搜尋要多久才查得到（印象是搜尋索引有延遲）。有延遲的話 Poller 會讀到舊 status，S4 認領之前要確定。
+- Jira Cloud：ADF 轉換的函式庫、comment property 是否可用、transitions API 的行為（S1 寫了建立後轉移的程式，但 KAN 的初始 status 就是 `refining`，沒有實際走到）、API token 的 rate limit。
+- Jira Cloud：寫入後 JQL 搜尋要多久才查得到（印象是搜尋索引有延遲）。有延遲的話 Poller 會讀到舊 status，S4 認領之前要確定。S1 的契約測試建完馬上搜，連跑 3 次都查得到，次數太少不算結論。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
 - Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。

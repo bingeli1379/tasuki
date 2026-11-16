@@ -299,3 +299,15 @@
 - 理由：在測試 site（KAN，team-managed）上實測。名稱會依 token 擁有者的語言設定翻譯，而且不同 endpoint 給的不一樣：同一個 `10009`，`/project/{key}/statuses` 回 `Story`，`/issuetype/project` 回 `故事`，`Accept-Language` header 沒有作用。id 也不是全域固定的：team-managed 的 issue type scope 是 `PROJECT`，status 除了內建的 `3`（進行中）以外也是 `PROJECT`，換一個 project 就是另一組 id，所以不能寫死在預設值裡。
 - 代價：config 裡的 id 人看不懂，`init` 寫入時要附上名稱當註解，UI 顯示的名稱向 Jira 取。
 - 重新檢視：支援 company-managed project，或 Jira 提供不翻譯的穩定 key 時。
+
+## D51 S1 實作時補的假設
+- 狀態：暫行，等作者確認。文件沒寫，S1 為了能寫程式先這樣定。
+- sqlite 的 ref 是 `TSK-<n>`，n 是流水號，在同一個 INSERT 裡算出來，兩個同時建立也不會撞號。
+- 省略 `statuses` 時，每個邏輯名對到顯示名；`statuses.item` 一定要對照 `refining`，否則拒絕啟動。
+- 看板只顯示 config 有對照的 item status，順序照 state-machine.md。Jira 的 KAN 目前只對照 `refining`，所以只有一欄。
+- plugin 從 config 所在的資料夾解析。本機開發的 config 在 repo 根目錄，所以根目錄的 `package.json` 把 `@tasuki/sqlite`、`@tasuki/jira-cloud` 列成 devDependencies。
+- `apiVersion` 要求完全相等（plugins.md 待定 3）。
+- Jira 的 body 先當純文字，一行一個 ADF paragraph，markdown 格式會掉。
+- 建 Jira issue 之後，如果落在的初始 status 不是要的 status，再做一次轉移。兩次呼叫不是原子的（D47），轉移失敗時 issue 留在初始 status，錯誤照樣丟出來。
+- `server.host` 先不讀，一律綁 `127.0.0.1`，等 S9 有 auth。
+- 重新檢視：作者確認或推翻任何一項時，改這條並更新對應文件。

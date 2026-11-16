@@ -89,7 +89,9 @@ type Outcome =
 | labels | JSON 欄位 | labels |
 | assignee | 欄位 | assignee |
 | comment 的 author / kind | 欄位 | 待 adapter spec 定（候選：comment property、內容裡的標記） |
-| body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉 |
+| body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉。S1 只做純文字，一行一個 paragraph |
+| ref | `TSK-<n>`，n 是流水號（D51） | issue key |
+| status 存什麼 | config 對照的 tracker key（預設是顯示名） | status id（D50） |
 
 item 與 task 各有自己的 workflow，所以 Jira 的 status mapping 要兩份。
 engine 用的 token 是誰，engine 寫的東西就顯示成誰。用專用 bot 帳號或個人 token 都可以，comment 一律帶標記，所以兩種情況都分得出來是人還是 engine 寫的。

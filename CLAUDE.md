@@ -1,6 +1,6 @@
 # Tasuki
 
-後端 engine 定時檢查 tracker（sqlite 或 Jira Cloud），命中規則就派 agent（claude / codex CLI）做事，結果寫回。規則、status 對照、agent 都在一份 config 裡。目前設計文件描述整個產品，不分版本。程式碼只有骨架：`core`（空）、`sqlite`（tracker plugin 的地基，目前只有開 DB 與 migration）、`server`（Hono，含 runtime store）、`web`（Vue 3 SPA）。功能依 `docs/plan.md` 的切片清單，一次一個從畫面做到 DB。
+後端 engine 定時檢查 tracker（sqlite 或 Jira Cloud），命中規則就派 agent（claude / codex CLI）做事，結果寫回。規則、status 對照、agent 都在一份 config 裡。目前設計文件描述整個產品，不分版本。程式碼做到 S1：`core`（domain、port、plugin 契約、use case）、`testkit`（StoragePort 契約測試）、`sqlite` 與 `jira-cloud`（tracker plugin）、`server`（Hono，config 與 plugin 載入、runtime store）、`web`（Vue 3 SPA）。功能依 `docs/plan.md` 的切片清單，一次一個從畫面做到 DB。
 
 ## 開發之前
 
@@ -30,7 +30,8 @@
 - 一次做一個功能（切片），從畫面一路做到 DB，做完能在瀏覽器操作再做下一個，不先寫完整層（D41）。
 - 切片開始前先講清楚這個功能的場景（誰做什麼、畫面看到什麼、資料怎麼變），再往下實作。
 - core 只長出該切片需要的型別與規則。DB 的表在用到的切片才寫成 migration。
-- 本機跑：`pnpm build`，然後 `node packages/server/dist/index.mjs`（8787，DB 在 `./data/runtime.db`，目錄可用環境變數 `TASUKI_DATA_DIR` 改）與在 `packages/web` 跑 `pnpm exec vp dev`（5173，要用 `localhost`）。
+- 本機跑：`pnpm build`，然後 `node packages/server/dist/index.mjs`（讀根目錄的 `tasuki.config.jsonc`，另一份用 `--config <路徑>` 指定；8787，資料在 config 的 `dataDir`）與在 `packages/web` 跑 `pnpm exec vp dev`（5173，要用 `localhost`）。
+- Jira：根目錄 `.env` 放 `JIRA_*`，`jira-cloud` 的契約測試讀到就打 KAN 測試 project，讀不到就 skip（CI 不跑）。
 
 ## 開發之後
 
