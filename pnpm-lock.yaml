@@ -170,6 +170,12 @@ importers:
 
   .:
     devDependencies:
+      '@tasuki/jira-cloud':
+        specifier: workspace:*
+        version: link:packages/jira-cloud
+      '@tasuki/sqlite':
+        specifier: workspace:*
+        version: link:packages/sqlite
       '@types/node':
         specifier: ^24.19.2
         version: 24.19.2
@@ -197,6 +203,9 @@ importers:
       '@hono/node-server':
         specifier: ^2.1.5
         version: 2.1.5(hono@4.13.13)
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
       hono:
         specifier: ^4.13.13
         version: 4.13.13
