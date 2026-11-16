@@ -184,7 +184,7 @@ importers:
         version: 7.1.0-beta
       vite-plus:
         specifier: 1.6.0
-        version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta)
+        version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta)
 
   packages/core: {}
 
@@ -227,7 +227,7 @@ importers:
         version: link:../core
       vite-plus:
         specifier: '*'
-        version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta)
+        version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta)
 
   packages/web:
     dependencies:
@@ -235,6 +235,9 @@ importers:
         specifier: ^3.5.44
         version: 3.5.44(typescript@7.1.0-beta)
     devDependencies:
+      '@playwright/test':
+        specifier: ^1.65.1
+        version: 1.65.1
       '@vitejs/plugin-vue':
         specifier: ^6.0.10
         version: 6.0.10(@voidzero-dev/vite-plus-core@1.6.0(@types/node@24.19.2)(typescript@7.1.0-beta))(vue@3.5.44(typescript@7.1.0-beta))
@@ -572,6 +575,11 @@ packages:
   '@oxlint/plugins@1.93.0':
     resolution: {integrity: sha512-bKWQI1g9jn8bWUZsvhbOLfgva576Fbp1KwoTNSUCMdT9tlTAvQS2JkifX1UrhPPdyN4GHvM20HhvIMqqU1yotQ==}
     engines: {node: ^12.22.0 || ^14.17.0 || >=16.0.0}
+
+  '@playwright/test@1.65.1':
+    resolution: {integrity: sha512-y+NCIRm2LvY4slUVWvGh1nujJ8RF/hEisIsq2mtUPgdQC4L701bq5hZGMhrpeXjACvwvO9tj5dJqhvM6TP9lbw==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@polka/url@1.0.0-next.29':
     resolution: {integrity: sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww==}
@@ -1238,6 +1246,16 @@ packages:
     resolution: {integrity: sha512-qcJu88Q2IWqJsDD529JKMdwGm/dvInW4HvQnRwiH9JtihJvzGOscDtHE3x1pBKeUOTysQ8kVmLnJ2kJu7yhcGA==}
     engines: {node: '>=12'}
 
+  playwright-core@1.65.1:
+    resolution: {integrity: sha512-hqPpz7blSMPxWVdoeE1yiBSzXsKiVOd2k+kjCvmUywD2GPO2Dd9HfcWnq9NN0GHbNZDFgZ9JfBFr+X5/BLo0qw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
+  playwright@1.65.1:
+    resolution: {integrity: sha512-vJ1FuoOrNwOKHUIVEvSt3jT1L+wjjDpwhwIstKtfvTh8XIG4FG4bIFuvNdMxi81LGfAhUgUZleVFaOLY4RIUUw==}
+    engines: {node: '>=20'}
+    hasBin: true
+
   pngjs@7.0.0:
     resolution: {integrity: sha512-LKWqWJRhstyYo9pGvgor/ivk2w94eSjE3RGVuzLGlr3NmD8bf7RcYGze1mNdEHRP6TRP6rMuDHk5t44hnTRyow==}
     engines: {node: '>=14.19.0'}
@@ -1565,6 +1583,10 @@ snapshots:
     optional: true
 
   '@oxlint/plugins@1.93.0': {}
+
+  '@playwright/test@1.65.1':
+    dependencies:
+      playwright: 1.65.1
 
   '@polka/url@1.0.0-next.29': {}
 
@@ -2081,7 +2103,7 @@ snapshots:
 
   obug@3.0.0: {}
 
-  oxfmt@0.78.0(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta)):
+  oxfmt@0.78.0(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta)):
     dependencies:
       tinypool: 2.2.0
     optionalDependencies:
@@ -2104,7 +2126,7 @@ snapshots:
       '@oxfmt/binding-win32-arm64-msvc': 0.78.0
       '@oxfmt/binding-win32-ia32-msvc': 0.78.0
       '@oxfmt/binding-win32-x64-msvc': 0.78.0
-      vite-plus: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta)
+      vite-plus: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta)
 
   oxlint-tsgolint@7.0.2006:
     optionalDependencies:
@@ -2115,7 +2137,7 @@ snapshots:
       '@oxlint-tsgolint/win32-arm64': 7.0.2006
       '@oxlint-tsgolint/win32-x64': 7.0.2006
 
-  oxlint@1.93.0(oxlint-tsgolint@7.0.2006)(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta)):
+  oxlint@1.93.0(oxlint-tsgolint@7.0.2006)(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta)):
     optionalDependencies:
       '@oxlint/binding-android-arm-eabi': 1.93.0
       '@oxlint/binding-android-arm64': 1.93.0
@@ -2137,7 +2159,7 @@ snapshots:
       '@oxlint/binding-win32-ia32-msvc': 1.93.0
       '@oxlint/binding-win32-x64-msvc': 1.93.0
       oxlint-tsgolint: 7.0.2006
-      vite-plus: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta)
+      vite-plus: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta)
 
   path-browserify@1.0.1: {}
 
@@ -2146,6 +2168,12 @@ snapshots:
   picocolors@1.1.1: {}
 
   picomatch@4.0.7: {}
+
+  playwright-core@1.65.1: {}
+
+  playwright@1.65.1:
+    dependencies:
+      playwright-core: 1.65.1
 
   pngjs@7.0.0: {}
 
@@ -2220,7 +2248,7 @@ snapshots:
 
   undici-types@7.24.6: {}
 
-  vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta):
+  vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta):
     dependencies:
       '@oxc-project/runtime': 0.158.0
       '@oxc-project/types': 0.158.0
@@ -2232,8 +2260,8 @@ snapshots:
       '@vitest/snapshot': 5.1.0
       '@vitest/spy': 5.1.0
       '@vitest/utils': 5.1.0
-      oxfmt: 0.78.0(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta))
-      oxlint: 1.93.0(oxlint-tsgolint@7.0.2006)(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(typescript@7.1.0-beta))
+      oxfmt: 0.78.0(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta))
+      oxlint: 1.93.0(oxlint-tsgolint@7.0.2006)(vite-plus@1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(playwright@1.65.1)(typescript@7.1.0-beta))
       oxlint-tsgolint: 7.0.2006
       vite: '@voidzero-dev/vite-plus-core@1.6.0(@types/node@24.19.2)(typescript@7.1.0-beta)'
       vitest: 5.1.0(@types/node@24.19.2)(@vitest/browser-preview@5.1.0)(@vitest/ui@5.1.0)(@voidzero-dev/vite-plus-core@1.6.0(@types/node@24.19.2)(typescript@7.1.0-beta))(typescript@7.1.0-beta)
@@ -2246,6 +2274,7 @@ snapshots:
       '@voidzero-dev/vite-plus-linux-x64-musl': 1.6.0
       '@voidzero-dev/vite-plus-win32-arm64-msvc': 1.6.0
       '@voidzero-dev/vite-plus-win32-x64-msvc': 1.6.0
+      playwright: 1.65.1
     transitivePeerDependencies:
       - '@arethetypeswrong/core'
       - '@astrojs/compiler-rs'

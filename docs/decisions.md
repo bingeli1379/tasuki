@@ -336,3 +336,13 @@
 - 沒選的做法：讓 Jira adapter 記住剛寫入的 key，`list` 時補撈。轉 status 也有同樣的延遲，要記的東西會一路變多，換到的只是 `list` 看起來即時。
 - 影響：Poller 可能晚一輪才看到 item 進入觸發 status，不影響正確性，因為認領走 `transition` 的 compare-and-set，讀的是 issue 本身。
 - 重新檢視：出現「寫完馬上要 list 才正確」的 use case 時。
+
+## D55 測試分三層，每層擋一種壞法
+- 決定：
+  - 單元：domain 規則與 use case，不碰 I/O。狀態機的轉移與不變量照 CLAUDE.md 要一列一個測試。
+  - 整合：tracker plugin 都跑 `testkit` 的 StoragePort 契約；server 用 `app.request` 測 API，另外測 plugin 載入的每種失敗。
+  - E2E：Playwright，在 `packages/web/e2e`。每個切片一條主路徑，從瀏覽器操作到資料真的存進 tracker（重新整理還在）。sqlite 每次都跑，`.env` 有 `JIRA_*` 時加跑 Jira，測完刪掉建出來的 issue。
+- 原則：寫能擋住功能壞掉的測試，不為覆蓋率寫。前端元件沒有自己的邏輯時不寫元件測試，E2E 已經蓋到；長出 composable 再測它。
+- 理由：作者大量用 AI 改程式，要靠測試確定功能沒壞。三層各自抓不同的錯：單元抓規則寫錯，整合抓兩個 tracker 行為不一致與載入失敗，E2E 抓前後端接不起來。
+- CI：build、check、test 之後裝 chromium 跑 `pnpm e2e`，CI 沒有 Jira 的 secret，只跑 sqlite。
+- 重新檢視：E2E 跑太久，或某層一直抓不到真正的錯時。
