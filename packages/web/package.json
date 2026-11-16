@@ -5,12 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vp dev",
-    "build": "vp build"
+    "build": "vp build",
+    "typecheck": "tsc --noEmit --runExternalCode"
   },
   "dependencies": {
     "vue": "^3.5.44"
   },
   "devDependencies": {
-    "@vitejs/plugin-vue": "^6.0.10"
+    "@vitejs/plugin-vue": "^6.0.10",
+    "@vue/content-mapper": "4.0.0-alpha.3"
   }
 }

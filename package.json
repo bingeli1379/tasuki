@@ -4,15 +4,16 @@
   "type": "module",
   "scripts": {
     "build": "vp run -r build",
-    "check": "vp check",
+    "check": "vp check && vp run -r typecheck",
     "format": "vp fmt",
-    "test": "vp test"
+    "test": "vp test",
+    "prepare": "vp config --no-agent"
   },
   "devDependencies": {
     "@tasuki/jira-cloud": "workspace:*",
     "@tasuki/sqlite": "workspace:*",
     "@types/node": "^24.19.2",
-    "typescript": "~7.0.2",
+    "typescript": "7.1.0-beta",
     "vite-plus": "1.6.0"
   },
   "engines": {

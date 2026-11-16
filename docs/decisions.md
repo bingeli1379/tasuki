@@ -318,3 +318,14 @@
 - 改前綴：已經存在的 item 保留原本的 ref，新建的才用新前綴，流水號繼續往下數。不回頭改名，因為 runtime store 的 Run 用 ref 指向 item，改名會斷掉。
 - 取代：D51 裡「sqlite 的 ref 是 `TSK-<n>`」那一項。
 - 重新檢視：出現要把舊 item 一起改名的需求時。
+
+## D53 .vue 的 template 型別檢查用 `@vue/content-mapper`，git hook 用 Vite+ 內建
+- 決定：`vp check` 只檢查 `<script>`，template 打錯欄位抓不到，所以 `web` 另外跑 `tsc --noEmit --runExternalCode`，靠 `tsconfig.json` 的 `contentMappers` 掛 `@vue/content-mapper`（Vue Language Tools v4）讀懂 `.vue`。根目錄的 `check` 是 `vp check` 加上 `vp run -r typecheck`，CI 與本機同一條。`typescript` 升到 `7.1.0-beta`，因為 `contentMappers` 是 7.1 才有；`@vue/content-mapper` 釘 `4.0.0-alpha.3`。`env.d.ts` 的 `*.vue` shim 留著，因為 `vp check` 的 tsgo 不跑 mapper，拿掉會找不到 `.vue`。
+- git hook：`vp config` 裝 dispatcher（`prepare` script 會跑），`.vite-hooks/pre-commit` 跑 `vp staged`，對 staged 檔案做 `vp check --fix`。不裝 husky 與 lint-staged，`vp staged` 內建 lint-staged。
+- 比較過的方案（都在 `web` 的副本上故意打錯 template 欄位實測）：
+  - vue-tsc 3.3.14 配 TS 7.0.2：直接失敗，`ERR_PACKAGE_PATH_NOT_EXPORTED`，因為它要 patch TS 的 JS API，TS 7 沒有。
+  - vue-tsc 3.3.14 配 TS 6（D25 的別名做法）：可用、穩定，但要多養一份 TS，之後還要再遷一次。
+  - vue-tsgo 0.3.0：TS 7.0.2 就能用，第三方個人維護，官方版出來後多半沒人顧。
+  - content-mapper：官方下一代，TS 與 mapper 都是預覽版，選它是因為正式版出來只要升版本。
+- 風險：`typescript` 目前只有這條檢查會用到（`vp check` 用 Vite+ 自帶的 tsgo，`vp pack` 用 oxc），預覽版壞掉影響範圍只到這一步。編輯器的 Vue 擴充還是用它自帶的 TS，與 CI 的結果可能不一樣。
+- 重新檢視：TS 7.1 與 Vue Language Tools v4 出正式版時改成 `^`；mapper 壞掉又一時修不好時，退回 vue-tsc 配 TS 6。

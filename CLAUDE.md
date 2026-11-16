@@ -32,6 +32,7 @@
 - core 只長出該切片需要的型別與規則。DB 的表在用到的切片才寫成 migration。
 - 本機跑：`pnpm build`，然後 `node packages/server/dist/index.mjs`（讀根目錄的 `tasuki.config.jsonc`，另一份用 `--config <路徑>` 指定；8787，資料在 config 的 `dataDir`）與在 `packages/web` 跑 `pnpm exec vp dev`（5173，要用 `localhost`）。
 - Jira：根目錄 `.env` 放 `JIRA_*`，`jira-cloud` 的契約測試讀到就打 KAN 測試 project，讀不到就 skip（CI 不跑）。
+- `pnpm check` 包含 `.vue` template 的型別檢查（D53）。`pnpm install` 會裝 pre-commit hook，對 staged 檔案跑 `vp check --fix`。
 
 ## 開發之後
 

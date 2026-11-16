@@ -5,5 +5,9 @@
     "isolatedDeclarations": false,
     "declaration": false
   },
+  // Lets tsc type-check .vue templates; needs `tsc --runExternalCode` (D53).
+  "contentMappers": [
+    { "package": "@vue/content-mapper", "extensions": [".vue"], "options": { "target": 3.5 } }
+  ],
   "include": ["src", "vite.config.ts"]
 }
