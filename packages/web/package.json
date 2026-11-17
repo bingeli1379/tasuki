@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vp dev",
     "build": "vp build",
-    "typecheck": "tsc --noEmit --runExternalCode",
+    "typecheck": "vp build && vue-tsc --noEmit",
     "e2e": "playwright test"
   },
   "dependencies": {
@@ -17,6 +17,7 @@
   "devDependencies": {
     "@playwright/test": "^1.65.1",
     "@vitejs/plugin-vue": "^6.0.10",
-    "@vue/content-mapper": "4.0.0-alpha.3"
+    "typescript": "~6.0.3",
+    "vue-tsc": "3.3.14"
   }
 }

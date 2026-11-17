@@ -14,7 +14,7 @@
     "@tasuki/jira-cloud": "workspace:*",
     "@tasuki/sqlite": "workspace:*",
     "@types/node": "^24.19.2",
-    "typescript": "7.1.0-beta",
+    "typescript": "~7.0.2",
     "vite-plus": "1.6.0"
   },
   "engines": {

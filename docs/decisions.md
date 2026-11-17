@@ -320,6 +320,7 @@
 - 重新檢視：出現要把舊 item 一起改名的需求時。
 
 ## D53 .vue 的 template 型別檢查用 `@vue/content-mapper`，git hook 用 Vite+ 內建
+- 狀態：型別檢查的部分已被 D58 取代，改用 vue-tsc 配 TS 6；git hook 的部分不變。以下保留當時的比較。
 - 決定：`vp check` 只檢查 `<script>`，template 打錯欄位抓不到，所以 `web` 另外跑 `tsc --noEmit --runExternalCode`，靠 `tsconfig.json` 的 `contentMappers` 掛 `@vue/content-mapper`（Vue Language Tools v4）讀懂 `.vue`。根目錄的 `check` 是 `vp check` 加上 `vp run -r typecheck`，CI 與本機同一條。`typescript` 升到 `7.1.0-beta`，因為 `contentMappers` 是 7.1 才有；`@vue/content-mapper` 釘 `4.0.0-alpha.3`。`env.d.ts` 的 `*.vue` shim 留著，因為 `vp check` 的 tsgo 不跑 mapper，拿掉會找不到 `.vue`。
 - git hook：`vp config` 裝 dispatcher（`prepare` script 會跑），`.vite-hooks/pre-commit` 跑 `vp staged`，對 staged 檔案做 `vp check --fix`。不裝 husky 與 lint-staged，`vp staged` 內建 lint-staged。
 - 比較過的方案（都在 `web` 的副本上故意打錯 template 欄位實測）：
@@ -364,3 +365,10 @@
 - tool 名稱是中性的，不帶 Jira 或 sqlite（CLAUDE.md）。
 - 安全：與 REST 同一個威脅面，見 security-and-auth.md。
 - 重新檢視：MCP facade（S8）做出來後，兩個入口的 tool 有大量重複時，看要不要共用定義。
+
+## D58 template 型別檢查改用 vue-tsc 配 TS 6
+- 決定：取代 D53 的型別檢查部分。`web` 的 `typecheck` 是 `vp build && vue-tsc --noEmit`，`vue-tsc` 釘 `3.3.14`，`web` 自己裝 `typescript@~6.0.3` 給它用；根目錄的 `typescript` 退回 `~7.0.2`，不再用 7.1 beta。`vp check` 用 Vite+ 自帶的 tsgo，不受 `web` 的 TS 6 影響。`web` 的 tsconfig 開 `vueCompilerOptions.strictTemplates`，元件不認識的 prop 與屬性會報錯。
+- 理由：作者不要 `@vue/content-mapper`。查證（2026-11-17）：它在官方的 `vuejs/language-tools`，維護者與 vue-tsc 相同，最後一版是 11/01，但每週下載約 2.4 萬，vue-tsc 約 950 萬，還在 alpha，拿這麼少人用過的東西當 CI 關卡風險偏高。換回 vue-tsc 還能讓根目錄脫離 TS beta。
+- 為什麼 `typecheck` 先 build：Nuxt UI 產生的 `components.d.ts` 用 `node_modules/.pnpm/<hash>/` 的路徑指向元件，檔頭有 `@ts-nocheck`。換 TS 版本之後 pnpm 的 peer hash 變了，舊檔指到不存在的路徑，元件型別安靜地變成 `any`，什麼錯都不報。先 build 讓它重新產生。
+- 驗證：故意打錯 template 欄位（`item.titel`）、在 `UCard` 加不存在的 `aria-label`，兩個都會報錯。`UButton` 加不存在的 prop 或 `size` 給錯值不會報錯，是 Nuxt UI 的 `UButton` 型別本身放寬（D56 已記）。
+- 重新檢視：Vue Language Tools v4 出正式版、下載量起來之後，看要不要回到 content-mapper，讓 `web` 不用多養一份 TS。
