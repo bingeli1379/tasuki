@@ -388,3 +388,21 @@
 - KAN 的設定（2026-11-19）：用 Jira REST 的 `POST /rest/api/3/workflows/update` 在 team-managed 的 workflow 加了六個 status（`10006` 到 `10011`），每個各一條 GLOBAL 轉移，所以任何 status 都能轉到任何 status。原本的 `待辦事項`、`進行中`、`審核中`、`完成` 對到 `refining`、`in-progress`、`in-review`、`done`。這個 API 可以改 team-managed 的 workflow，待釐清 14 要做「代為去改 Jira」時可以走這條。注意要帶上既有 status 的 `id`，不然會被當成新的 status，名稱重複而失敗；新的 status 用 UUID 當 `statusReference`。
 - 實測：E2E 在 Jira 上第一次跑時，S1 那條會超時。看板從一欄變十欄後每次讀取要 0.7 到 1.2 秒，而重新整理的迴圈只等 1 秒就再重新整理，看板永遠來不及出現。改成每輪等 `/api/board` 的回應回來才檢查。
 - 重新檢視：有記錄操作者的切片時（把 `actor` 加回 `transition`）；Jira 的小視窗真的造成問題時。
+
+## D60 部署到公司伺服器時的 auth 細節
+- 背景：作者確認 tasuki 之後會部署在伺服器上給公司用。security-and-auth.md 原本定了登入方式與綁定檢查，但沒講 TLS、token 放哪、`/mcp` 怎麼登入、`static` 的密碼怎麼存、怎麼擋暴力破解。
+- 決定：
+  - engine 不做 TLS，非 loopback 的部署放在 HTTPS 的 reverse proxy 或 ingress 後面。新增 `server.publicUrl`，非 loopback 時必填且是 `https`，`Host` 與 `Origin` 檢查都拿它比對。
+  - 看板的 session 放 `HttpOnly`、`Secure`、`SameSite=Lax` 的 cookie，session 存在 runtime store（只存 hash），登出立刻失效。會改東西的請求檢查 `Origin`。
+  - `/mcp` 只收個人 API token（Bearer），在看板上產生、只顯示一次、存 hash、可撤銷，不吃 cookie。
+  - `static` 的密碼在 config 裡存 scrypt hash，明文就拒絕啟動。
+  - 登入失敗以帳號計數，回應延遲從 1 秒加倍到 30 秒，不鎖帳號。
+  - 除了 `/api/health` 與登入，所有 route 預設要驗證。
+  - 登入就有完整權限，不做角色與權限。RBAC 從「還沒決定要不要做」移到「刻意不做」。
+- 理由：
+  - TLS 交給 proxy：公司環境本來就有一層，憑證在那裡管，engine 少一份要輪替的東西。
+  - cookie 加 `HttpOnly` 讓 XSS 偷不到 session；`Lax` 讓從 Slack 點連結進來還是登入狀態；`Origin` 補上 `Lax` 擋不到的情況。
+  - `/mcp` 的 client 是設定檔裡寫死 token 的 AI 工具，不會走登入表單；只收 Bearer，瀏覽器發的跨站請求就帶不到身分。
+  - 以帳號計數而不是 IP，不用信任 proxy 帶的 header；不鎖帳號，避免任何人都能把別人鎖在外面。
+  - 作者確認目前不需要分權限。
+- 重新檢視：有使用者需要唯讀或只能看部分 item 的角色時；要支援多 instance 時（失敗計數要搬出記憶體）；有人要求 engine 直接對外提供 HTTPS 時。

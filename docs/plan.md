@@ -18,13 +18,13 @@
 ## 刻意不做
 
 - engine 內建任何 git、GitHub、GitLab 功能，包含自動開 MR（見 workspace-and-git.md）。
+- 角色與權限（RBAC）。登入就有完整權限（D60）。
 
 ## 還沒決定要不要做
 
 沒有排進切片，做不做、何時做都還沒決定。
 
 - 多 instance、高可用。
-- 角色與權限（RBAC）。
 - sqlite 模式的指派與使用者系統。
 - Jira Data Center 的 tracker。plugin 機制出來後，也可以由第三方提供。
 - webhook 驅動端（待釐清 10）。
@@ -48,7 +48,7 @@
 | S6 | execute：task 狀態與 verdict 驗證 | item 一路走到 `in-review`、`done` |
 | S7 | hold、Stop、pause、blocked 自動接回、rework | 對應的按鈕與狀態變化 |
 | S8 | 真的 claude runner（plugin）、MCP facade、run token | 在玩具 repo 上用真的 claude 跑一次 |
-| S9 | auth（`none`、`static`、`http`） | 登入畫面、ttl 過期 |
+| S9 | auth（`none`、`static`、`http`）、session cookie 與 CSRF、`/mcp` 的個人 API token、登入防暴力、`Host` 檢查（D60） | 登入畫面、ttl 過期、產生與撤銷 token、沒登入打 API 被拒 |
 | S10 | `doctor` | 啟動前列出 config、plugin、Jira workflow 的問題 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
 | S12 | codex runner、npm CLI 打包、container image、預設 prompt | `init`、`doctor`、`start` 可用 |
