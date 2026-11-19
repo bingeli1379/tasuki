@@ -46,6 +46,12 @@ interface AuthPort {
 - Run 結束、取消、`abandoned` 時立刻失效。
 - agent 拿不到 tracker 的 token。Jira 的 token 只存在 engine 裡。
 
+## 使用者 MCP
+
+`/mcp` 的身分是使用者，能做的事跟看板一樣，包含改 item status，所以它跟 REST API 是同一個威脅面，套同樣的綁定與 auth（D57）。S9 之前只綁 `127.0.0.1`，沒有登入。
+
+已知風險：只綁 loopback 擋不住 DNS rebinding，惡意網頁可以讓瀏覽器把請求送到 `127.0.0.1:8787`。REST 與 `/mcp` 都受影響，S9 做 auth 時一起檢查 `Host` header。
+
 ## Plugin 的信任範圍
 
 - plugin 是 in-process 的 npm 套件，與 engine 同一個 process、同樣的權限。它是受信任的程式碼，信任程度等同 `package.json` 裡的其他相依。
@@ -54,7 +60,7 @@ interface AuthPort {
 
 ## Secret 處理
 
-- config 不放明文，使用 `${ENV_VAR}`。
+- config 不放明文，使用 `${ENV_VAR}`。本機開發可以放在 config 旁邊的 `.env`，它不進 git（D49）。
 - `agents.<name>.env` 只傳給被 spawn 的那個 CLI，engine 自己不用。
 - engine 不把 secret 寫進 log、`system` comment 或 API 回應。
 

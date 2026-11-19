@@ -19,3 +19,5 @@ jobs:
       - run: pnpm build
       - run: pnpm check
       - run: pnpm test
+      - run: pnpm --filter @tasuki/web exec playwright install --with-deps chromium
+      - run: pnpm e2e

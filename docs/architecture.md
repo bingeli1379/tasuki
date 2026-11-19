@@ -17,10 +17,12 @@ Clean Architecture / ports and adapters。Domain 不認識 Jira、sqlite、claud
 flowchart LR
   FE["Frontend (Vue SPA)"] --> REST
   AG["Agent CLI"] --> MCP
+  UA["User AI client (Claude Code, Codex)"] --> UMCP
 
   subgraph Driving["Driving adapters"]
     REST["REST API"]
     MCP["MCP facade (http)"]
+    UMCP["User MCP (/mcp)"]
     POLL["Poller"]
   end
 
@@ -39,6 +41,7 @@ flowchart LR
 
   REST --> UC
   MCP --> UC
+  UMCP --> UC
   POLL --> UC
   UC --> DOM
   UC --> ST
@@ -52,6 +55,7 @@ flowchart LR
 要點：
 
 - 狀態轉移、權限、驗證只寫在 use case 與 domain 一處，REST、MCP、Poller 進來都過同一關。
+- MCP 有兩個入口：MCP facade 給 engine 派出的 agent，帶 run token，只能碰被派的那張 item；使用者 MCP（`/mcp`）給使用者自己的 AI client，身分是使用者，能做的事跟看板一樣（D57）。
 - port 的介面定義在 application 層，adapter 去實作它。
 - 真正需要寫成程式介面的只有三個：Storage、Runner、Auth，它們也是 plugin 的三個角色（D44）。RuntimeStore 是 engine 內部的 port，不開放給 plugin。stage 是 config，model 是 agent 的參數，前端是 API 的 client。
 - 所有用到現在時間的地方都從 `Clock` 拿，不直接呼叫 `Date.now()`。
@@ -60,6 +64,10 @@ flowchart LR
 
 草稿，簽名之後以程式碼為準。adapter 的建構子注入 `Clock`，`createdAt`、`finishedAt`、`cancelRequestedAt` 這類時間由 adapter 蓋章，use case 只傳業務欄位。
 
+StoragePort 的每個方法各自生效，兩次呼叫之間沒有 transaction。Jira 做不到跨呼叫的原子性，所以 sqlite adapter 也不提供，use case 不能假設一連串寫入「全成功或全失敗」，中途失敗後重跑要能接著做（D47）。
+
+`list` 可能比寫入晚幾秒才反映出來。Jira 的 `list` 走搜尋索引，實測建完 338ms 搜不到、1740ms 搜得到；`get` 與寫入本身是即時的。剛寫完的呼叫端要用寫入回傳的結果，不要馬上重新 `list`。Poller 下一輪自然會讀到，認領用的 compare-and-set 直接讀那張 issue，不受影響（D54）。
+
 ```ts
 interface StoragePort {
   list(kind: Kind, status: string): Promise<WorkUnit[]>
@@ -67,6 +75,7 @@ interface StoragePort {
   children(item: Ref): Promise<WorkUnit[]>
   dependencies(item: Ref): Promise<Dependency[]>
   comments(target: Ref): Promise<Comment[]>
+  createItem(i: NewItem): Promise<WorkUnit>
   // compare-and-set: throws StatusConflict if current status != expectedFrom
   transition(ref: Ref, expectedFrom: string, to: string, actor: Actor): Promise<void>
   addComment(c: NewComment): Promise<void>
@@ -176,9 +185,9 @@ Jira 模式下 ticket 在 Jira，Run 在本機，兩邊靠 key 互指。
 
 - 語言：TypeScript，Node。
 - engine：單一 monolith process，同時 serve REST、MCP、靜態前端。
-- 前端：Vue 3 + Vite SPA，打包成靜態檔由 engine serve。不用 Nuxt，因為是 API 後面的管理介面，不需要 SSR。
+- 前端：Vue 3 + Vite SPA，打包成靜態檔由 engine serve。不用 Nuxt，因為是 API 後面的管理介面，不需要 SSR。元件用 Nuxt UI（在純 Vue + Vite 底下用，不需要 Nuxt），見 D56。
 - repo：pnpm workspace。
-- 工具鏈：Vite+（`vp`），lint、format、type check、測試、build 都走它，見 D27、D28。library 用 `vp pack`（tsdown）打包。
+- 工具鏈：Vite+（`vp`），lint、format、type check、測試、build 都走它，見 D27、D28。`.vue` 的 template 型別檢查另外用 vue-tsc（配 `web` 自己的 TS 6），見 D58；git hook 走 `vp config` 與 `vp staged`，見 D53。library 用 `vp pack`（tsdown）打包。
 
 ```
 packages/

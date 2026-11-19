@@ -15,6 +15,9 @@ export default defineConfig({
       typeCheck: true,
     },
   },
+  staged: {
+    '*': 'vp check --fix',
+  },
   test: {
     include: ['packages/*/src/**/*.test.ts'],
     passWithNoTests: true,

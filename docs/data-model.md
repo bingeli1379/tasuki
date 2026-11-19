@@ -84,12 +84,14 @@ type Outcome =
 |---|---|---|
 | item | `work_unit` 一列 | Issue（type 可設定，例如 Story） |
 | task | `work_unit` 一列，帶 `parent` | Sub-task |
-| Dependency | `dependency` 表 | issue link（預設 `Blocks`） |
+| Dependency | `dependency` 表 | issue link（type 可設定，例如 Blocks，config 寫 id） |
 | Comment | `comment` 表 | comment |
 | labels | JSON 欄位 | labels |
 | assignee | 欄位 | assignee |
 | comment 的 author / kind | 欄位 | 待 adapter spec 定（候選：comment property、內容裡的標記） |
-| body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉 |
+| body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉。S1 只做純文字，一行一個 paragraph |
+| ref | `<refPrefix>-<n>`，前綴在 plugin 的 `options.refPrefix`，預設 `TSK`；n 是流水號（D52） | issue key |
+| status 存什麼 | config 對照的 tracker key（預設是顯示名） | status id（D50） |
 
 item 與 task 各有自己的 workflow，所以 Jira 的 status mapping 要兩份。
 engine 用的 token 是誰，engine 寫的東西就顯示成誰。用專用 bot 帳號或個人 token 都可以，comment 一律帶標記，所以兩種情況都分得出來是人還是 engine 寫的。

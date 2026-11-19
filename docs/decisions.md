@@ -129,9 +129,9 @@
 ## D27 工具鏈用 Vite+（VoidZero 整套）
 - 決定：lint、format、type check、測試統一走 `vite-plus` 的 `vp`。`vp check` 一次跑 oxfmt、oxlint、tsgolint 的 type check，`vp test` 跑 Vitest。設定全部收在根目錄 `vite.config.ts`（`fmt`、`lint`、`test` 三個區塊）。移除 ESLint、typescript-eslint、單獨安裝的 oxlint、oxfmt、vitest。TypeScript 用 `~7.0.2`。
 - 理由：作者要整套 Vite / Oxc 生態系。oxlint 的 type-aware 靠 `typescript-go`，要 TS 7 以上，剛好繞開 D25 的卡點。原本 ESLint 只開 recommended，沒有用到 type-aware 規則，換過去沒有功能損失。
-- 釘版本：`vite-plus` 釘確切版本（`1.3.0`），`pnpm-workspace.yaml` 的 `overrides` 要寫同一個版本，`vitest` override 要等於 `vp toolchain vitest` 顯示的版本。升級時三處一起改。官方文件提到相依性機器人只升其中一個會造成不相容。
+- 釘版本：`vite-plus` 釘確切版本（`1.6.0`），`pnpm-workspace.yaml` 的 `overrides` 要寫同一個版本，`vitest` override 要等於 `vp toolchain vitest` 顯示的版本。升級時三處一起改。官方文件提到相依性機器人只升其中一個會造成不相容。
 - 寫測試：從 `vite-plus/test` import，不從 `vitest` import。
-- 已知現象：`vite` 被 override 成 `@voidzero-dev/vite-plus-core`，pnpm 拿它的版本號 1.3.0 去比對 vitest 要求的 `^6.4 || ^7 || ^8`，報 unmet peer。實際打包的 vite 是 8.3.4，不是執行期不相容。維護者在 `voidzero-dev/vite-plus` 的 #1021 與 #2806 說目前只能用 `peerDependencyRules.allowAny`，根本解法是把 core 的版本號對齊 Vite 的 major，#2806 還開著。
+- 已知現象：`vite` 被 override 成 `@voidzero-dev/vite-plus-core`，pnpm 拿它的版本號 1.6.0 去比對 vitest 要求的 `^6.4 || ^7 || ^8`，報 unmet peer。實際打包的 vite 是 8.3.7，不是執行期不相容。維護者在 `voidzero-dev/vite-plus` 的 #1021 與 #2806 說目前只能用 `peerDependencyRules.allowAny`，根本解法是把 core 的版本號對齊 Vite 的 major，#2806 還開著。
 - 處理：`pnpm-workspace.yaml` 加 `peerDependencyRules.allowAny: [vite]`。官方建議的清單是 `vite` 與 `vitest`，我們只有 `vite` 會報，所以只放它，`vitest` 真有 peer 問題還是看得到。代價是之後若裝了不支援 Vite 8 的 Vite plugin，這條規則會一併遮掉。
 - 重新檢視：#2806 修好後移除 `allowAny`。
 - 風險：oxfmt 還是 0.x，格式輸出可能隨版本變（見 D26），因為版本由 `vite-plus` 釘死，升級是手動、可預期的。type-aware lint 在很大的 codebase 可能吃很多記憶體（官方文件的說明）。
@@ -275,3 +275,100 @@
 - 取代：`config-and-rules.md` 原本的 `tracker.sqlite.path` 與 `workspace.root: ./workspaces`。
 - 待定：config 檔名 `tasuki.config.jsonc` 沿用 D23 改名後的命名，沒有另外討論過。
 - 重新檢視：出現多個 instance 想共用同一份 data 的需求時。
+
+## D47 每個切片 sqlite 與 Jira Cloud 一起做、一起驗
+- 決定：從 S1 開始，每個切片同時實作 `sqlite` 與 `jira-cloud` 兩個 tracker，用同一組 StoragePort 契約測試驗兩邊，作者在兩邊都能從瀏覽器操作才算做完。S10 只剩 `doctor`。use case 不能假設多次 StoragePort 呼叫是原子的，每一步中途失敗後都要能重跑。
+- 理由：作者擔心做到後面才發現 Jira 的形狀跟 sqlite 不同，要整個打掉。設計本來就以 Jira 的限制為準（`ref` 不透明、status 用邏輯名、Run 放本機、轉移用 compare-and-set），整個打掉的機率低，真正會分岔的是幾個簽名與行為：多步寫入的原子性、寫入後搜尋的延遲、看板一次讀多個 status 的成本、comment 的 author / kind、markdown 與 ADF 的互轉。只做 sqlite，port 會被 sqlite 的形狀養歪，這些到 S10 才一起爆。每個切片兩邊都做，分岔在當下就看得到。
+- 代價：每個切片的工作量變多；`plan.md` 待驗證裡 Jira 的項目提前到 S1；需要一個可以隨意建 issue 的 Jira Cloud 測試 site 與 project。
+- 取代：`plan.md` 原本「先把 sqlite 做到能完整跑，Jira adapter 放在 sqlite 的行為穩定之後」的順序。
+- 重新檢視：Jira 的測試環境拖慢每個切片到不能接受，或某個切片的行為確定只屬於 sqlite 時。
+
+## D48 plugin 的匯出形狀、config 寫法、載入失敗
+- 決定：plugin 的 default export 是 `definePlugin({ name, apiVersion, tracker?, runner?, auth? })`，每個角色是工廠函式 `(ctx, options) => 實例`，`ctx` 帶 `Clock`、logger、`dataDir`。config 用 `{ "plugin": "<npm 套件名>", "options": {...} }` 指定，`options` 原封不動交給工廠。`statuses` 留在 config 最外層。任何載入失敗都拒絕啟動。
+- 理由：engine 要在建立實例時注入 `Clock` 等東西，工廠的參數就是注入點，第三方不用繼承 `core` 的 class，和 Vite、ESLint 的 plugin 同一種形狀。`statuses` 是 engine 在讀的邏輯名對照，不是 tracker 私有的設定。少了 tracker 或 runner engine 無事可做，跳過只會讓人以為它在跑。
+- 取代：`config-and-rules.md` 原本的 `tracker.kind` 加 `tracker.jira`。plugins.md 待定的 1、2、8 結案。
+- 重新檢視：plugin 需要在 engine 啟動後動態載入或卸載時。
+
+## D49 本機的 secret 放 config 旁邊的 `.env`
+- 決定：啟動時，config 檔所在資料夾有 `.env` 就用 Node 內建的 `process.loadEnvFile` 讀進環境變數，已經存在的環境變數優先。`.env` 列進 `.gitignore`。config 裡照舊只寫 `${VAR}`。
+- 理由：文件定了 `${VAR}` 展開，但沒定變數從哪來。本機開發每次在 shell export token 很煩，`.env` 是大家預期的位置。Node 24 內建讀取，不用加 dotenv。container 與 CI 直接給環境變數，不受影響。
+- 重新檢視：需要從 secret manager（Vault、1Password CLI）取值時。
+
+## D50 Jira 的 issue type、status、link type 在 config 裡用 id
+- 決定：`jira-cloud` 的 `issueTypes`、`dependencyLinkType` 與 `statuses` 對照的值寫 Jira 的 id，不寫名稱。link type 一開始寫成名稱 `Blocks`，比照 issue type 改成 id，KAN 上是 `10000`；link type 名稱會不會翻譯還沒驗過，改 id 是為了同一份 config 只有一種寫法。sqlite 照舊寫名稱，`statuses` 的值對 engine 是不透明的 tracker 端識別。id 由 `init` 向 Jira 查出來再寫進 config；S1 到 S11 先手寫。
+- 理由：在測試 site（KAN，team-managed）上實測。名稱會依 token 擁有者的語言設定翻譯，而且不同 endpoint 給的不一樣：同一個 `10009`，`/project/{key}/statuses` 回 `Story`，`/issuetype/project` 回 `故事`，`Accept-Language` header 沒有作用。id 也不是全域固定的：team-managed 的 issue type scope 是 `PROJECT`，status 除了內建的 `3`（進行中）以外也是 `PROJECT`，換一個 project 就是另一組 id，所以不能寫死在預設值裡。
+- 代價：config 裡的 id 人看不懂，`init` 寫入時要附上名稱當註解，UI 顯示的名稱向 Jira 取。
+- 重新檢視：支援 company-managed project，或 Jira 提供不翻譯的穩定 key 時。
+
+## D51 S1 實作時補的假設
+- 狀態：暫行，等作者確認。文件沒寫，S1 為了能寫程式先這樣定。
+- sqlite 的 ref 格式已由 D52 定案。
+- 省略 `statuses` 時，每個邏輯名對到顯示名；`statuses.item` 一定要對照 `refining`，否則拒絕啟動。
+- 看板只顯示 config 有對照的 item status，順序照 state-machine.md。Jira 的 KAN 目前只對照 `refining`，所以只有一欄。
+- plugin 從 config 所在的資料夾解析。本機開發的 config 在 repo 根目錄，所以根目錄的 `package.json` 把 `@tasuki/sqlite`、`@tasuki/jira-cloud` 列成 devDependencies。
+- `apiVersion` 要求完全相等（plugins.md 待定 3）。
+- Jira 的 body 先當純文字，一行一個 ADF paragraph，markdown 格式會掉。
+- 建 Jira issue 之後，如果落在的初始 status 不是要的 status，再做一次轉移。兩次呼叫不是原子的（D47），轉移失敗時 issue 留在初始 status，錯誤照樣丟出來。
+- `server.host` 先不讀，一律綁 `127.0.0.1`，等 S9 有 auth。
+- 重新檢視：作者確認或推翻任何一項時，改這條並更新對應文件。
+
+## D52 sqlite 的 ref 前綴由使用者在 config 設定
+- 決定：sqlite 的 ref 是 `<refPrefix>-<n>`。`refPrefix` 放在 `@tasuki/sqlite` 的 `options`，預設 `TSK`，只能是大寫英文字母開頭的大寫字母與數字（跟 Jira 的 project key 同一種形狀），不合格就拒絕啟動。n 是流水號，和前綴無關，在同一個 INSERT 裡算出來，兩個同時建立也不會撞號。
+- 理由：ref 是人每天在看板上看到的名字，前綴應該是使用者的專案名，不是 tasuki 的。只有 sqlite 需要前綴，Jira 的 key 由 Jira 決定，所以放 plugin 自己的 options，不放 config 最外層（D48）。限制成 key 的形狀，ref 之後放進 URL、filter 都不用跳脫。
+- 改前綴：已經存在的 item 保留原本的 ref，新建的才用新前綴，流水號繼續往下數。不回頭改名，因為 runtime store 的 Run 用 ref 指向 item，改名會斷掉。
+- 取代：D51 裡「sqlite 的 ref 是 `TSK-<n>`」那一項。
+- 重新檢視：出現要把舊 item 一起改名的需求時。
+
+## D53 .vue 的 template 型別檢查用 `@vue/content-mapper`，git hook 用 Vite+ 內建
+- 狀態：型別檢查的部分已被 D58 取代，改用 vue-tsc 配 TS 6；git hook 的部分不變。以下保留當時的比較。
+- 決定：`vp check` 只檢查 `<script>`，template 打錯欄位抓不到，所以 `web` 另外跑 `tsc --noEmit --runExternalCode`，靠 `tsconfig.json` 的 `contentMappers` 掛 `@vue/content-mapper`（Vue Language Tools v4）讀懂 `.vue`。根目錄的 `check` 是 `vp check` 加上 `vp run -r typecheck`，CI 與本機同一條。`typescript` 升到 `7.1.0-beta`，因為 `contentMappers` 是 7.1 才有；`@vue/content-mapper` 釘 `4.0.0-alpha.3`。`env.d.ts` 的 `*.vue` shim 留著，因為 `vp check` 的 tsgo 不跑 mapper，拿掉會找不到 `.vue`。
+- git hook：`vp config` 裝 dispatcher（`prepare` script 會跑），`.vite-hooks/pre-commit` 跑 `vp staged`，對 staged 檔案做 `vp check --fix`。不裝 husky 與 lint-staged，`vp staged` 內建 lint-staged。
+- 比較過的方案（都在 `web` 的副本上故意打錯 template 欄位實測）：
+  - vue-tsc 3.3.14 配 TS 7.0.2：直接失敗，`ERR_PACKAGE_PATH_NOT_EXPORTED`，因為它要 patch TS 的 JS API，TS 7 沒有。
+  - vue-tsc 3.3.14 配 TS 6（D25 的別名做法）：可用、穩定，但要多養一份 TS，之後還要再遷一次。
+  - vue-tsgo 0.3.0：TS 7.0.2 就能用，第三方個人維護，官方版出來後多半沒人顧。
+  - content-mapper：官方下一代，TS 與 mapper 都是預覽版，選它是因為正式版出來只要升版本。
+- 風險：`typescript` 目前只有這條檢查會用到（`vp check` 用 Vite+ 自帶的 tsgo，`vp pack` 用 oxc），預覽版壞掉影響範圍只到這一步。編輯器的 Vue 擴充還是用它自帶的 TS，與 CI 的結果可能不一樣。
+- 重新檢視：TS 7.1 與 Vue Language Tools v4 出正式版時改成 `^`；mapper 壞掉又一時修不好時，退回 vue-tsc 配 TS 6。
+
+## D54 `StoragePort.list` 可以落後寫入
+- 決定：`list` 不保證馬上看得到剛寫入的東西。剛寫完的呼叫端用寫入回傳的結果：看板新增後把 POST 回來的 item 直接放進欄位，不重新讀取。契約測試建完之後在 10 秒內重試 `list`。
+- 理由：Jira 的搜尋索引有延遲。2026-11-16 在 KAN 實測，建完 338ms 搜不到、1740ms 搜得到；同時間 `key = X` 的 JQL 與 `GET /issue` 都馬上查得到。S1 的契約測試建完馬上搜，同一天連跑 3 次都失敗。
+- 沒選的做法：讓 Jira adapter 記住剛寫入的 key，`list` 時補撈。轉 status 也有同樣的延遲，要記的東西會一路變多，換到的只是 `list` 看起來即時。
+- 影響：Poller 可能晚一輪才看到 item 進入觸發 status，不影響正確性，因為認領走 `transition` 的 compare-and-set，讀的是 issue 本身。
+- 重新檢視：出現「寫完馬上要 list 才正確」的 use case 時。
+
+## D55 測試分三層，每層擋一種壞法
+- 決定：
+  - 單元：domain 規則與 use case，不碰 I/O。狀態機的轉移與不變量照 CLAUDE.md 要一列一個測試。
+  - 整合：tracker plugin 都跑 `testkit` 的 StoragePort 契約；server 用 `app.request` 測 API，另外測 plugin 載入的每種失敗。
+  - E2E：Playwright，在 `packages/web/e2e`。每個切片一條主路徑，從瀏覽器操作到資料真的存進 tracker（重新整理還在）。sqlite 每次都跑，`.env` 有 `JIRA_*` 時加跑 Jira，測完刪掉建出來的 issue。
+- 原則：寫能擋住功能壞掉的測試，不為覆蓋率寫。前端元件沒有自己的邏輯時不寫元件測試，E2E 已經蓋到；長出 composable 再測它。
+- 理由：作者大量用 AI 改程式，要靠測試確定功能沒壞。三層各自抓不同的錯：單元抓規則寫錯，整合抓兩個 tracker 行為不一致與載入失敗，E2E 抓前後端接不起來。
+- CI：build、check、test 之後裝 chromium 跑 `pnpm e2e`，CI 沒有 Jira 的 secret，只跑 sqlite。
+- 重新檢視：E2E 跑太久，或某層一直抓不到真正的錯時。
+
+## D56 前端元件用 Nuxt UI
+- 決定：`web` 用 `@nuxt/ui`（v4，Reka UI 加 Tailwind 4），以 `@nuxt/ui/vite` 外掛在純 Vue + Vite 底下使用，`router: false`，不裝 vue-router。元件自動匯入，產生的 `components.d.ts`、`auto-imports.d.ts` 不進 git，`web` 的 tsconfig 把它們納入 template 型別檢查。
+- 理由：之後要有 modal、下拉、toast、表單驗證，自己刻的話 focus 與鍵盤操作要自己顧。Nuxt UI 的 peer 支援 TS 7，不跟 D27、D53 的工具鏈衝突。
+- 沒選的：
+  - UI SDK（Vercel，2026-11-12 發表）：`@ui-sdk/vue` 還是 `0.1.0-beta.3`，而且只給行為不給樣式，畫面仍然要自己刻。
+  - PrimeVue 很完整但很重；Vuetify 是 Material 外觀；Element Plus 適合後台但外觀偏舊。
+- 安裝時的供應鏈設定：4.12.1 與 4.12.2 都在當天發布，被 pnpm 的 `minimumReleaseAge` 擋下。不加例外，改用 `^4.12.0` 讓 pnpm 選過了冷卻期的版本（目前鎖 4.12.0）。`esbuild` 與 `vue-demi` 的 build script 在 `allowBuilds` 設為不執行：esbuild 的平台 binary 由 optionalDependencies 裝好，vue-demi 預設就是 Vue 3。
+- 已知限制：template 型別檢查抓得到不存在的 prop，但 Nuxt UI 的 variant 類 prop（例如 `size`）型別是放寬的，給錯值不會報錯。
+- 重新檢視：UI SDK 出正式版且有預設樣式時，或 Nuxt UI 跟 TS、Vite+ 版本卡住時。
+
+## D57 使用者的 AI client 用 engine 的 `/mcp` 操作 tasuki
+- 決定：engine 在 `/mcp` 提供 MCP（Streamable HTTP，無狀態，每個請求開新的 server）。身分是使用者，能做的事跟看板一樣，背後呼叫同一個 use case，之後每個切片的人操作在看板與 `/mcp` 都要有。Claude Code 與 Codex 都要能接，用 http 設定 `http://127.0.0.1:<port>/mcp`。
+- 能改 item status：使用者叫自己的 AI 改，跟自己點按鈕一樣，算「人」。「agent 不能改 item status」限制的是 engine 派出、沒人盯著的 agent，它們走另一個入口（MCP facade，帶 run token，D3）。代價是使用者的 AI 把 item 拉進觸發 status，就會真的開始派 agent。操作者記成使用者並標 `via mcp`，等有記錄操作者的切片時實作。
+- 理由：sqlite 模式下 refine 階段的 AI 原本沒有地方寫回 tracker（待釐清 5）。Jira 模式雖然有 Atlassian MCP，但它不知道 tasuki 的 status 對照與規則，走 tasuki 才會過同一套驗證。
+- tool 名稱是中性的，不帶 Jira 或 sqlite（CLAUDE.md）。
+- 安全：與 REST 同一個威脅面，見 security-and-auth.md。
+- 重新檢視：MCP facade（S8）做出來後，兩個入口的 tool 有大量重複時，看要不要共用定義。
+
+## D58 template 型別檢查改用 vue-tsc 配 TS 6
+- 決定：取代 D53 的型別檢查部分。`web` 的 `typecheck` 是 `vp build && vue-tsc --noEmit`，`vue-tsc` 釘 `3.3.14`，`web` 自己裝 `typescript@~6.0.3` 給它用；根目錄的 `typescript` 退回 `~7.0.2`，不再用 7.1 beta。`vp check` 用 Vite+ 自帶的 tsgo，不受 `web` 的 TS 6 影響。`web` 的 tsconfig 開 `vueCompilerOptions.strictTemplates`，元件不認識的 prop 與屬性會報錯。
+- 理由：作者不要 `@vue/content-mapper`。查證（2026-11-17）：它在官方的 `vuejs/language-tools`，維護者與 vue-tsc 相同，最後一版是 11/01，但每週下載約 2.4 萬，vue-tsc 約 950 萬，還在 alpha，拿這麼少人用過的東西當 CI 關卡風險偏高。換回 vue-tsc 還能讓根目錄脫離 TS beta。
+- 為什麼 `typecheck` 先 build：Nuxt UI 產生的 `components.d.ts` 用 `node_modules/.pnpm/<hash>/` 的路徑指向元件，檔頭有 `@ts-nocheck`。換 TS 版本之後 pnpm 的 peer hash 變了，舊檔指到不存在的路徑，元件型別安靜地變成 `any`，什麼錯都不報。先 build 讓它重新產生。
+- 驗證：故意打錯 template 欄位（`item.titel`）、在 `UCard` 加不存在的 `aria-label`，兩個都會報錯。`UButton` 加不存在的 prop 或 `size` 給錯值不會報錯，是 Nuxt UI 的 `UButton` 型別本身放寬（D56 已記）。
+- 重新檢視：Vue Language Tools v4 出正式版、下載量起來之後，看要不要回到 content-mapper，讓 `web` 不用多養一份 TS。

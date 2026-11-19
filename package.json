@@ -4,14 +4,18 @@
   "type": "module",
   "scripts": {
     "build": "vp run -r build",
-    "check": "vp check",
+    "check": "vp check && vp run -r typecheck",
     "format": "vp fmt",
-    "test": "vp test"
+    "test": "vp test",
+    "e2e": "pnpm --filter @tasuki/web e2e",
+    "prepare": "vp config --no-agent"
   },
   "devDependencies": {
+    "@tasuki/jira-cloud": "workspace:*",
+    "@tasuki/sqlite": "workspace:*",
     "@types/node": "^24.19.2",
     "typescript": "~7.0.2",
-    "vite-plus": "1.3.0"
+    "vite-plus": "1.6.0"
   },
   "engines": {
     "node": ">=24"
