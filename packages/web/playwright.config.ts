@@ -13,7 +13,7 @@ const jiraVars = [
   'JIRA_API_TOKEN',
   'JIRA_TEST_PROJECT',
   'JIRA_TEST_ITEM_TYPE',
-  'JIRA_TEST_REFINING_STATUS',
+  'JIRA_TEST_ITEM_STATUSES',
 ]
 const withJira = jiraVars.every((v) => process.env[v])
 
@@ -47,7 +47,7 @@ const trackers = [
                 issueTypes: { item: process.env['JIRA_TEST_ITEM_TYPE'] },
               },
             },
-            statuses: { item: { refining: process.env['JIRA_TEST_REFINING_STATUS'] } },
+            statuses: { item: JSON.parse(String(process.env['JIRA_TEST_ITEM_STATUSES'])) },
           },
         },
       ]
