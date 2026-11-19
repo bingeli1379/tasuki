@@ -41,7 +41,7 @@
 |---|---|---|
 | S0 | 骨架：web、server、sqlite、CI（已完成） | 瀏覽器開頁面，顯示 server 回報的 DB schema 版本 |
 | S1 | 建立 item，在看板上看到。含最小的 config 載入、`.env`、plugin 載入（tracker 角色），內建的 `sqlite` 與 `jira-cloud` 都走這條路（已完成） | 新增 item，重新整理後還在，出現在 `refining` 欄；sqlite 與 Jira 測試 project 各做一次 |
-| S2 | 人移動 item 的 status | 拖拉或按鈕移動；兩邊同時改時顯示衝突 |
+| S2 | 人移動 item 的 status（已完成） | 拖拉或按鈕移動；兩邊同時改時顯示衝突 |
 | S3 | item 詳情與 comment | 點開 item 看內容，留言 |
 | S4 | 規則命中，假 runner 跑 split | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
 | S5 | task 與 `split-review` 放行 | 看到拆出的 task，人放行或打回 |
@@ -99,7 +99,7 @@
 11. 不變量 3（`in-progress` 的 task 只有 item 有存活 Run 時才可信）目前只靠 agent 遵守，engine 端沒有對應程式碼，測試只留了 `it.todo`。要不要由 engine 在 Run 結束時把殘留的 `in-progress` task 改回 `to-do`，或維持由 agent 處理？
 12. 人能不能把 `done` 的 task 重開。task 圖沒有 `done` 的出口，實作時照圖，所有人都不行。
 13. config 的 JSON Schema 怎麼產生。D28 的 `isolatedDeclarations` 要求每個 export 有明確型別，zod 這類 schema 物件很難滿足，所以傾向型別手寫。要補 `$schema` 給編輯器用時再決定（手寫、或從型別產生）。
-14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。
+14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。team-managed 的 workflow 可以用 `POST /workflows/update` 改，S2 設定 KAN 時用過（D59）。
 
 ## 待驗證（動手前對現行文件確認）
 
@@ -113,7 +113,7 @@
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
 - agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。
 - 使用者 MCP 接 Codex（D57）：2026-11-16 用 codex-cli 0.169.0 驗過 `initialize` 與 `tools/list`（中間放 proxy 記錄請求），`tools/call` 沒驗，因為手上沒有 Codex 帳號，模型叫不起來。Claude Code 2.1.311 已實際呼叫 `create_item` 與 `list_board` 成功。
-- Jira Cloud：ADF 轉換的函式庫、comment property 是否可用、transitions API 的行為（S1 寫了建立後轉移的程式，但 KAN 的初始 status 就是 `refining`，沒有實際走到）、API token 的 rate limit。
+- Jira Cloud：ADF 轉換的函式庫、comment property 是否可用、API token 的 rate limit。transitions API 已在 S2 的契約測試與 E2E 實際走過（D59）。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
 - Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。

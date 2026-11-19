@@ -55,6 +55,7 @@
 | plugin | 提供 tracker、runner、auth 其中一個以上角色的 npm 套件，與 engine 同一個 process。內建的與第三方的走同一條載入路徑。 |
 | testkit | 契約測試套件。任何 tracker、runner、auth 實作都要通過同一組，才算遵守 port。 |
 | adapter | port 的實作。 |
+| compare-and-set / StatusConflict | status 轉移帶著呼叫端以為的目前 status（`expectedFrom`），對不上就不轉，丟 `StatusConflict` 並附上 item 現在的樣子。人在看板上看到的是舊資料時，靠它不蓋掉別人剛做的移動。 |
 | driving adapter | 從外面呼叫 use case 的入口：REST、MCP、Poller。 |
 | driven adapter | use case 往外呼叫的實作：storage、runtime store、runner、auth、clock。 |
 | soft stop / hard stop | soft 是不再派新工作、目前這步做完就停。hard 是馬上終止。 |
