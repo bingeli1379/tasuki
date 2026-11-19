@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "vp run -r build",
+    "dev": "vp run -r build && vp run -r --parallel dev",
     "check": "vp check && vp run -r typecheck",
     "format": "vp fmt",
     "test": "vp test",
