@@ -1,13 +1,27 @@
-import type { Kind, PluginContext, StoragePort, WorkUnit } from '@tasuki/core'
+import {
+  NotFound,
+  StatusConflict,
+  type Kind,
+  type PluginContext,
+  type StoragePort,
+  type WorkUnit,
+} from '@tasuki/core'
 import { adfToText, textToAdf, type AdfDoc } from './adf'
-import type { JiraRequest } from './client'
+import { JiraHttpError, type JiraRequest } from './client'
 import type { JiraOptions } from './options'
 
-const FIELDS = ['summary', 'description', 'status', 'labels']
+const FIELDS = ['summary', 'description', 'status', 'labels', 'issuetype', 'project']
 
 interface Issue {
   key: string
-  fields: { summary: string; description: AdfDoc | null; status: { id: string }; labels: string[] }
+  fields: {
+    summary: string
+    description: AdfDoc | null
+    status: { id: string }
+    labels: string[]
+    issuetype: { id: string }
+    project: { key: string }
+  }
 }
 
 function toWorkUnit(ctx: PluginContext, kind: Kind, issue: Issue): WorkUnit {
@@ -29,6 +43,24 @@ export function createJiraTracker(
 ): StoragePort {
   const getIssue = (key: string): Promise<Issue> =>
     jira('GET', `/issue/${key}?fields=${FIELDS.join(',')}`)
+
+  // Only items exist so far; an issue outside the project or of another type is not ours.
+  async function getItem(key: string): Promise<Issue> {
+    let issue: Issue
+    try {
+      issue = await getIssue(key)
+    } catch (e) {
+      if (e instanceof JiraHttpError && e.status === 404)
+        throw new NotFound(`${key} does not exist`)
+      throw e
+    }
+    if (
+      issue.fields.project.key !== options.project ||
+      issue.fields.issuetype.id !== options.issueTypes.item
+    )
+      throw new NotFound(`${key} is not a tasuki item in ${options.project}`)
+    return issue
+  }
 
   async function moveTo(key: string, statusId: string): Promise<void> {
     const { transitions } = await jira<{ transitions: { id: string; to: { id: string } }[] }>(
@@ -80,6 +112,19 @@ export function createJiraTracker(
         issue = await getIssue(key)
       }
       return toWorkUnit(ctx, 'item', issue)
+    },
+    async get(ref) {
+      return toWorkUnit(ctx, 'item', await getItem(ref))
+    },
+
+    // Jira has no conditional transition, so this re-reads right before moving and accepts
+    // the small window between the two calls (stop-and-recovery.md).
+    async transition(ref, expectedFrom, to) {
+      const issue = await getItem(ref)
+      if (issue.fields.status.id !== ctx.statuses.toTracker('item', expectedFrom))
+        throw new StatusConflict(expectedFrom, toWorkUnit(ctx, 'item', issue))
+      await moveTo(ref, ctx.statuses.toTracker('item', to))
+      return toWorkUnit(ctx, 'item', await getIssue(ref))
     },
   }
 }
