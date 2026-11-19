@@ -71,13 +71,13 @@ StoragePort 的每個方法各自生效，兩次呼叫之間沒有 transaction�
 ```ts
 interface StoragePort {
   list(kind: Kind, status: string): Promise<WorkUnit[]>
-  get(ref: Ref): Promise<WorkUnit>
+  get(ref: Ref): Promise<WorkUnit>            // throws NotFound
   children(item: Ref): Promise<WorkUnit[]>
   dependencies(item: Ref): Promise<Dependency[]>
   comments(target: Ref): Promise<Comment[]>
   createItem(i: NewItem): Promise<WorkUnit>
-  // compare-and-set: throws StatusConflict if current status != expectedFrom
-  transition(ref: Ref, expectedFrom: string, to: string, actor: Actor): Promise<void>
+  // compare-and-set: throws StatusConflict (with the unit as it is now) if current status != expectedFrom
+  transition(ref: Ref, expectedFrom: string, to: string): Promise<WorkUnit>
   addComment(c: NewComment): Promise<void>
   createTask(item: Ref, t: NewTask): Promise<WorkUnit>
   updateTask(ref: Ref, patch: TaskPatch): Promise<void>

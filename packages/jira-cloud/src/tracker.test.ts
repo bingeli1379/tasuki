@@ -16,7 +16,7 @@ const configured = [
   'JIRA_API_TOKEN',
   'JIRA_TEST_PROJECT',
   'JIRA_TEST_ITEM_TYPE',
-  'JIRA_TEST_REFINING_STATUS',
+  'JIRA_TEST_ITEM_STATUSES',
 ].every((k) => env[k])
 
 if (configured) {
@@ -32,12 +32,17 @@ if (configured) {
     const ctx = {
       clock: { now: () => new Date() },
       dataDir: '',
-      statuses: createStatusMap({ item: { refining: String(env['JIRA_TEST_REFINING_STATUS']) } }),
+      // Logical status -> Jira status id, as JSON.
+      statuses: createStatusMap({
+        item: JSON.parse(String(env['JIRA_TEST_ITEM_STATUSES'])) as Record<string, string>,
+      }),
     }
     const inner = createJiraTracker(ctx, options, jira)
     const created: string[] = []
     const storage: StoragePort = {
       list: (kind, status) => inner.list(kind, status),
+      get: (ref) => inner.get(ref),
+      transition: (ref, from, to) => inner.transition(ref, from, to),
       createItem: async (item) => {
         const unit = await inner.createItem(item)
         created.push(unit.ref)

@@ -1,2 +1,12 @@
 @import 'tailwindcss';
 @import '@nuxt/ui';
+
+/* macOS hides overlay scrollbars until you scroll; a styled one stays, so the board shows
+   there are more columns to the right. */
+.scrollbar-always::-webkit-scrollbar {
+  height: 10px;
+}
+.scrollbar-always::-webkit-scrollbar-thumb {
+  border-radius: 9999px;
+  background: var(--ui-border-accented);
+}

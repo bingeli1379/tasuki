@@ -1,4 +1,4 @@
-import { createItem, listBoard, type StatusMap, type StoragePort } from '@tasuki/core'
+import { createItem, listBoard, moveItem, type StatusMap, type StoragePort } from '@tasuki/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
@@ -34,6 +34,22 @@ export function createMcpServer({ storage, statuses }: McpDeps): McpServer {
       },
     },
     async ({ title, body }) => json(await createItem(storage, { title, body: body ?? '' })),
+  )
+  server.registerTool(
+    'move_item',
+    {
+      description:
+        'Move an item to another status on the board. `from` is the status you last saw it in; ' +
+        'if someone moved it since, the call fails and says where it is now, so read the board ' +
+        'and decide again instead of retrying blindly. Moving an item into a status a rule ' +
+        'watches starts an agent on it. Returns the moved item.',
+      inputSchema: {
+        ref: z.string().describe('The item ref, e.g. TSK-12'),
+        from: z.string().describe('Logical status the item is in now, e.g. refining'),
+        to: z.string().describe('Logical status to move it to; must be a board column'),
+      },
+    },
+    async (input) => json(await moveItem(storage, statuses.mapped('item'), input)),
   )
   return server
 }

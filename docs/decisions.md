@@ -304,7 +304,7 @@
 - 狀態：暫行，等作者確認。文件沒寫，S1 為了能寫程式先這樣定。
 - sqlite 的 ref 格式已由 D52 定案。
 - 省略 `statuses` 時，每個邏輯名對到顯示名；`statuses.item` 一定要對照 `refining`，否則拒絕啟動。
-- 看板只顯示 config 有對照的 item status，順序照 state-machine.md。Jira 的 KAN 目前只對照 `refining`，所以只有一欄。
+- 看板只顯示 config 有對照的 item status，順序照 state-machine.md。S1 時 KAN 只對照 `refining`，只有一欄；S2 補齊了十個（D59）。
 - plugin 從 config 所在的資料夾解析。本機開發的 config 在 repo 根目錄，所以根目錄的 `package.json` 把 `@tasuki/sqlite`、`@tasuki/jira-cloud` 列成 devDependencies。
 - `apiVersion` 要求完全相等（plugins.md 待定 3）。
 - Jira 的 body 先當純文字，一行一個 ADF paragraph，markdown 格式會掉。
@@ -372,3 +372,37 @@
 - 為什麼 `typecheck` 先 build：Nuxt UI 產生的 `components.d.ts` 用 `node_modules/.pnpm/<hash>/` 的路徑指向元件，檔頭有 `@ts-nocheck`。換 TS 版本之後 pnpm 的 peer hash 變了，舊檔指到不存在的路徑，元件型別安靜地變成 `any`，什麼錯都不報。先 build 讓它重新產生。
 - 驗證：故意打錯 template 欄位（`item.titel`）、在 `UCard` 加不存在的 `aria-label`，兩個都會報錯。`UButton` 加不存在的 prop 或 `size` 給錯值不會報錯，是 Nuxt UI 的 `UButton` 型別本身放寬（D56 已記）。
 - 重新檢視：Vue Language Tools v4 出正式版、下載量起來之後，看要不要回到 content-mapper，讓 `web` 不用多養一份 TS。
+
+## D59 S2：人移動 item 的 status
+- 決定：
+  - `StoragePort` 加 `get` 與 `transition(ref, expectedFrom, to)`。`transition` 回傳移完的 `WorkUnit`，比照 `createItem`，因為剛寫完的呼叫端不能重新 `list`（D54）。找不到 ref 丟 `NotFound`，`expectedFrom` 對不上丟 `StatusConflict`，裡面帶 item 現在的樣子。
+  - architecture.md 草稿裡 `transition` 的 `actor` 參數先不放。D57 說記錄操作者等有那個切片再做，現在放進去沒有人讀。
+  - sqlite 的 compare-and-set 是一條 `UPDATE … WHERE ref = ? AND status = ?`，真的原子。Jira 是轉移前重讀一次 status，照 stop-and-recovery.md 接受兩次呼叫之間的小視窗。
+  - Jira 的 `get` 遇到別的 project 或不是 item 的 issue type 也當 `NotFound`，tasuki 只動自己管的 issue。
+  - use case `moveItem`：`from` 與目標 status 都必須是看板上的欄（config 有對照），而且兩者不能一樣，否則 `InvalidInput`。任何 status 到任何 status 都可以（state-machine.md）。
+  - REST 是 `POST /api/items/:ref/transition`，body `{ from, to }`。衝突回 409，body 帶 `item`；`NotFound` 回 404。使用者 MCP 加 `move_item(ref, from, to)`，同一個 use case（D57）。
+  - 看板：卡片用原生 HTML5 drag 拖到別欄，另外有「Move」下拉選單給鍵盤操作。放下就先把卡片移過去並鎖住，等回應期間不能再移，因為第二次移動會帶著舊的 `from`，撞上自己造成的衝突。回應後把回傳的 item 放到對應欄位，不重新讀取；其他錯誤放回原欄。409 時把卡片放到 item 現在所在的欄，跳 warning toast 說誰的 item 被別人移到哪。
+  - StoragePort 契約測試加 `get`、`transition`、衝突、`NotFound` 四條，fixture 要對照 `refining`、`ready-to-split`、`in-progress`。整套 timeout 拉到 30 秒，Jira 一條測試要來回七八次。
+  - Jira 的測試設定從 `JIRA_TEST_REFINING_STATUS` 改成 `JIRA_TEST_ITEM_STATUSES`，值是邏輯名對 status id 的 JSON。契約測試與 E2E 共用。
+- 理由：衝突一定會發生在「人看到的是舊資料」的時候，所以 `from` 由人看到的畫面給，不由 server 補讀。拖拉不裝套件，因為 Nuxt UI 沒有 DnD，原生的寫起來只有幾行；下拉選單補上鍵盤操作，E2E 也好寫。
+- KAN 的設定（2026-11-19）：用 Jira REST 的 `POST /rest/api/3/workflows/update` 在 team-managed 的 workflow 加了六個 status（`10006` 到 `10011`），每個各一條 GLOBAL 轉移，所以任何 status 都能轉到任何 status。原本的 `待辦事項`、`進行中`、`審核中`、`完成` 對到 `refining`、`in-progress`、`in-review`、`done`。這個 API 可以改 team-managed 的 workflow，待釐清 14 要做「代為去改 Jira」時可以走這條。注意要帶上既有 status 的 `id`，不然會被當成新的 status，名稱重複而失敗；新的 status 用 UUID 當 `statusReference`。
+- 實測：E2E 在 Jira 上第一次跑時，S1 那條會超時。看板從一欄變十欄後每次讀取要 0.7 到 1.2 秒，而重新整理的迴圈只等 1 秒就再重新整理，看板永遠來不及出現。改成每輪等 `/api/board` 的回應回來才檢查。
+- 重新檢視：有記錄操作者的切片時（把 `actor` 加回 `transition`）；Jira 的小視窗真的造成問題時。
+
+## D60 部署到公司伺服器時的 auth 細節
+- 背景：作者確認 tasuki 之後會部署在伺服器上給公司用。security-and-auth.md 原本定了登入方式與綁定檢查，但沒講 TLS、token 放哪、`/mcp` 怎麼登入、`static` 的密碼怎麼存、怎麼擋暴力破解。
+- 決定：
+  - engine 不做 TLS，非 loopback 的部署放在 HTTPS 的 reverse proxy 或 ingress 後面。新增 `server.publicUrl`，非 loopback 時必填且是 `https`，`Host` 與 `Origin` 檢查都拿它比對。
+  - 看板的 session 放 `HttpOnly`、`Secure`、`SameSite=Lax` 的 cookie，session 存在 runtime store（只存 hash），登出立刻失效。會改東西的請求檢查 `Origin`。
+  - `/mcp` 只收個人 API token（Bearer），在看板上產生、只顯示一次、存 hash、可撤銷，不吃 cookie。
+  - `static` 的密碼在 config 裡存 scrypt hash，明文就拒絕啟動。
+  - 登入失敗以帳號計數，回應延遲從 1 秒加倍到 30 秒，不鎖帳號。
+  - 除了 `/api/health` 與登入，所有 route 預設要驗證。
+  - 登入就有完整權限，不做角色與權限。RBAC 從「還沒決定要不要做」移到「刻意不做」。
+- 理由：
+  - TLS 交給 proxy：公司環境本來就有一層，憑證在那裡管，engine 少一份要輪替的東西。
+  - cookie 加 `HttpOnly` 讓 XSS 偷不到 session；`Lax` 讓從 Slack 點連結進來還是登入狀態；`Origin` 補上 `Lax` 擋不到的情況。
+  - `/mcp` 的 client 是設定檔裡寫死 token 的 AI 工具，不會走登入表單；只收 Bearer，瀏覽器發的跨站請求就帶不到身分。
+  - 以帳號計數而不是 IP，不用信任 proxy 帶的 header；不鎖帳號，避免任何人都能把別人鎖在外面。
+  - 作者確認目前不需要分權限。
+- 重新檢視：有使用者需要唯讀或只能看部分 item 的角色時；要支援多 instance 時（失敗計數要搬出記憶體）；有人要求 engine 直接對外提供 HTTPS 時。

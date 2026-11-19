@@ -6,6 +6,8 @@ const recording = (): { storage: StoragePort; created: NewItem[] } => {
   const created: NewItem[] = []
   const storage: StoragePort = {
     list: () => Promise.resolve([]),
+    get: () => Promise.reject(new Error('not used')),
+    transition: () => Promise.reject(new Error('not used')),
     createItem: (item) => {
       created.push(item)
       return Promise.resolve({ ref: 'X-1', kind: 'item', labels: [], ...item })

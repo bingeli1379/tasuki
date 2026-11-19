@@ -1,4 +1,11 @@
-import type { Kind, PluginContext, StoragePort, WorkUnit } from '@tasuki/core'
+import {
+  NotFound,
+  StatusConflict,
+  type Kind,
+  type PluginContext,
+  type StoragePort,
+  type WorkUnit,
+} from '@tasuki/core'
 import type { DatabaseSync } from 'node:sqlite'
 
 type Row = Record<string, unknown>
@@ -22,12 +29,22 @@ export function createSqliteTracker(
   db: DatabaseSync,
   refPrefix: string,
 ): StoragePort {
+  function get(ref: string): WorkUnit {
+    const row = db.prepare('SELECT * FROM work_unit WHERE ref = ?').get(ref)
+    if (row === undefined) throw new NotFound(`${ref} does not exist`)
+    return toWorkUnit(ctx, row)
+  }
+
   return {
     list(kind, status) {
       const rows = db
         .prepare('SELECT * FROM work_unit WHERE kind = ? AND status = ? ORDER BY rowid')
         .all(kind, ctx.statuses.toTracker(kind, status))
       return Promise.resolve(rows.map((r) => toWorkUnit(ctx, r)))
+    },
+    // async so a throw becomes a rejection, like every other tracker.
+    async get(ref) {
+      return get(ref)
     },
     createItem(item) {
       const now = ctx.clock.now().toISOString()
@@ -48,6 +65,23 @@ export function createSqliteTracker(
         )
       if (row === undefined) throw new Error('insert returned no row')
       return Promise.resolve(toWorkUnit(ctx, row))
+    },
+    async transition(ref, expectedFrom, to) {
+      const kind = get(ref).kind
+      // The status check is in the same statement as the write, so this is a real
+      // compare-and-set: a concurrent move makes this one update nothing.
+      const row = db
+        .prepare(
+          `UPDATE work_unit SET status = ?, updated_at = ? WHERE ref = ? AND status = ? RETURNING *`,
+        )
+        .get(
+          ctx.statuses.toTracker(kind, to),
+          ctx.clock.now().toISOString(),
+          ref,
+          ctx.statuses.toTracker(kind, expectedFrom),
+        )
+      if (row === undefined) throw new StatusConflict(expectedFrom, get(ref))
+      return toWorkUnit(ctx, row)
     },
   }
 }
