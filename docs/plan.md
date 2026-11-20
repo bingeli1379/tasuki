@@ -24,7 +24,7 @@
 
 沒有排進切片，做不做、何時做都還沒決定。
 
-- 多 instance、高可用。
+- 多 instance、高可用。一個 tracker project 只接一個 engine，要更多 agent 往 runner 擴（D66）。
 - sqlite 模式的指派與使用者系統。
 - Jira Data Center 的 tracker。plugin 機制出來後，也可以由第三方提供。
 - webhook 驅動端（待釐清 10）。
@@ -44,12 +44,12 @@
 | S2 | 人移動 item 的 status（已完成） | 拖拉或按鈕移動；兩邊同時改時顯示衝突 |
 | S3 | item 詳情與 comment，含編輯 title 與 body、markdown、附件（已完成，D61） | 點開 item 看內容、改內容、貼圖、留言 |
 | S4 | 規則命中，假 runner 跑 split（已完成，D63） | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
-| S5 | task 與 `split-review` 放行 | 看到拆出的 task，人放行或打回 |
+| S5 | task 與 `split-review` 放行（已完成，D65） | 看到拆出的 task，人放行或打回 |
 | S6 | execute：task 狀態與 verdict 驗證 | item 一路走到 `in-review`、`done` |
 | S7 | hold、Stop、pause、blocked 自動接回、rework | 對應的按鈕與狀態變化 |
 | S8 | 真的 claude runner（plugin）、MCP facade、run token | 在玩具 repo 上用真的 claude 跑一次 |
 | S9 | auth（`none`、`static`、`http`）、session cookie 與 CSRF、`/mcp` 的個人 API token、登入防暴力、`Host` 檢查（D60） | 登入畫面、ttl 過期、產生與撤銷 token、沒登入打 API 被拒 |
-| S10 | `doctor` | 啟動前列出 config、plugin、Jira workflow 的問題 |
+| S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
 | S12 | codex runner、npm CLI 打包、container image、預設 prompt | `init`、`doctor`、`start` 可用 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |
@@ -80,7 +80,7 @@
 
 | 切片 | 要先定 | 為什麼卡 |
 |---|---|---|
-| S5、S6 | verdict 驗證 | S4 直接採信 verdict（D63）。split 的 `succeeded` 要檢查 item 底下有 task，S5 有 task 時補上；`needs_input` 要檢查 `produced.questions`，facade 有 `add_comment` 時補上 |
+| S6、S7 | 其餘的 verdict 驗證 | S5 做了 split 的 `succeeded` 與 `needs_input`（D65）。execute 的 `succeeded`（task 全部 done）、rework 的 `succeeded`（`produced.tasks`）、`blocked_manual` 跟著對應的規則做 |
 | S8 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。S4 先照草稿當預設值，邏輯用假 clock 測過；接上真的 claude 後，用實際的輸出間隔回頭調 |
 | S8 | 「待驗證」裡 headless CLI 那幾項：session resume、http MCP、取得 session id | 結果可能讓 runner 設計大改，例如只支援 stdio 時要加 shim |
 

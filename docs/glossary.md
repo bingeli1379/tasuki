@@ -45,7 +45,7 @@
 | orchestrator | 規則 B 跑的 agent。執行 task：派 subagent、更新 task 狀態、處理 merge。 |
 | subagent | orchestrator 自己派的子 agent，engine 看不到。 |
 | runner | RunnerPort 的實作，spawn 某個 agent CLI。 |
-| fake runner | `@tasuki/fake-runner`，不叫 LLM 的假 agent，照 item 標題裡的 `[fake:<verdict>]` 回報結果，拿來試 engine 與跑 E2E（D63）。 |
+| fake runner | `@tasuki/fake-runner`，不叫 LLM 的假 agent，照 item 標題裡的 `[fake:<verdict>]` 回報結果，沒有標記時先建兩張 task 再回報 `succeeded`，拿來試 engine 與跑 E2E（D63、D65）。 |
 | MCP facade | engine 提供給 agent 的 MCP 入口，背後呼叫 use case。 |
 | 使用者 MCP | engine 在 `/mcp` 提供給使用者自己的 AI client（Claude Code、Codex）的 MCP 入口，身分是使用者，能做的事跟看板一樣（D57）。 |
 | run token | 每個 Run 發一個的 token，綁定該 item 與底下的 task，Run 結束就失效。 |

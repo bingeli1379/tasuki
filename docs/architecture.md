@@ -84,7 +84,8 @@ interface StoragePort {
   attachments(target: Ref): Promise<Attachment[]>
   addAttachment(target: Ref, a: NewAttachment): Promise<Attachment>
   readAttachment(target: Ref, id: string): Promise<{ attachment: Attachment; data: Uint8Array }>
-  createTask(item: Ref, t: NewTask): Promise<WorkUnit>
+  // children and dependencies see a task the moment it exists, unlike list: verdicts are checked against them
+  createTask(item: Ref, t: NewTask): Promise<WorkUnit>   // throws InvalidInput when blockedBy is not a task of item
   updateTask(ref: Ref, patch: TaskPatch): Promise<void>
   setLabels(ref: Ref, labels: string[]): Promise<void>
 }
@@ -94,16 +95,17 @@ interface Clock {
 }
 
 // Lives in core (use cases need it), implemented in server; not a plugin role.
-// What S4 has; the comments are what later slices add.
+// What S5 has; the comments are what later slices add.
 interface RuntimeStorePort {
   createRun(r: NewRun): Promise<Run>          // throws RunConflict if target already has a live Run; the store assigns id and logPath
   getRun(id: string): Promise<Run>
   renewLease(id: string, leaseSeconds: number): Promise<void>
   report(id: string, verdict: Verdict, summary: string): Promise<void>   // first report only
+  bumpProduced(id: string, key: 'questions' | 'tasks'): Promise<void>
   finishRun(id: string, outcome: Outcome): Promise<void>                  // + usage
   liveRuns(): Promise<Run[]>
   runsFor(target: Ref): Promise<Run[]>        // newest first
-  // requestCancel(id, mode, by), bumpProduced(id, key), getState / setState ('paused')
+  // requestCancel(id, mode, by), getState / setState ('paused')
 }
 
 interface RunnerPort {
@@ -189,7 +191,7 @@ Jira 模式下 ticket 在 Jira，Run 在本機，兩邊靠 key 互指。
 | agent 認證 | 沿用使用者已登入的 claude / codex CLI | API key |
 | tracker | sqlite 或 Jira | 通常 Jira |
 | 登入 | 預設不登入，只綁 127.0.0.1 | 設 auth，或放在反向代理後面 |
-| 單 instance | 是 | 是（多 instance 還沒決定，見 plan.md） |
+| 單 instance | 是 | 是，一個 tracker project 一個 engine（D66） |
 
 ## 暫定技術棧
 
