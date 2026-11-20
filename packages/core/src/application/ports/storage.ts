@@ -1,11 +1,20 @@
 import type { Attachment } from '../../domain/attachment'
 import type { Comment, CommentAuthor, CommentKind } from '../../domain/comment'
-import type { Kind, Ref, WorkUnit } from '../../domain/work-unit'
+import type { Dependency, Kind, Origin, Ref, WorkUnit } from '../../domain/work-unit'
 
 export interface NewItem {
   title: string
   body: string
   status: string
+}
+
+export interface NewTask {
+  title: string
+  body: string
+  status: string
+  origin: Origin
+  // Tasks of the same item this one waits for.
+  blockedBy: Ref[]
 }
 
 export interface ItemPatch {
@@ -34,7 +43,15 @@ export interface StoragePort {
   list(kind: Kind, statuses: readonly string[]): Promise<WorkUnit[]>
   // Throws NotFound when the tracker has no such unit.
   get(ref: Ref): Promise<WorkUnit>
+  // The item's tasks, oldest first. Unlike list, sees a task the moment it is created: a
+  // verdict is checked against it right after the agent made it.
+  children(item: Ref): Promise<WorkUnit[]>
+  // Between the item's tasks. Same freshness as children.
+  dependencies(item: Ref): Promise<Dependency[]>
   createItem(item: NewItem): Promise<WorkUnit>
+  // Throws NotFound when item is not an item, InvalidInput when a blockedBy ref is not one
+  // of its tasks. The task and its dependencies are separate writes (D47).
+  createTask(item: Ref, task: NewTask): Promise<WorkUnit>
   // Compare-and-set: throws StatusConflict when the unit is not in expectedFrom, NotFound
   // when it does not exist. Returns the unit after the move.
   transition(ref: Ref, expectedFrom: string, to: string): Promise<WorkUnit>

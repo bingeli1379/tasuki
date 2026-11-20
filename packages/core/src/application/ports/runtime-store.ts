@@ -20,6 +20,8 @@ export interface RuntimeStorePort {
   renewLease(id: string, leaseSeconds: number): Promise<void>
   // Keeps the first report; throws InvalidInput on a second one or once the Run is over.
   report(id: string, verdict: Verdict, summary: string): Promise<void>
+  // Counts what the agent made, for checking its verdict later.
+  bumpProduced(id: string, key: 'questions' | 'tasks'): Promise<void>
   finishRun(id: string, outcome: Outcome): Promise<void>
   liveRuns(): Promise<Run[]>
   // Newest first.

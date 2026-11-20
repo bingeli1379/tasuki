@@ -19,7 +19,11 @@ export async function finishRun(
   const run = await runtime.getRun(runId)
   // Recovery already gave up on it, and the item may be on its next attempt by now.
   if (run.outcome !== undefined) return run.outcome
-  let { outcome, reason } = outcomeOf(run.verdict, exit)
+  const tasks = exit.code === 0 ? (await storage.children(run.target)).length : 0
+  let { outcome, reason } = outcomeOf(rule.mode, run.verdict, exit, {
+    tasks,
+    questions: run.produced.questions,
+  })
   // e.g. blocked_manual from a split agent: leaving the item in the claim status with no
   // Run would strand it there.
   if (exitFor(rule, outcome) === undefined) {

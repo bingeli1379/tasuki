@@ -10,6 +10,7 @@ const run = (attempt: number, outcome: Outcome): Run => ({
   workspace: '/w/X-1',
   state: 'finished',
   outcome,
+  produced: { questions: 0, tasks: 0 },
   leaseUntil: '',
   startedAt: '',
   lastActivityAt: '',

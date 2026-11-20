@@ -19,6 +19,8 @@ export interface Run {
   // What the agent reported with report_result, before the engine turns it into an outcome.
   verdict?: Verdict
   summary?: string
+  // What the agent made through the facade during this Run; verdicts are checked against it.
+  produced: { questions: number; tasks: number }
   leaseUntil: string
   startedAt: string
   lastActivityAt: string
