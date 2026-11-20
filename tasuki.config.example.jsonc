@@ -17,7 +17,12 @@
   // Logical status -> the tracker's status key. Omitted, each status maps to its
   // display name ("refining" -> "Refining"), which only suits sqlite.
   // refining is required: new items start there. Unmapped statuses are not on the board.
-  // "statuses": { "item": { "refining": "Refining", "in-progress": "In Progress" } },
+  // A split rule also needs the task statuses to-do and manual, where its tasks start.
+  // "statuses": {
+  //   "item": { "refining": "Refining", "in-progress": "In Progress" },
+  //   "task": { "to-do": "To Do", "in-progress": "In Progress", "in-review": "In Review",
+  //             "manual": "Manual", "done": "Done" }
+  // },
 
   // Jira Cloud instead; put JIRA_EMAIL and JIRA_API_TOKEN in .env.
   // Every Jira value below is an id, not a name, and ids differ per project.
@@ -28,17 +33,18 @@
   //     "email": "${JIRA_EMAIL}",
   //     "apiToken": "${JIRA_API_TOKEN}",
   //     "project": "PROJ",
-  //     "issueTypes": { "item": "10009", "task": "10007" },
-  //     "dependencyLinkType": "10000"
+  //     "issueTypes": { "item": "10009", "task": "10007" },   // task is a sub-task type
+  //     "dependencyLinkType": "10000"                        // the "Blocks" issue link type
   //   }
   // },
   // Jira needs statuses: the display-name default does not match any Jira status id.
-  // "statuses": { "item": { "refining": "10003" } },
+  // "statuses": { "item": { "refining": "10003" }, "task": { "to-do": "10003", "manual": "10012" } },
 
   // Agents are runner plugins, given the same way as the tracker. Only the fake runner
   // exists so far: it stands in for an agent so the engine can be tried without an LLM.
-  // A title with [fake:needs_input], [fake:failed], [fake:blocked_manual] or [fake:hang]
-  // picks what it does; anything else succeeds after `seconds`.
+  // A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or
+  // [fake:no_tasks] picks what it does; anything else makes two tasks and succeeds after
+  // `seconds`.
   "agents": { "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } } },
 
   // Without rules the engine leaves every item alone. See docs/config-and-rules.md.

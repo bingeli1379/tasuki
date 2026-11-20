@@ -3,6 +3,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   createStatusMap,
   ITEM_STATUS_DISPLAY,
+  TASK_STATUS_DISPLAY,
   type Rule,
   type RunExit,
   type RunnerPort,
@@ -22,7 +23,7 @@ import { migrate } from './runtime-store/migrate'
 import { RUNTIME_MIGRATIONS } from './runtime-store/migrations'
 import { createRuntimeStore } from './runtime-store/run-store'
 
-const statuses = createStatusMap({ item: ITEM_STATUS_DISPLAY })
+const statuses = createStatusMap({ item: ITEM_STATUS_DISPLAY, task: TASK_STATUS_DISPLAY })
 
 const split: Rule = {
   id: 'split',
@@ -49,6 +50,29 @@ const report =
     return ok
   }
 const hang: Script = () => new Promise(() => {})
+const text = (res: Awaited<ReturnType<Client['callTool']>>): string =>
+  (res.content as { text: string }[])[0]?.text ?? ''
+// What a splitter that did its job does: tasks first, each waiting for the one before.
+const splitInto =
+  (...titles: string[]): Script =>
+  async (mcp, spec) => {
+    let previous: string | undefined
+    for (const title of titles.length > 0 ? titles : ['Schema', 'Endpoint']) {
+      const res = await mcp.callTool({
+        name: 'create_task',
+        arguments: { title, blockedBy: previous === undefined ? [] : [previous] },
+      })
+      previous = (JSON.parse(text(res)) as WorkUnit).ref
+    }
+    return report('succeeded')(mcp, spec)
+  }
+const ask: Script = async (mcp, spec) => {
+  await mcp.callTool({
+    name: 'add_comment',
+    arguments: { kind: 'question', body: 'Which login provider?' },
+  })
+  return report('needs_input')(mcp, spec)
+}
 
 // The real sqlite tracker and runtime store, a clock the test moves, and the app serving
 // the facade, so a scripted agent goes through the same HTTP path as the fake runner.
@@ -69,7 +93,7 @@ function setup(
   const runner: RunnerPort = {
     start(spec) {
       started.push(spec)
-      const script = scripts.shift() ?? report('succeeded')
+      const script = scripts.shift() ?? splitInto()
       const exit = (async () => {
         const mcp = new Client({ name: 'agent', version: '0' })
         await mcp.connect(
@@ -132,30 +156,33 @@ describe('rule split on a fake agent', () => {
   })
 
   it.each([
-    ['succeeded', 'split-review'],
-    ['needs_input', 'needs-answers'],
-    ['failed', 'blocked'],
-  ])('moves the item on the reported %s and says so in a system comment', async (verdict, to) => {
-    const t = setup()
-    t.scripts.push(report(verdict))
-    const item = await t.readyItem()
-    const engine = t.engine()
-    await engine.tick()
-    await engine.settled()
+    ['succeeded', 'split-review', splitInto()],
+    ['needs_input', 'needs-answers', ask],
+    ['failed', 'blocked', report('failed')],
+  ])(
+    'moves the item on the reported %s and says so in a system comment',
+    async (verdict, to, script) => {
+      const t = setup()
+      t.scripts.push(script)
+      const item = await t.readyItem()
+      const engine = t.engine()
+      await engine.tick()
+      await engine.settled()
 
-    expect((await t.storage.get(item.ref)).status).toBe(to)
-    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
-      state: 'finished',
-      outcome: verdict,
-      verdict,
-      summary: `said ${verdict}`,
-    })
-    const [comment] = await t.storage.comments(item.ref)
-    expect(comment).toMatchObject({ author: 'engine', kind: 'system' })
-    expect(comment?.body).toBe(
-      `Rule split, attempt 1: ${verdict}, moved to ${to}.\n\nsaid ${verdict}`,
-    )
-  })
+      expect((await t.storage.get(item.ref)).status).toBe(to)
+      expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+        state: 'finished',
+        outcome: verdict,
+        verdict,
+        summary: `said ${verdict}`,
+      })
+      const comment = (await t.storage.comments(item.ref)).find((c) => c.author === 'engine')
+      expect(comment).toMatchObject({ kind: 'system' })
+      expect(comment?.body).toBe(
+        `Rule split, attempt 1: ${verdict}, moved to ${to}.\n\nsaid ${verdict}`,
+      )
+    },
+  )
 
   it('is failed when the agent exits without a verdict, or with a non-zero code', async () => {
     const t = setup()
@@ -180,6 +207,40 @@ describe('rule split on a fake agent', () => {
       expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
       expect((await t.storage.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
     }
+  })
+
+  // agent-contract.md, the verdict table.
+  it.each([
+    ['succeeded', report('succeeded'), 'the agent reported succeeded but the item has no tasks'],
+    ['needs_input', report('needs_input'), 'the agent reported needs_input but asked no question'],
+  ])('does not take %s from an agent that did not do it: failed', async (_verdict, script, why) => {
+    const t = setup()
+    t.scripts.push(script)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
+    expect((await t.storage.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
+  })
+
+  it('a split counts tasks an earlier run left on the item (D30)', async () => {
+    const t = setup()
+    const item = await t.readyItem()
+    await t.storage.createTask(item.ref, {
+      title: 'from refine',
+      body: '',
+      status: 'manual',
+      origin: 'refine',
+      blockedBy: [],
+    })
+    t.scripts.push(report('succeeded'))
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
   })
 
   it('a split agent saying blocked_manual has nowhere to go, so it is failed', async () => {
@@ -299,7 +360,7 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
     )
 
     await t.storage.transition(item.ref, 'blocked', 'ready-to-split')
-    t.scripts.push(report('succeeded'))
+    t.scripts.push(splitInto())
     const engine = t.engine()
     await engine.tick()
     await engine.settled()
@@ -332,9 +393,8 @@ describe('the MCP facade for agents', () => {
     t.scripts.push(async (client) => {
       mcp = client
       const read = await client.callTool({ name: 'get_item', arguments: {} })
-      const text = (read.content as { text: string }[])[0]?.text ?? ''
-      expect(JSON.parse(text)).toMatchObject({ ref: 'T-1', status: 'splitting' })
-      await report('succeeded')(client, t.started[0] as RunSpec)
+      expect(JSON.parse(text(read))).toMatchObject({ ref: 'T-1', status: 'splitting' })
+      await splitInto()(client, t.started[0] as RunSpec)
       const again = await client.callTool({
         name: 'report_result',
         arguments: { verdict: 'failed', summary: '' },
@@ -351,18 +411,71 @@ describe('the MCP facade for agents', () => {
     await expect(mcp?.callTool({ name: 'get_item', arguments: {} })).rejects.toThrow()
   })
 
+  it('makes tasks on its own item, shown with what each waits for, and counts them', async () => {
+    const t = setup()
+    t.scripts.push(splitInto('Schema', 'Endpoint', 'Page'))
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+
+    const detail = (await (await t.app.request(`/api/items/${item.ref}`)).json()) as {
+      tasks: { ref: string; title: string; status: string; origin: string; blockedBy: string[] }[]
+    }
+    expect(detail.tasks.map((x) => [x.title, x.status, x.origin, x.blockedBy])).toEqual([
+      ['Schema', 'to-do', 'splitter', []],
+      ['Endpoint', 'to-do', 'splitter', [detail.tasks[0]?.ref]],
+      ['Page', 'to-do', 'splitter', [detail.tasks[1]?.ref]],
+    ])
+    expect((await t.runtime.runsFor(item.ref))[0]?.produced).toEqual({ questions: 0, tasks: 3 })
+    const board = (await (await t.app.request('/api/board')).json()) as {
+      tasks: Record<string, unknown>
+    }
+    expect(board.tasks).toEqual({ [item.ref]: { done: 0, total: 3 } })
+  })
+
+  it('cannot reach another item: not its tasks, not its comments', async () => {
+    const t = setup()
+    const other = await t.storage.createItem({ title: 'other', body: '', status: 'refining' })
+    const theirs = await t.storage.createTask(other.ref, {
+      title: 'theirs',
+      body: '',
+      status: 'to-do',
+      origin: 'human',
+      blockedBy: [],
+    })
+    const errors: boolean[] = []
+    t.scripts.push(async (mcp, spec) => {
+      for (const call of [
+        { name: 'create_task', arguments: { title: 'x', blockedBy: [theirs.ref] } },
+        { name: 'add_comment', arguments: { target: other.ref, kind: 'note', body: 'hi' } },
+        { name: 'create_task', arguments: { title: 'x', initialStatus: 'done' } },
+      ])
+        errors.push((await mcp.callTool(call)).isError === true)
+      return report('failed')(mcp, spec)
+    })
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+
+    expect(errors).toEqual([true, true, true])
+    expect(await t.storage.children(item.ref)).toEqual([])
+    expect(await t.storage.comments(other.ref)).toEqual([])
+  })
+
   it('has no tool that moves the item (invariant 2)', async () => {
     const t = setup()
     let names: string[] = []
     t.scripts.push(async (client) => {
       names = (await client.listTools()).tools.map((tool) => tool.name)
-      return report('succeeded')(client, t.started[0] as RunSpec)
+      return splitInto()(client, t.started[0] as RunSpec)
     })
     await t.readyItem()
     const engine = t.engine()
     await engine.tick()
     await engine.settled()
-    expect(names).toEqual(['get_item', 'report_result'])
+    expect(names).toEqual(['get_item', 'list_tasks', 'create_task', 'add_comment', 'report_result'])
   })
 
   it('turns away a request without a live Run token', async () => {

@@ -1,6 +1,8 @@
 import {
   ITEM_STATUS_DISPLAY,
   ITEM_STATUSES,
+  TASK_STATUS_DISPLAY,
+  TASK_STATUSES,
   type Rule,
   type RuleExit,
   type RuleMode,
@@ -161,10 +163,18 @@ export function loadConfig(path: string): Config {
   const tracker = pluginRef(raw['tracker'] ?? { plugin: '@tasuki/sqlite' }, 'tracker')
 
   // Without a mapping, sqlite stores the display names (config-and-rules.md example).
-  const statuses = (raw['statuses'] ?? { item: ITEM_STATUS_DISPLAY }) as StatusMapping
-  const unknown = Object.keys(statuses.item ?? {}).filter((s) => !ITEM_STATUSES.includes(s))
-  if (unknown.length > 0)
-    throw new Error(`config statuses.item: unknown status ${unknown.join(', ')}`)
+  const statuses = (raw['statuses'] ?? {
+    item: ITEM_STATUS_DISPLAY,
+    task: TASK_STATUS_DISPLAY,
+  }) as StatusMapping
+  for (const [kind, known] of [
+    ['item', ITEM_STATUSES],
+    ['task', TASK_STATUSES],
+  ] as const) {
+    const unknown = Object.keys(statuses[kind] ?? {}).filter((s) => !known.includes(s))
+    if (unknown.length > 0)
+      throw new Error(`config statuses.${kind}: unknown status ${unknown.join(', ')}`)
+  }
   if (statuses.item?.['refining'] === undefined) {
     throw new Error('config statuses.item must map refining: new items start there')
   }
@@ -184,6 +194,20 @@ export function loadConfig(path: string): Config {
   // Jira searches are slower and rate limited, so it is polled less often.
   const pollDefault = tracker.plugin === '@tasuki/jira-cloud' ? 30 : 5
 
+  const rules = parseRules(
+    raw['rules'],
+    Object.keys(statuses.item ?? {}),
+    agents,
+    limits.defaultMaxAttempts,
+  )
+  // The tasks a splitting agent can make start in one of these.
+  const splitter = rules.find((r) => r.mode === 'split')
+  const missing = ['to-do', 'manual'].filter((s) => statuses.task?.[s] === undefined)
+  if (splitter !== undefined && missing.length > 0)
+    throw new Error(
+      `config statuses.task must map ${missing.join(', ')}: rule ${splitter.id} splits items into tasks`,
+    )
+
   return {
     configDir,
     dataDir: resolve(configDir, typeof raw['dataDir'] === 'string' ? raw['dataDir'] : './data'),
@@ -198,11 +222,6 @@ export function loadConfig(path: string): Config {
     ),
     limits,
     agents,
-    rules: parseRules(
-      raw['rules'],
-      Object.keys(statuses.item ?? {}),
-      agents,
-      limits.defaultMaxAttempts,
-    ),
+    rules,
   }
 }

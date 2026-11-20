@@ -21,4 +21,7 @@ export const RUNTIME_MIGRATIONS: readonly string[] = [
   -- invariant 1: at most one live Run per target
   CREATE UNIQUE INDEX one_live_run ON run(target) WHERE state = 'running';
   CREATE INDEX run_by_target ON run(target, started_at DESC);`,
+  // S5: what the agent made, for checking its verdict (agent-contract.md).
+  `ALTER TABLE run ADD COLUMN produced_questions INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE run ADD COLUMN produced_tasks INTEGER NOT NULL DEFAULT 0;`,
 ]
