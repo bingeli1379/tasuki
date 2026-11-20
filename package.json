@@ -12,6 +12,7 @@
     "prepare": "vp config --no-agent"
   },
   "devDependencies": {
+    "@tasuki/fake-runner": "workspace:*",
     "@tasuki/jira-cloud": "workspace:*",
     "@tasuki/sqlite": "workspace:*",
     "@types/node": "24.19.2",
