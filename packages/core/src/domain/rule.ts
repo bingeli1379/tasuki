@@ -1,4 +1,5 @@
 import type { Outcome, Verdict } from './run'
+import { isRunnable, type TaskNode } from './task'
 
 export type RuleMode = 'split' | 'execute' | 'rework'
 
@@ -34,14 +35,13 @@ export interface RunExit {
 // What the engine looked up to check a verdict.
 export interface Evidence {
   // Tasks under the item now, made by this Run or earlier (D30).
-  tasks: number
-  // Questions this Run left.
-  questions: number
+  tasks: readonly TaskNode[]
+  // What this Run made.
+  produced: { tasks: number; questions: number }
 }
 
 // The agent's verdict is a claim; the engine checks it before acting on it
-// (agent-contract.md). Execute, rework and blocked_manual checks arrive with the slices that
-// run them; until then those verdicts are taken as reported.
+// (agent-contract.md, the verdict table).
 export function outcomeOf(
   mode: RuleMode,
   verdict: Verdict | undefined,
@@ -59,9 +59,33 @@ export function outcomeOf(
             : 'the agent could not be started',
     }
   if (verdict === undefined) return { outcome: 'failed', reason: 'the agent reported no verdict' }
-  if (mode === 'split' && verdict === 'succeeded' && evidence.tasks === 0)
-    return { outcome: 'failed', reason: 'the agent reported succeeded but the item has no tasks' }
-  if (verdict === 'needs_input' && evidence.questions === 0)
-    return { outcome: 'failed', reason: 'the agent reported needs_input but asked no question' }
-  return { outcome: verdict }
+  const refusal = refuse(mode, verdict, evidence)
+  return refusal === undefined ? { outcome: verdict } : { outcome: 'failed', reason: refusal }
+}
+
+function refuse(
+  mode: RuleMode,
+  verdict: Verdict,
+  { tasks, produced }: Evidence,
+): string | undefined {
+  const claim = `the agent reported ${verdict}`
+  switch (verdict) {
+    case 'succeeded': {
+      if (mode === 'split' && tasks.length === 0) return `${claim} but the item has no tasks`
+      if (mode === 'rework' && produced.tasks === 0) return `${claim} but made no task in this run`
+      const open = tasks.filter((t) => t.status !== 'done').length
+      if (mode === 'execute' && open > 0)
+        return `${claim} but ${open} of ${tasks.length} tasks are not done`
+      return undefined
+    }
+    case 'needs_input':
+      return produced.questions === 0 ? `${claim} but asked no question` : undefined
+    case 'blocked_manual': {
+      if (!tasks.some((t) => t.status === 'manual')) return `${claim} but no task is manual`
+      const runnable = tasks.find((t) => isRunnable(t, tasks))
+      return runnable !== undefined ? `${claim} but ${runnable.ref} can still run` : undefined
+    }
+    case 'failed':
+      return undefined
+  }
 }

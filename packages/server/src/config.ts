@@ -207,6 +207,13 @@ export function loadConfig(path: string): Config {
     throw new Error(
       `config statuses.task must map ${missing.join(', ')}: rule ${splitter.id} splits items into tasks`,
     )
+  // An executing agent walks every task status.
+  const executor = rules.find((r) => r.mode === 'execute')
+  const unmapped = TASK_STATUSES.filter((s) => statuses.task?.[s] === undefined)
+  if (executor !== undefined && unmapped.length > 0)
+    throw new Error(
+      `config statuses.task must map ${unmapped.join(', ')}: rule ${executor.id} runs tasks`,
+    )
 
   return {
     configDir,

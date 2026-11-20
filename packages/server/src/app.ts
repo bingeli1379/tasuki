@@ -150,9 +150,11 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
     const token = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '')?.[1]
     const runId = token === undefined ? undefined : tokens.resolve(token)
     const run = runId === undefined ? undefined : await runtime.getRun(runId)
-    if (run?.state !== 'running') return c.json({ error: 'not a live run token' }, 401)
+    const mode = rules.find((r) => r.id === run?.rule)?.mode
+    if (run?.state !== 'running' || mode === undefined)
+      return c.json({ error: 'not a live run token' }, 401)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createAgentMcpServer({ storage, runtime, run }).connect(transport)
+    await createAgentMcpServer({ storage, runtime, run, mode }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   return app

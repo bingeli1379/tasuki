@@ -1,6 +1,14 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { API_VERSION, definePlugin, VERDICTS, type Plugin, type RunExit } from '@tasuki/core'
+import {
+  API_VERSION,
+  definePlugin,
+  isRunnable,
+  VERDICTS,
+  type Plugin,
+  type RunExit,
+  type TaskNode,
+} from '@tasuki/core'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 // A stand-in agent for trying the engine without an LLM. It talks to the MCP facade over
@@ -8,7 +16,9 @@ import { setTimeout as sleep } from 'node:timers/promises'
 // A marker in the item's title picks what it does: [fake:needs_input] asks a question first,
 // [fake:failed], [fake:blocked_manual], [fake:hang] never finishes, and [fake:no_tasks]
 // claims success without making any. Anything else splits the item into two tasks, unless
-// it already has some, and succeeds.
+// it already has some, and succeeds; [fake:manual] makes the second one manual.
+// Executing, it walks every task it can run to done, then reports succeeded, or
+// blocked_manual when manual tasks are left.
 const plugin: Plugin = definePlugin({
   name: '@tasuki/fake-runner',
   apiVersion: API_VERSION,
@@ -36,13 +46,26 @@ const plugin: Plugin = definePlugin({
             const marker = /\[fake:([a-z_]+)\]/.exec(title)?.[1]
             if (marker === 'hang') await new Promise(() => {})
             await sleep(seconds * 1000)
-            const verdict = VERDICTS.find((v) => v === marker) ?? 'succeeded'
+            let verdict = VERDICTS.find((v) => v === marker) ?? 'succeeded'
             if (verdict === 'needs_input')
               await call('add_comment', {
                 kind: 'question',
                 body: 'The fake runner asks: what should this do?',
               })
-            if (verdict === 'succeeded' && marker !== 'no_tasks') {
+            if (verdict === 'succeeded' && spec.mode === 'execute') {
+              let tasks = await call<TaskNode[]>('list_tasks')
+              for (let next = tasks.find((t) => isRunnable(t, tasks)); next !== undefined;) {
+                for (const [status, reason] of [
+                  ['in-progress', 'Starting on it.'],
+                  ['in-review', 'Built it; checking the work.'],
+                  ['done', 'The check passed.'],
+                ])
+                  await call('set_task_status', { task: next.ref, status, reason })
+                tasks = await call<TaskNode[]>('list_tasks')
+                next = tasks.find((t) => isRunnable(t, tasks))
+              }
+              if (tasks.some((t) => t.status === 'manual')) verdict = 'blocked_manual'
+            } else if (verdict === 'succeeded' && marker !== 'no_tasks') {
               // Splitting again after being sent back keeps what is there (D30).
               if ((await call<unknown[]>('list_tasks')).length === 0) {
                 const first = await call<{ ref: string }>('create_task', {
@@ -53,6 +76,7 @@ const plugin: Plugin = definePlugin({
                   title: 'Build',
                   body: 'Made by the fake runner.',
                   blockedBy: [first.ref],
+                  ...(marker === 'manual' ? { initialStatus: 'manual' } : {}),
                 })
               }
             }

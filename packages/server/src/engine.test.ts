@@ -2,12 +2,14 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import {
   createStatusMap,
+  isRunnable,
   ITEM_STATUS_DISPLAY,
   TASK_STATUS_DISPLAY,
   type Rule,
   type RunExit,
   type RunnerPort,
   type RunSpec,
+  type TaskNode,
   type WorkUnit,
 } from '@tasuki/core'
 import { createSqliteTracker, migrate as migrateTracker, TRACKER_MIGRATIONS } from '@tasuki/sqlite'
@@ -33,6 +35,16 @@ const split: Rule = {
   mode: 'split',
   maxAttempts: 2,
   on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+}
+
+// Rule B: no claim status, the lease alone keeps a second Run off the item.
+const execute: Rule = {
+  id: 'execute',
+  watch: 'in-progress',
+  agent: 'fake',
+  mode: 'execute',
+  maxAttempts: 2,
+  on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
 }
 
 // What a scripted agent does once started: it gets an MCP client already connected to the
@@ -66,6 +78,25 @@ const splitInto =
     }
     return report('succeeded')(mcp, spec)
   }
+const move = async (mcp: Client, task: string, status: string): Promise<boolean> =>
+  (
+    await mcp.callTool({
+      name: 'set_task_status',
+      arguments: { task, status, reason: `To ${status}.` },
+    })
+  ).isError !== true
+// What an executor that did its job does: every task it can run, in order, to done.
+const walk: Script = async (mcp, spec) => {
+  for (;;) {
+    const tasks = JSON.parse(
+      text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+    ) as TaskNode[]
+    const next = tasks.find((t) => isRunnable(t, tasks))
+    if (next === undefined) break
+    for (const status of ['in-progress', 'in-review', 'done']) await move(mcp, next.ref, status)
+  }
+  return report('succeeded')(mcp, spec)
+}
 const ask: Script = async (mcp, spec) => {
   await mcp.callTool({
     name: 'add_comment',
@@ -87,7 +118,14 @@ function setup(
   const storage = createSqliteTracker({ clock, dataDir: '', statuses }, trackerDb, 'T')
   const runtime = createRuntimeStore(runtimeDb, clock, '/logs')
   const tokens = createRunTokens()
-  const app = createApp({ db: runtimeDb, storage, runtime, statuses, rules: [split], tokens })
+  const app = createApp({
+    db: runtimeDb,
+    storage,
+    runtime,
+    statuses,
+    rules: [split, execute],
+    tokens,
+  })
   const scripts: Script[] = []
   const started: RunSpec[] = []
   const runner: RunnerPort = {
@@ -125,10 +163,35 @@ function setup(
     const item = await storage.createItem({ title, body: '', status: 'refining' })
     return storage.transition(item.ref, 'refining', 'ready-to-split')
   }
+  // Approved in split-review: in-progress with the given tasks, each waiting for the one
+  // before unless it is manual.
+  const approvedItem = async (...tasks: [string, string][]): Promise<WorkUnit[]> => {
+    const item = await storage.createItem({ title: 'Login page', body: '', status: 'in-progress' })
+    const made: WorkUnit[] = [item]
+    for (const [title, status] of tasks.length > 0
+      ? tasks
+      : ([
+          ['Schema', 'to-do'],
+          ['Endpoint', 'to-do'],
+        ] as [string, string][])) {
+      const previous = made.at(-1)
+      made.push(
+        await storage.createTask(item.ref, {
+          title,
+          body: '',
+          status,
+          origin: 'splitter',
+          blockedBy: made.length > 1 && previous !== undefined ? [previous.ref] : [],
+        }),
+      )
+    }
+    return made
+  }
   return {
     storage,
     runtime,
     app,
+    approvedItem,
     scripts,
     started,
     engine,
@@ -300,6 +363,241 @@ describe('rule split on a fake agent', () => {
 
     expect(t.started.map((s) => s.target)).toEqual(['T-1'])
     expect((await t.storage.get('T-2')).status).toBe('ready-to-split')
+  })
+})
+
+describe('rule execute on a fake agent', () => {
+  it('runs the tasks to done, moves the item to in-review, and leaves a reason on each move', async () => {
+    const t = setup()
+    t.scripts.push(walk)
+    const [item, schema] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+
+    expect(t.started).toMatchObject([{ target: item?.ref, mode: 'execute' }])
+    expect((await t.storage.get(item?.ref ?? '')).status).toBe('in-review')
+    expect((await t.storage.children(item?.ref ?? '')).map((x) => x.status)).toEqual([
+      'done',
+      'done',
+    ])
+    expect(
+      (await t.storage.comments(schema?.ref ?? '')).map((c) => [c.author, c.kind, c.body]),
+    ).toEqual([
+      ['engine', 'system', 'The agent moved it from to-do to in-progress.\n\nTo in-progress.'],
+      ['engine', 'system', 'The agent moved it from in-progress to in-review.\n\nTo in-review.'],
+      ['engine', 'system', 'The agent moved it from in-review to done.\n\nTo done.'],
+    ])
+    expect((await t.storage.comments(item?.ref ?? ''))[0]?.body).toBe(
+      'Rule execute, attempt 1: succeeded, moved to in-review.\n\nsaid succeeded',
+    )
+  })
+
+  it('does not take succeeded while tasks are left: failed, to blocked', async () => {
+    const t = setup()
+    t.scripts.push(report('succeeded'))
+    const [item] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
+    expect((await t.storage.comments(item?.ref ?? ''))[0]?.body).toContain(
+      'Why: the agent reported succeeded but 2 of 2 tasks are not done.',
+    )
+  })
+
+  it('takes blocked_manual once only manual work holds the item up', async () => {
+    const t = setup()
+    // Does the one task it can, then the manual one holds up the rest.
+    t.scripts.push(async (mcp, spec) => {
+      const tasks = JSON.parse(
+        text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+      ) as TaskNode[]
+      for (const status of ['in-progress', 'in-review', 'done'])
+        await move(mcp, tasks[0]?.ref ?? '', status)
+      return report('blocked_manual')(mcp, spec)
+    })
+    const [item] = await t.approvedItem(['Schema', 'to-do'], ['Sign the contract', 'manual'])
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
+    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('blocked_manual')
+  })
+
+  it('does not take blocked_manual while a task can still run: failed', async () => {
+    const t = setup()
+    t.scripts.push(report('blocked_manual'))
+    const [item, schema] = await t.approvedItem(['Schema', 'to-do'], ['Sign', 'manual'])
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('failed')
+    expect((await t.storage.comments(item?.ref ?? ''))[0]?.body).toContain(
+      `Why: the agent reported blocked_manual but ${schema?.ref} can still run.`,
+    )
+  })
+
+  it('sends a task left in-progress back to to-do once the Run is over (invariant 3)', async () => {
+    const t = setup()
+    t.scripts.push(async (mcp, spec) => {
+      const tasks = JSON.parse(
+        text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+      ) as TaskNode[]
+      await move(mcp, tasks[0]?.ref ?? '', 'in-progress')
+      return report('failed')(mcp, spec)
+    })
+    const [item, schema] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
+    expect((await t.storage.get(schema?.ref ?? '')).status).toBe('to-do')
+    expect((await t.storage.comments(schema?.ref ?? '')).at(-1)?.body).toBe(
+      "Moved back to to-do: rule execute's run ended failed.",
+    )
+  })
+
+  it('leaves tasks alone when a person took the item over (invariant 6)', async () => {
+    const t = setup()
+    let release = (): void => {}
+    const moved = new Promise<void>((r) => (release = r))
+    t.scripts.push(async (mcp, spec) => {
+      const tasks = JSON.parse(
+        text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+      ) as TaskNode[]
+      await move(mcp, tasks[0]?.ref ?? '', 'in-progress')
+      await moved
+      return report('succeeded')(mcp, spec)
+    })
+    const [item, schema] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    // Give the agent its first move before the person steps in.
+    while ((await t.storage.get(schema?.ref ?? '')).status !== 'in-progress')
+      await new Promise((r) => setTimeout(r, 5))
+    await t.storage.transition(item?.ref ?? '', 'in-progress', 'refining')
+    release()
+    await engine.settled()
+
+    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('cancelled')
+    expect((await t.storage.get(schema?.ref ?? '')).status).toBe('in-progress')
+  })
+
+  it('refuses moves off the task diagram, and a blank reason', async () => {
+    const t = setup()
+    const refused: boolean[] = []
+    t.scripts.push(async (mcp, spec) => {
+      const tasks = JSON.parse(
+        text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+      ) as TaskNode[]
+      const [schema, sign, endpoint] = tasks.map((x) => x.ref)
+      refused.push(
+        !(await move(mcp, endpoint ?? '', 'in-progress')), // waits for sign
+        !(await move(mcp, sign ?? '', 'to-do')), // manual: a person's
+        !(await move(mcp, schema ?? '', 'done')), // skips in-progress and in-review
+        (
+          await mcp.callTool({
+            name: 'set_task_status',
+            arguments: { task: schema, status: 'in-progress', reason: ' ' },
+          })
+        ).isError === true,
+      )
+      return report('failed')(mcp, spec)
+    })
+    const [item] = await t.approvedItem(
+      ['Schema', 'to-do'],
+      ['Sign', 'manual'],
+      ['Endpoint', 'to-do'],
+    )
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+
+    expect(refused).toEqual([true, true, true, true])
+    expect((await t.storage.children(item?.ref ?? '')).map((x) => x.status)).toEqual([
+      'to-do',
+      'manual',
+      'to-do',
+    ])
+  })
+
+  it('gives an executor set_task_status and no create_task (agent-contract.md)', async () => {
+    const t = setup()
+    let names: string[] = []
+    t.scripts.push(async (client, spec) => {
+      names = (await client.listTools()).tools.map((tool) => tool.name)
+      return report('failed')(client, spec)
+    })
+    await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+    expect(names).toEqual([
+      'get_item',
+      'list_tasks',
+      'add_comment',
+      'set_task_status',
+      'report_result',
+    ])
+  })
+
+  it('after a lease expiry the item stays in-progress, its tasks go back, and attempt 2 runs', async () => {
+    const first = setup()
+    first.scripts.push(async (mcp) => {
+      const tasks = JSON.parse(
+        text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+      ) as TaskNode[]
+      await move(mcp, tasks[0]?.ref ?? '', 'in-progress')
+      return hang(mcp, first.started[0] as RunSpec)
+    })
+    const [item, schema] = await first.approvedItem()
+    await first.engine([execute]).tick()
+    while ((await first.storage.get(schema?.ref ?? '')).status !== 'in-progress')
+      await new Promise((r) => setTimeout(r, 5))
+
+    const second = setup(first.runtimeDb, first.trackerDb, first.now)
+    second.scripts.push(hang)
+    second.now.t += 121_000
+    await second.engine([execute]).tick()
+
+    expect((await second.storage.get(item?.ref ?? '')).status).toBe('in-progress')
+    expect((await second.storage.get(schema?.ref ?? '')).status).toBe('to-do')
+    expect(
+      (await second.runtime.runsFor(item?.ref ?? '')).map((r) => [r.attempt, r.outcome]),
+    ).toEqual([
+      [2, undefined],
+      [1, 'abandoned'],
+    ])
+    expect((await second.storage.comments(item?.ref ?? ''))[0]?.body).toBe(
+      'Rule execute, attempt 1: the agent stopped answering. The next round tries again.',
+    )
+  })
+
+  it('gives up on a Run whose item was deleted, and keeps claiming the rest', async () => {
+    const first = setup()
+    first.scripts.push(hang)
+    const [item] = await first.approvedItem()
+    await first.engine([execute]).tick()
+    const other = await first.readyItem('other')
+    // There is no delete in StoragePort; a person deletes the issue in Jira.
+    first.trackerDb.exec('PRAGMA foreign_keys = OFF')
+    first.trackerDb
+      .prepare('DELETE FROM work_unit WHERE ref = ? OR parent = ?')
+      .run(item?.ref ?? '', item?.ref ?? '')
+
+    const second = setup(first.runtimeDb, first.trackerDb, first.now)
+    second.scripts.push(hang)
+    second.now.t += 121_000
+    await second.engine([split, execute]).tick()
+
+    expect(second.logs).toEqual([])
+    expect((await second.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('abandoned')
+    expect((await second.storage.get(other.ref)).status).toBe('splitting')
   })
 })
 

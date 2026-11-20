@@ -45,8 +45,8 @@
 | S3 | item 詳情與 comment，含編輯 title 與 body、markdown、附件（已完成，D61） | 點開 item 看內容、改內容、貼圖、留言 |
 | S4 | 規則命中，假 runner 跑 split（已完成，D63） | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
 | S5 | task 與 `split-review` 放行（已完成，D65） | 看到拆出的 task，人放行或打回 |
-| S6 | execute：task 狀態與 verdict 驗證 | item 一路走到 `in-review`、`done` |
-| S7 | hold、Stop、pause、blocked 自動接回、rework | 對應的按鈕與狀態變化 |
+| S6 | execute：task 狀態與 verdict 驗證（已完成，D69） | item 一路走到 `in-review`、`done` |
+| S7 | hold、Stop、pause、blocked 自動接回、rework；task 詳情（內文與 comment，含 D67 的原因）、人改 task status（接手、交回、manual 做完）、在 `split-review` 編輯與刪除 task（D69） | 對應的按鈕與狀態變化；點開 task 看內容與原因；不用重拆就能修 task |
 | S8 | 真的 claude runner（plugin）、MCP facade、run token | 在玩具 repo 上用真的 claude 跑一次 |
 | S9 | auth（`none`、`static`、`http`）、session cookie 與 CSRF、`/mcp` 的個人 API token、登入防暴力、`Host` 檢查（D60） | 登入畫面、ttl 過期、產生與撤銷 token、沒登入打 API 被拒 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
@@ -80,7 +80,6 @@
 
 | 切片 | 要先定 | 為什麼卡 |
 |---|---|---|
-| S6、S7 | 其餘的 verdict 驗證 | S5 做了 split 的 `succeeded` 與 `needs_input`（D65）。execute 的 `succeeded`（task 全部 done）、rework 的 `succeeded`（`produced.tasks`）、`blocked_manual` 跟著對應的規則做 |
 | S8 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。S4 先照草稿當預設值，邏輯用假 clock 測過；接上真的 claude 後，用實際的輸出間隔回頭調 |
 | S8 | 「待驗證」裡 headless CLI 那幾項：session resume、http MCP、取得 session id | 結果可能讓 runner 設計大改，例如只支援 stdio 時要加 shim |
 
@@ -96,7 +95,7 @@
 8. UI 的細節範圍（kanban 能不能直接改 status、能不能編輯 task）。
 9. license。
 10. webhook 驅動端。
-11. 不變量 3（`in-progress` 的 task 只有 item 有存活 Run 時才可信）目前只靠 agent 遵守，engine 端沒有對應程式碼，測試只留了 `it.todo`。要不要由 engine 在 Run 結束時把殘留的 `in-progress` task 改回 `to-do`，或維持由 agent 處理？
+11. （已定，D69）不變量 3：Run 結束（`cancelled` 除外）或被 `abandoned` 時，engine 把殘留的 `in-progress` task 送回 `to-do`，每張留一則原因。
 12. 人能不能把 `done` 的 task 重開。task 圖沒有 `done` 的出口，實作時照圖，所有人都不行。
 13. config 的 JSON Schema 怎麼產生。D28 的 `isolatedDeclarations` 要求每個 export 有明確型別，zod 這類 schema 物件很難滿足，所以傾向型別手寫。要補 `$schema` 給編輯器用時再決定（手寫、或從型別產生）。
 14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。team-managed 的 workflow 可以用 `POST /workflows/update` 改，S2 設定 KAN 時用過（D59）。Jira 看板的欄位也要一起檢查：`doctor` 用公開的 `GET /rest/agile/1.0/board/{id}/configuration` 比對，tasuki 用到的 status 沒有出現在任何一欄就警告（那些卡片在 Jira 看板上會看不到），欄位順序跟 state-machine.md 不同也提示。公開 API 不能改看板欄位，所以順序對不上時問使用者要不要「試著」自動排：用 Jira 網頁自己用的內部 API `PUT /rest/greenhopper/1.0/rapidviewconfig/columns`（2026-11-20 在 KAN 的 team-managed 看板上試過，回 500 但順序已經存進去），排完重讀一次確認；失敗或結果不對，就退回列出正確順序請使用者自己拖。內部 API 沒有文件、隨時會變，不能當成唯一的路。

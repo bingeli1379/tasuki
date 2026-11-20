@@ -90,7 +90,7 @@ stateDiagram-v2
     InProgress --> InReview: subagent finished
     InReview --> Done: review passed
     InReview --> InProgress: review failed
-    InProgress --> ToDo: stale, item has no live Run
+    InProgress --> ToDo: Run over (engine), or stale
     ToDo --> Manual: human takes over
     InProgress --> Manual: human takes over
     Manual --> Done: human finished
@@ -108,7 +108,7 @@ stateDiagram-v2
 
 1. 同一張 item 同時最多一個存活的 Run。
 2. item 的 status 只有三種來源能改：人、規則的 outcome、自動復原。agent 不能改。
-3. `in-progress` 的 task 只有在 item 有存活的 Run 時才可信。
+3. `in-progress` 的 task 只有在 item 有存活的 Run 時才可信。Run 結束（`cancelled` 除外）或被 `abandoned` 時，engine 把它們送回 `to-do`（D69）。
 4. `done` 的 task 不會被 engine 重開。
 5. 有 `hold` 的 item，Poller 跳過它，存活的 Run 被取消。
 6. `cancelled` 的 Run 不動任何 status。

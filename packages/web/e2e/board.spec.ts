@@ -182,11 +182,11 @@ test('open an item, edit it in markdown with an image, comment, and find it all 
   await expect(dialog.locator('.markdown em')).toHaveText('fine')
 })
 
-test('an item dragged to Ready to Split is split into tasks, reviewed, and approved', async ({
+test('an item dragged to Ready to Split is split, approved, executed, and accepted', async ({
   page,
   request,
 }) => {
-  test.setTimeout(120_000)
+  test.setTimeout(180_000)
   const title = `e2e split ${Date.now()}`
   await createThroughApi(request, title)
   await page.goto('/')
@@ -220,10 +220,27 @@ test('an item dragged to Ready to Split is split into tasks, reviewed, and appro
   await expect(dialog.getByRole('listitem', { name: 'Task Prepare' })).toContainText('To Do')
   await expect(dialog.getByRole('listitem', { name: 'Task Build' })).toContainText('after Prepare')
   await dialog.getByRole('button', { name: 'Approve' }).click()
-  await expect(dialog).toContainText('In Progress')
-  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
 
+  // Rule execute picks it up where it is and walks both tasks to done.
   const inProgress = page.getByRole('region', { name: /^In Progress/ })
-  await expect(inProgress.getByRole('article', { name: title })).toContainText('0/2 tasks')
-  await reloadUntilVisible(page, inProgress.getByRole('article', { name: title }))
+  await expect(inProgress.getByRole('article', { name: title }).getByText('Running')).toBeVisible({
+    timeout: 60_000,
+  })
+  const inReview = page.getByRole('region', { name: /^In Review/ })
+  await expect(inReview.getByRole('article', { name: title })).toContainText('2/2 tasks', {
+    timeout: 60_000,
+  })
+
+  await inReview.getByRole('button', { name: title, exact: true }).click()
+  await expect(dialog.getByRole('listitem', { name: 'Run execute attempt 1' })).toContainText(
+    'succeeded',
+  )
+  await expect(dialog.getByRole('listitem', { name: 'Task Build' })).toContainText('Done')
+  await dialog.getByRole('button', { name: 'Accept' }).click()
+  await expect(dialog).toBeHidden()
+  await reloadUntilVisible(
+    page,
+    page.getByRole('region', { name: /^Done/ }).getByRole('article', { name: title }),
+  )
 })

@@ -173,7 +173,8 @@ function insert(attachment: Attachment): void {
     .run()
 }
 
-// split-review is where a person checks the tasks before any of them runs.
+// split-review is where a person checks the tasks before any of them runs, in-review where
+// they accept the finished work.
 async function decide(to: string): Promise<void> {
   const current = detail.value
   if (!current) return
@@ -186,6 +187,7 @@ async function decide(to: string): Promise<void> {
     current.item = item
     error.value = ''
     emit('updated', item)
+    open.value = false
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.data.item) {
       current.item = e.data.item
@@ -351,6 +353,13 @@ const authorOf = (c: Comment): string =>
                   @click="decide('in-progress')"
                 />
               </span>
+              <UButton
+                v-else-if="detail.item.status === 'in-review'"
+                label="Accept"
+                size="sm"
+                :loading="moving"
+                @click="decide('done')"
+              />
             </div>
             <p v-if="detail.tasks.length === 0" class="text-sm text-muted">No tasks yet.</p>
             <ol class="flex flex-col gap-1">

@@ -4,7 +4,10 @@ import {
   createTask,
   listTasks,
   reportResult,
+  setTaskStatus,
+  TASK_STATUSES,
   VERDICTS,
+  type RuleMode,
   type Run,
   type RuntimeStorePort,
   type StoragePort,
@@ -15,6 +18,9 @@ export interface AgentMcpDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
   run: Run
+  // The mode of the rule that started the Run: splitters build the task graph, executors
+  // walk it (agent-contract.md, the tool table).
+  mode: RuleMode
 }
 
 const json = (value: unknown): { content: { type: 'text'; text: string }[] } => ({
@@ -24,7 +30,7 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 // The MCP facade for an agent the engine started. Bound to one Run by its token, so every
 // tool works on that Run's item and nothing else; there is no tool that moves the item
 // (agent-contract.md).
-export function createAgentMcpServer({ storage, runtime, run }: AgentMcpDeps): McpServer {
+export function createAgentMcpServer({ storage, runtime, run, mode }: AgentMcpDeps): McpServer {
   const server = new McpServer({ name: 'tasuki-agent', version: '0.0.0' })
   server.registerTool(
     'get_item',
@@ -46,35 +52,36 @@ export function createAgentMcpServer({ storage, runtime, run }: AgentMcpDeps): M
     },
     async () => json(await listTasks(storage, run.target)),
   )
-  server.registerTool(
-    'create_task',
-    {
-      description:
-        'Add a task to the item. A person reviews all tasks before any of them runs. ' +
-        'Returns the created task; use its ref in blockedBy of the tasks that wait for it.',
-      inputSchema: {
-        title: z.string().describe('One line; must not be blank'),
-        body: z.string().optional().describe('Markdown: what to do and how to tell it is done'),
-        initialStatus: z
-          .enum(['to-do', 'manual'])
-          .optional()
-          .describe('to-do (default) for work an agent does, manual for a step a person does'),
-        blockedBy: z
-          .array(z.string())
-          .optional()
-          .describe('Refs of tasks of this item that must be done first'),
+  if (mode !== 'execute')
+    server.registerTool(
+      'create_task',
+      {
+        description:
+          'Add a task to the item. A person reviews all tasks before any of them runs. ' +
+          'Returns the created task; use its ref in blockedBy of the tasks that wait for it.',
+        inputSchema: {
+          title: z.string().describe('One line; must not be blank'),
+          body: z.string().optional().describe('Markdown: what to do and how to tell it is done'),
+          initialStatus: z
+            .enum(['to-do', 'manual'])
+            .optional()
+            .describe('to-do (default) for work an agent does, manual for a step a person does'),
+          blockedBy: z
+            .array(z.string())
+            .optional()
+            .describe('Refs of tasks of this item that must be done first'),
+        },
       },
-    },
-    async ({ title, body, initialStatus, blockedBy }) =>
-      json(
-        await createTask({ storage, runtime }, run, {
-          title,
-          body: body ?? '',
-          status: initialStatus ?? 'to-do',
-          blockedBy: blockedBy ?? [],
-        }),
-      ),
-  )
+      async ({ title, body, initialStatus, blockedBy }) =>
+        json(
+          await createTask({ storage, runtime }, run, {
+            title,
+            body: body ?? '',
+            status: initialStatus ?? 'to-do',
+            blockedBy: blockedBy ?? [],
+          }),
+        ),
+    )
   server.registerTool(
     'add_comment',
     {
@@ -96,6 +103,27 @@ export function createAgentMcpServer({ storage, runtime, run }: AgentMcpDeps): M
         }),
       ),
   )
+  if (mode === 'execute')
+    server.registerTool(
+      'set_task_status',
+      {
+        description:
+          "Move one of the item's tasks: to-do to in-progress once every task it waits for is " +
+          'done, in-progress to in-review when the work is finished, in-review to done when the ' +
+          'review passed or back to in-progress when it did not, and to manual when a person ' +
+          'has to do or decide it. A manual or done task cannot be moved.',
+        inputSchema: {
+          task: z.string().describe("The task's ref"),
+          status: z.enum(TASK_STATUSES as [string, ...string[]]),
+          reason: z
+            .string()
+            .describe(
+              'One sentence for the people reading the task: why it moves; for manual, what a person has to decide. Must not be blank',
+            ),
+        },
+      },
+      async (input) => json(await setTaskStatus(storage, run, input)),
+    )
   server.registerTool(
     'report_result',
     {
