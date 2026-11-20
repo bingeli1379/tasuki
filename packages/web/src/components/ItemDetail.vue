@@ -22,6 +22,7 @@ import {
   toStoredMarkdown,
 } from '../editor'
 import { renderMarkdown } from '../markdown'
+import TaskDetail from './TaskDetail.vue'
 
 const props = defineProps<{ itemRef: string; statusName: (status: string) => string }>()
 const emit = defineEmits<{ updated: [item: Item] }>()
@@ -37,6 +38,13 @@ const commentDraft = ref('')
 const commenting = ref(false)
 const uploading = ref(false)
 const moving = ref(false)
+const openTask = ref<string>()
+const taskOpen = computed({
+  get: () => openTask.value !== undefined,
+  set: (value) => {
+    if (!value) openTask.value = undefined
+  },
+})
 const toast = useToast()
 const bodyEditor = useTemplateRef('bodyEditor')
 
@@ -59,19 +67,24 @@ const comments = computed(() =>
   })),
 )
 
+async function load(): Promise<void> {
+  try {
+    detail.value = await call<ItemDetail>(`/api/items/${encodeURIComponent(props.itemRef)}`)
+    error.value = ''
+  } catch (e) {
+    error.value = messageOf(e)
+  }
+}
+
 // Every opening reads afresh: someone may have edited or commented in the tracker meanwhile.
 watch(
   () => [open.value, props.itemRef] as const,
-  async ([isOpen, itemRef]) => {
+  async ([isOpen]) => {
     if (!isOpen) return
     detail.value = undefined
     editing.value = false
     error.value = ''
-    try {
-      detail.value = await call<ItemDetail>(`/api/items/${encodeURIComponent(itemRef)}`)
-    } catch (e) {
-      error.value = messageOf(e)
-    }
+    await load()
   },
   { immediate: true },
 )
@@ -369,10 +382,14 @@ const authorOf = (c: Comment): string =>
                 :aria-label="`Task ${t.title}`"
                 class="flex items-center justify-between gap-2 text-sm"
               >
-                <span class="flex min-w-0 flex-col">
-                  <span class="truncate">
+                <span class="flex min-w-0 flex-col items-start">
+                  <button
+                    type="button"
+                    class="max-w-full truncate text-left hover:underline"
+                    @click="openTask = t.ref"
+                  >
                     <span class="text-muted">{{ t.ref }}</span> {{ t.title }}
-                  </span>
+                  </button>
                   <span v-if="t.blockedBy.length > 0" class="text-xs text-muted">
                     after {{ t.blockedBy.map(taskTitle).join(', ') }}
                   </span>
@@ -389,6 +406,15 @@ const authorOf = (c: Comment): string =>
               </li>
             </ol>
           </section>
+
+          <TaskDetail
+            v-if="openTask"
+            v-model:open="taskOpen"
+            :task-ref="openTask"
+            :item-status="detail.item.status"
+            :task-title="taskTitle"
+            @changed="load"
+          />
 
           <section aria-labelledby="runs-heading" class="flex flex-col gap-2">
             <h3 id="runs-heading" class="text-sm font-medium">Runs</h3>

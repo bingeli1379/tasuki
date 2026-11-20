@@ -42,6 +42,12 @@ export interface Task {
   blockedBy: string[]
 }
 
+export interface TaskDetail {
+  task: Task & { parent: string; body: string; version: string }
+  // Oldest first; the engine's say why it or an agent moved the task.
+  comments: Comment[]
+}
+
 export interface ItemDetail {
   item: Item
   comments: Comment[]
