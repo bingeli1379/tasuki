@@ -378,6 +378,12 @@ export function createJiraTracker(
       return toWorkUnit(await getIssue(ref))
     },
 
+    // Jira takes the issue's links, comments and attachments with it.
+    async deleteTask(ref) {
+      if (kindOf(await getUnit(ref)) !== 'task') throw new NotFound(`${ref} is not a task`)
+      await jira('DELETE', `/issue/${ref}`)
+    },
+
     async comments(target) {
       await getUnit(target)
       const fetchAll = async (expand: string): Promise<JiraComment[]> => {
