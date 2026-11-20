@@ -19,6 +19,7 @@
     "vue": "3.5.45"
   },
   "devDependencies": {
+    "@iconify-json/lucide": "1.2.154",
     "@playwright/test": "1.65.1",
     "@types/markdown-it": "14.2.0",
     "@vitejs/plugin-vue": "6.0.11",

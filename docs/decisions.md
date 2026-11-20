@@ -506,3 +506,10 @@
 - 現在的狀態：S10 之前沒有任何偵測。同時開 `pnpm dev` 跟 Jira E2E 就會撞到，跑 Jira E2E 前要先關掉 dev。
 - 重新檢視：engine 自己掛掉的停機時間變得不能接受時（目前靠 lease 復原，重開就接回去）；有人需要多個 engine 分工時。
 
+## D68 看板每欄標出輪到 engine 還是人
+- 決定：
+  - `listBoard` 每欄多一個 `turn`：規則 watch 的欄是 `engine`，`AWAITING_PERSON`（`needs-answers`、`split-review`、`in-review`、`blocked`）是 `person`，其他不標。engine 那組從 config 的 rules 算，不寫死。看板與使用者 MCP 的 `list_board` 拿到同一份（D57）。
+  - 看板在欄名前放 lucide 的 `radar`（engine，`info` 色）與 `eye`（人，等人 review 的意思，`warning` 色），hover 顯示說明，讀屏讀得到同一句。欄位的 accessible name 只指欄名，不含圖示說明。
+  - 圖示打包進 bundle：`web` 裝 `@iconify-json/lucide`，Vite 的 `ui()` 用 `icon.clientBundle.icons` 點名要用的圖示，少一個 build 就失敗。裝了圖示集之後 Nuxt UI 自己元件的圖示也一起打包。D61 工具列用文字按鈕的理由（沒有圖示集會去打 Iconify API）因此不成立了，工具列先維持文字，要換時不用再顧慮這點。
+- 理由：十欄外觀一樣，作者要讀欄名才知道哪幾欄在等自己、哪幾欄 engine 會自己處理。`refining` 是人在寫需求，不是在等確認，作者決定不標。
+- 重新檢視：狀態機加了新的 status 時（決定它屬於哪一組）；規則能設成「等人」的 status 時。

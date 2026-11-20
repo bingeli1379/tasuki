@@ -34,6 +34,7 @@ const appWith = (db = openDatabase(':memory:')): ReturnType<typeof createApp> =>
     storage: memoryStorage(),
     runtime: memoryRuntime(),
     statuses,
+    rules: [],
     tokens: createRunTokens(),
   })
 

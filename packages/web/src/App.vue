@@ -8,8 +8,18 @@ import { previewText } from './markdown'
 interface Column {
   status: string
   displayName: string
+  turn?: 'engine' | 'person'
   items: Item[]
 }
+
+const TURN = {
+  engine: {
+    icon: 'i-lucide-radar',
+    color: 'text-info',
+    hint: 'An agent picks items up from here on its own',
+  },
+  person: { icon: 'i-lucide-eye', color: 'text-warning', hint: 'Waiting for a person' },
+} as const
 
 const columns = ref<Column[]>([])
 // Refs an agent is working on right now.
@@ -235,11 +245,19 @@ onMounted(load)
             @dragover.prevent
             @drop.prevent="drop(column.status)"
           >
-            <h2
-              :id="`column-${column.status}`"
-              class="flex items-center justify-between px-1 text-sm font-medium"
-            >
-              {{ column.displayName }}
+            <h2 class="flex items-center justify-between px-1 text-sm font-medium">
+              <span class="flex items-center gap-1.5">
+                <UTooltip v-if="column.turn" :text="TURN[column.turn].hint">
+                  <span role="img" :aria-label="TURN[column.turn].hint" class="flex">
+                    <UIcon
+                      :name="TURN[column.turn].icon"
+                      class="size-4"
+                      :class="TURN[column.turn].color"
+                    />
+                  </span>
+                </UTooltip>
+                <span :id="`column-${column.status}`">{{ column.displayName }}</span>
+              </span>
               <UBadge :label="column.items.length" color="neutral" variant="subtle" size="sm" />
             </h2>
             <article

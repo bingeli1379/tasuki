@@ -12,6 +12,7 @@ import {
   NotFound,
   StatusConflict,
   updateItem,
+  type Rule,
   type RuntimeStorePort,
   type StatusMap,
   type StoragePort,
@@ -38,10 +39,11 @@ export interface AppDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
   statuses: StatusMap
+  rules: readonly Rule[]
   tokens: RunTokens
 }
 
-export function createApp({ db, storage, runtime, statuses, tokens }: AppDeps): Hono {
+export function createApp({ db, storage, runtime, statuses, rules, tokens }: AppDeps): Hono {
   const app = new Hono()
   app.onError((e, c) => {
     if (e instanceof InvalidInput) return c.json({ error: e.message }, 400)
@@ -54,10 +56,12 @@ export function createApp({ db, storage, runtime, statuses, tokens }: AppDeps): 
   app.get('/api/health', (c) => c.json({ ok: true, schemaVersion: schemaVersion(db) }))
   app.get('/api/board', async (c) =>
     c.json(
-      await listBoard(storage, runtime, {
-        item: statuses.mapped('item'),
-        task: statuses.mapped('task'),
-      }),
+      await listBoard(
+        storage,
+        runtime,
+        { item: statuses.mapped('item'), task: statuses.mapped('task') },
+        rules,
+      ),
     ),
   )
   app.post('/api/items', async (c) => {
@@ -138,7 +142,7 @@ export function createApp({ db, storage, runtime, statuses, tokens }: AppDeps): 
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ storage, runtime, statuses }).connect(transport)
+    await createMcpServer({ storage, runtime, statuses, rules }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   // The facade for agents the engine started: only a live Run's token gets in.

@@ -6,6 +6,7 @@ import {
   listBoard,
   moveItem,
   updateItem,
+  type Rule,
   type RuntimeStorePort,
   type StatusMap,
   type StoragePort,
@@ -17,6 +18,7 @@ export interface McpDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
   statuses: StatusMap
+  rules: readonly Rule[]
 }
 
 const json = (value: unknown): { content: { type: 'text'; text: string }[] } => ({
@@ -25,23 +27,27 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 
 // The user's own AI client (Claude Code, Codex) acting as the user: the same use cases as
 // the board, so whatever a person can do on the board this can do too (D57).
-export function createMcpServer({ storage, runtime, statuses }: McpDeps): McpServer {
+export function createMcpServer({ storage, runtime, statuses, rules }: McpDeps): McpServer {
   const server = new McpServer({ name: 'tasuki', version: '0.0.0' })
   server.registerTool(
     'list_board',
     {
       description:
-        'List the board: one column per item status in board order, each with its items, ' +
+        'List the board: one column per item status in board order, each with its items ' +
+        'and `turn`: engine when a rule picks items up from it, person when items wait for a ' +
+        'person there, absent otherwise; ' +
         'and `running`, the refs an agent is working on right now, and `tasks`, per item ref ' +
         'that has tasks, how many are done out of how many. ' +
         'Items created a few seconds ago may not be listed yet when the tracker is Jira.',
     },
     async () =>
       json(
-        await listBoard(storage, runtime, {
-          item: statuses.mapped('item'),
-          task: statuses.mapped('task'),
-        }),
+        await listBoard(
+          storage,
+          runtime,
+          { item: statuses.mapped('item'), task: statuses.mapped('task') },
+          rules,
+        ),
       ),
   )
   server.registerTool(

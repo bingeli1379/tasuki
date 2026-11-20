@@ -281,6 +281,9 @@ importers:
         specifier: 3.5.45
         version: 3.5.45(typescript@6.0.3)
     devDependencies:
+      '@iconify-json/lucide':
+        specifier: 1.2.154
+        version: 1.2.154
       '@playwright/test':
         specifier: 1.65.1
         version: 1.65.1
@@ -513,6 +516,9 @@ packages:
     engines: {node: '>=20'}
     peerDependencies:
       hono: ^4 || ^5.0.0-0
+
+  '@iconify-json/lucide@1.2.154':
+    resolution: {integrity: sha512-8+fuquLzqefUqEsnQSn77laDESOd9AX5ZM9zQzL5HT9DN58DtzwMIkLXxDjX77GAQ8PF4HTMuxhShQCOynwADg==}
 
   '@iconify/collections@1.0.765':
     resolution: {integrity: sha512-tNn4orTF0GFTjtXbWXeX5K6lW3Fc0zmrVlyxdDw5ZUJ7R5IVOoX4H0V2ES8TtewEaQXwWGvMnCG469mLMMsaaQ==}
@@ -3410,6 +3416,10 @@ snapshots:
   '@hono/node-server@2.1.8(hono@4.13.18)':
     dependencies:
       hono: 4.13.18
+
+  '@iconify-json/lucide@1.2.154':
+    dependencies:
+      '@iconify/types': 2.0.0
 
   '@iconify/collections@1.0.765':
     dependencies:

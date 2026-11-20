@@ -87,7 +87,7 @@ function setup(
   const storage = createSqliteTracker({ clock, dataDir: '', statuses }, trackerDb, 'T')
   const runtime = createRuntimeStore(runtimeDb, clock, '/logs')
   const tokens = createRunTokens()
-  const app = createApp({ db: runtimeDb, storage, runtime, statuses, tokens })
+  const app = createApp({ db: runtimeDb, storage, runtime, statuses, rules: [split], tokens })
   const scripts: Script[] = []
   const started: RunSpec[] = []
   const runner: RunnerPort = {

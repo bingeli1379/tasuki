@@ -1,4 +1,5 @@
-import { ITEM_STATUS_DISPLAY, ITEM_STATUSES } from '../../domain/status'
+import type { Rule } from '../../domain/rule'
+import { AWAITING_PERSON, ITEM_STATUS_DISPLAY, ITEM_STATUSES } from '../../domain/status'
 import type { Ref, WorkUnit } from '../../domain/work-unit'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
@@ -6,6 +7,8 @@ import type { StoragePort } from '../ports/storage'
 export interface BoardColumn {
   status: string
   displayName: string
+  // Whose move it is: engine when a rule watches the column, person when it waits for one.
+  turn?: 'engine' | 'person'
   items: WorkUnit[]
 }
 
@@ -23,6 +26,7 @@ export async function listBoard(
   storage: StoragePort,
   runtime: RuntimeStorePort,
   mapped: { item: readonly string[]; task: readonly string[] },
+  rules: readonly Rule[],
 ): Promise<Board> {
   const statuses = ITEM_STATUSES.filter((s) => mapped.item.includes(s))
   const [items, tasks, live] = await Promise.all([
@@ -30,9 +34,15 @@ export async function listBoard(
     storage.list('task', mapped.task),
     runtime.liveRuns(),
   ])
+  const watched = new Set(rules.map((r) => r.watch))
   const columns = statuses.map((status) => ({
     status,
     displayName: ITEM_STATUS_DISPLAY[status] ?? status,
+    ...(watched.has(status)
+      ? { turn: 'engine' as const }
+      : AWAITING_PERSON.includes(status)
+        ? { turn: 'person' as const }
+        : {}),
     items: items.filter((i) => i.status === status),
   }))
   const counts: Board['tasks'] = {}

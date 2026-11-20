@@ -25,6 +25,15 @@ export const ITEM_STATUS_DISPLAY: Readonly<Record<string, string>> = {
   done: 'Done',
 }
 
+// Item statuses that wait for a person: no rule moves an item out of them. blocked counts
+// too, since auto-resume only follows once a person has done the manual tasks.
+export const AWAITING_PERSON: readonly string[] = [
+  'needs-answers',
+  'split-review',
+  'in-review',
+  'blocked',
+]
+
 // Task order, as the task state machine reads (state-machine.md).
 export const TASK_STATUSES: readonly string[] = [
   'to-do',
