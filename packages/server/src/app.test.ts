@@ -1,50 +1,29 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import {
-  createStatusMap,
-  NotFound,
-  StatusConflict,
-  type NewItem,
-  type StoragePort,
-  type WorkUnit,
-} from '@tasuki/core'
+import { createStatusMap, type WorkUnit } from '@tasuki/core'
+import { createSqliteTracker, migrate as migrateTracker, TRACKER_MIGRATIONS } from '@tasuki/sqlite'
 import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
 import { openDatabase } from './runtime-store/database'
 import { migrate } from './runtime-store/migrate'
 
-const memoryStorage = (): StoragePort => {
-  const units: WorkUnit[] = []
-  const find = (ref: string): WorkUnit => {
-    const unit = units.find((u) => u.ref === ref)
-    if (unit === undefined) throw new NotFound(`${ref} does not exist`)
-    return unit
-  }
-  return {
-    list: (kind, status) =>
-      Promise.resolve(units.filter((u) => u.kind === kind && u.status === status)),
-    get: async (ref) => ({ ...find(ref) }),
-    transition: async (ref, from, to) => {
-      const unit = find(ref)
-      if (unit.status !== from) throw new StatusConflict(from, { ...unit })
-      unit.status = to
-      return { ...unit }
-    },
-    createItem: (item: NewItem) => {
-      const unit: WorkUnit = { ref: `M-${units.length + 1}`, kind: 'item', labels: [], ...item }
-      units.push(unit)
-      return Promise.resolve(unit)
-    },
-  }
+const statuses = createStatusMap({
+  item: { refining: 'Refining', 'ready-to-split': 'Ready to Split', done: 'Done' },
+})
+
+// The real sqlite tracker in memory: the server is tested against a tracker that keeps
+// the StoragePort contract, not a hand-written fake that drifts from it.
+const memoryStorage = (): ReturnType<typeof createSqliteTracker> => {
+  const db = openDatabase(':memory:')
+  migrateTracker(db, TRACKER_MIGRATIONS)
+  return createSqliteTracker({ clock: { now: () => new Date() }, dataDir: '', statuses }, db, 'M')
 }
 
 const appWith = (db = openDatabase(':memory:')): ReturnType<typeof createApp> =>
   createApp({
     db,
     storage: memoryStorage(),
-    statuses: createStatusMap({
-      item: { refining: 'Refining', 'ready-to-split': 'Ready to Split', done: 'Done' },
-    }),
+    statuses,
   })
 
 describe('GET /api/health', () => {
@@ -151,6 +130,104 @@ describe('moving an item', () => {
   })
 })
 
+describe('item detail', () => {
+  const PNG = Uint8Array.from(
+    atob(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+    ),
+    (c) => c.charCodeAt(0),
+  )
+  const json = (body: unknown): RequestInit => ({ body: JSON.stringify(body) })
+  const created = async (app: ReturnType<typeof createApp>): Promise<WorkUnit> =>
+    (await (
+      await app.request('/api/items', { method: 'POST', ...json({ title: 'Login', body: '' }) })
+    ).json()) as WorkUnit
+  const upload = (
+    app: ReturnType<typeof createApp>,
+    ref: string,
+    file: File,
+  ): Promise<Response> | Response => {
+    const form = new FormData()
+    form.append('file', file)
+    return app.request(`/api/items/${ref}/attachments`, { method: 'POST', body: form })
+  }
+
+  it('edits the item, comments on it, and reads it all back', async () => {
+    const app = appWith()
+    const item = await created(app)
+
+    const edited = await app.request(`/api/items/${item.ref}`, {
+      method: 'PATCH',
+      ...json({ expectedVersion: item.version, body: '**bold**' }),
+    })
+    expect(edited.status).toBe(200)
+    const comment = await app.request(`/api/items/${item.ref}/comments`, {
+      method: 'POST',
+      ...json({ body: 'ok' }),
+    })
+    expect(comment.status).toBe(201)
+
+    const detail = (await (await app.request(`/api/items/${item.ref}`)).json()) as {
+      item: WorkUnit
+      comments: { author: string; kind: string; body: string }[]
+    }
+    expect(detail.item).toMatchObject({ title: 'Login', body: '**bold**' })
+    expect(detail.comments).toMatchObject([{ author: 'human', kind: 'note', body: 'ok' }])
+  })
+
+  it('an edit from a replaced version is a 409 with the item as it is now', async () => {
+    const app = appWith()
+    const item = await created(app)
+    const patch = (body: string): Promise<Response> | Response =>
+      app.request(`/api/items/${item.ref}`, {
+        method: 'PATCH',
+        ...json({ expectedVersion: item.version, body }),
+      })
+    await patch('theirs')
+    const res = await patch('mine')
+    expect(res.status).toBe(409)
+    expect(await res.json()).toMatchObject({ item: { body: 'theirs' } })
+  })
+
+  it('serves an uploaded image inline, with headers that keep it from running anything', async () => {
+    const app = appWith()
+    const item = await created(app)
+    const res = await upload(app, item.ref, new File([PNG], 'dot.png', { type: 'image/png' }))
+    expect(res.status).toBe(201)
+    const { id } = (await res.json()) as { id: string }
+
+    const file = await app.request(`/api/items/${item.ref}/attachments/${id}`)
+    expect(file.status).toBe(200)
+    expect(file.headers.get('content-type')).toBe('image/png')
+    expect(file.headers.get('content-disposition')).toBe("inline; filename*=UTF-8''dot.png")
+    expect(file.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(file.headers.get('content-security-policy')).toBe("default-src 'none'; sandbox")
+    expect(new Uint8Array(await file.arrayBuffer())).toEqual(PNG)
+  })
+
+  it('an SVG or HTML upload is only ever downloaded, never shown', async () => {
+    const app = appWith()
+    const item = await created(app)
+    for (const [name, type] of [
+      ['x.svg', 'image/svg+xml'],
+      ['x.html', 'text/html'],
+    ] as const) {
+      const res = await upload(app, item.ref, new File(['<script>1</script>'], name, { type }))
+      const { id } = (await res.json()) as { id: string }
+      const file = await app.request(`/api/items/${item.ref}/attachments/${id}`)
+      expect(file.headers.get('content-type')).toBe('application/octet-stream')
+      expect(file.headers.get('content-disposition')).toMatch(/^attachment;/)
+    }
+  })
+
+  it('a file over 10 MB is a 413', async () => {
+    const app = appWith()
+    const item = await created(app)
+    const big = new File([new Uint8Array(10 * 1024 * 1024 + 70 * 1024)], 'big.bin')
+    expect((await upload(app, item.ref, big)).status).toBe(413)
+  })
+})
+
 describe("MCP for the user's AI client", () => {
   const connect = async (): Promise<Client> => {
     const app = appWith()
@@ -167,7 +244,16 @@ describe("MCP for the user's AI client", () => {
 
   it('lists the tools', async () => {
     const { tools } = await (await connect()).listTools()
-    expect(tools.map((t) => t.name)).toEqual(['list_board', 'create_item', 'move_item'])
+    expect(tools.map((t) => t.name)).toEqual([
+      'list_board',
+      'create_item',
+      'move_item',
+      'get_item',
+      'update_item',
+      'add_comment',
+      'add_attachment',
+      'get_attachment',
+    ])
   })
 
   it('an item created through MCP is on the board', async () => {
@@ -217,5 +303,44 @@ describe("MCP for the user's AI client", () => {
     })
     expect(stale.isError).toBe(true)
     expect(text(stale)).toContain(`${item.ref} is in ready-to-split, not refining`)
+  })
+
+  it('reads, edits and comments on an item, and hands an image back as an image', async () => {
+    const client = await connect()
+    const item = JSON.parse(
+      text(await client.callTool({ name: 'create_item', arguments: { title: 'From Claude' } })),
+    ) as WorkUnit
+    await client.callTool({
+      name: 'update_item',
+      arguments: { ref: item.ref, version: item.version, body: 'new body' },
+    })
+    await client.callTool({ name: 'add_comment', arguments: { ref: item.ref, body: 'hi' } })
+    const attachment = JSON.parse(
+      text(
+        await client.callTool({
+          name: 'add_attachment',
+          arguments: {
+            ref: item.ref,
+            filename: 'dot.png',
+            mimeType: 'image/png',
+            base64:
+              'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+          },
+        }),
+      ),
+    ) as { id: string }
+
+    const detail = JSON.parse(
+      text(await client.callTool({ name: 'get_item', arguments: { ref: item.ref } })),
+    ) as { item: WorkUnit; comments: { body: string }[]; attachments: { filename: string }[] }
+    expect(detail.item.body).toBe('new body')
+    expect(detail.comments.map((c) => c.body)).toEqual(['hi'])
+    expect(detail.attachments.map((a) => a.filename)).toEqual(['dot.png'])
+
+    const image = await client.callTool({
+      name: 'get_attachment',
+      arguments: { ref: item.ref, id: attachment.id },
+    })
+    expect(image.content).toMatchObject([{ type: 'image', mimeType: 'image/png' }])
   })
 })
