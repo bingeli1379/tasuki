@@ -194,8 +194,11 @@ export function createJiraTracker(
   }
 
   return {
-    async list(kind, status) {
-      const jql = `project = "${options.project}" AND issuetype = ${options.issueTypes.item} AND status = ${ctx.statuses.toTracker(kind, status)} ORDER BY created ASC`
+    async list(kind, statuses) {
+      // `status in ()` is not valid JQL.
+      if (statuses.length === 0) return []
+      const keys = statuses.map((s) => ctx.statuses.toTracker(kind, s))
+      const jql = `project = "${options.project}" AND issuetype = ${options.issueTypes.item} AND status in (${keys.join(', ')}) ORDER BY created ASC`
       const issues: Issue[] = []
       let nextPageToken: string | undefined
       do {
