@@ -440,5 +440,8 @@
   - `.github/dependabot.yml`：npm（含 pnpm workspace）與 github-actions，每月 1 號、15 號早上 9 點（台北）各開一個合併的升版 PR，cooldown 7 天，跟 pnpm 一致，CI 才裝得下它提的版本。資安修補不受 cooldown 影響，有公告就開，前提是 repo 設定開了「Dependabot security updates」。
 - 理由：作者要部署到公司，在意供應鏈。lockfile 加 CI 的 `--frozen-lockfile` 已經保證裝的是鎖定的版本，`^` 真正的風險在 `pnpm add`、`pnpm update` 時悄悄把範圍內的新版帶進來；定版讓每次升版都是一個要人看過的 diff。7 天是因為被劫持的版本多半幾天內就被發現下架。Action 的大版本標籤可以被作者移走（2025 年 tj-actions 事件），SHA 不行。每兩週是作者選的；Dependabot 沒有隔週的選項，用 1 號與 15 號近似。
 - 過渡：拉長冷卻期時，lockfile 裡有 44 個版本（TipTap 3.34.0 一批、Playwright 1.65.1 等）發布還不滿 7 天，pnpm 拒絕安裝。它們是已經在用、測過的版本，用 `minimumReleaseAgeExclude` 只放行那些確切版本，2026-11-21 之後全部滿 7 天，整段刪掉。
-- 待驗證：Dependabot 對 pnpm 12 的 lockfile 與 workspace 支不支援，文件沒寫，第一次跑才知道；不支援就改用 Renovate。
+- 資安修補不受 Dependabot 的 cooldown 影響，但 pnpm 的 `minimumReleaseAge` 還在：修補版發布不滿 7 天，CI 會裝不起來。這時在 `minimumReleaseAgeExclude` 只放行那一個確切版本，滿 7 天後刪掉。
+- Dependabot 不提 `typescript` 與 `@types/node` 的大版本：web 要等 vue-tsc 支援 TS 7（D58）；`@types/node` 跟著 engine 跑的 Node 大版本，換 Node 時手動一起升。第一次跑時它提了這兩個，CI 在 `pnpm check` 擋下（vue-tsc 碰到 TS 7 的 `ERR_PACKAGE_PATH_NOT_EXPORTED`）。
+- 已驗證（2026-11-20）：Dependabot 讀得懂 pnpm 12 的 lockfile 與 workspace，github-actions 的檢查也正常。repo 的資安更新原本就是開的。
+- 不修的警示：`esbuild` 0.27.x 的開發伺服器在 Windows 上能讀任意檔案（low），修在 0.28.1，但 esbuild 被 vite-plus 綁在 0.27.x。我們不用 esbuild 的開發伺服器、也不在 Windows 上跑，等 vite-plus 升版。
 - 重新檢視：Dependabot 的 PR 太吵或太少時調頻率；要發布 npm 套件（S11、S12）時，看被別人安裝的套件是否改回範圍。
