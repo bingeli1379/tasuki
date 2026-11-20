@@ -537,3 +537,15 @@
   - 人改 task status（接手、交回、manual 做完）放 S7，跟 blocked 自動接回一起做。
 - 理由：沒有 Run 的 item 底下掛著 In Progress 的 task，人要多想一下才知道它是假的。engine 送回去的代價是 Run 結束時多讀一次 task、多幾個 transition，換到的是看板不說謊，而且不變量 3 變成測得到的行為。之前把它留給 agent，是因為 M1 的 orchestrator 才知道 subagent 在做什麼。但 Run 一結束，這件事就沒有人知道了，engine 送回去不會跟 agent 衝突。
 - 重新檢視：M2 由 engine 自己派 task 時（送回改成 engine 派發的一部分）；人在詳情看不到 task 上的 comment（sqlite 模式下 D67 的原因只在 DB 裡），做 task 詳情時一起補。
+
+## D70 S7a：task 詳情、人改 task status、在 `split-review` 修 task
+- 決定：
+  - S7 太大，拆成 S7a 到 S7d，每段都能在瀏覽器操作（D41）。S7a 先做，因為 S7b 的自動接回要等人把 manual task 標成 `done`。
+  - task 詳情：item 詳情的 task 清單點下去開第二層 modal，顯示內文、origin、等哪幾張、comment（engine 與 agent 留的原因就在這裡，D67）與留言框。新的 use case `getTask`，REST 是 `/api/tasks/:ref`，使用者 MCP 加 `get_task`；`add_comment` 原本就能留在 task 上，描述改成 item 或 task（D57）。
+  - 人改 task status 只走 task 圖上人的四條邊：接手（`to-do`、`in-progress` 到 `manual`）、交回（`manual` 到 `to-do`）、做完（`manual` 到 `done`）。domain 的 `personMoveRefusal` 擋其他的，`done` 不能重開（待釐清 12）。use case `moveTask`，跟 item 一樣用 compare-and-set，撞上 `StatusConflict` 回 409。人移動不留原因（D67）。Run 還在跑時接手也可以，只是 soft stop（M1）。
+  - 修 task：item 在 `split-review` 時才能改 title、body 或刪除，其他時候 `InvalidInput`。拆之前 splitter 還在建，放行之後 agent 可能正照著做。改內容沿用 `StoragePort.updateItem`（兩邊本來就吃 task）。blockedBy 不開放改，要兩邊都補拆 link 的寫入，這次換不到什麼；要改依賴就打回重拆。
+  - `StoragePort.deleteTask`：連它兩個方向的 dependency、comment、附件一起刪，等它的 task 從此不等。sqlite 包在一個 transaction 裡；Jira 用 `DELETE /issue/{key}`，link、comment、附件由 Jira 一起刪。刪除不帶 version，畫面上要先按一次再確認。
+  - sqlite 的 ref 原本是 `MAX(rowid) + 1`，刪掉最後一張之後下一張會拿到同一個 ref，舊 comment、log 裡的 ref 就指錯東西。改成 `ref_counter` 表發號，migration 從現有的 `MAX(rowid)` 起算，已經發出去的 ref 不變。契約測試多一條：刪掉之後新建的 task 不會撞到舊 ref。
+- 理由：splitter 拆得差不多但有一兩張不對時，原本只能打回重拆，等一輪 agent。人在 `split-review` 直接修，前台省一次重跑，後台只多一個 port 方法和一個狀態檢查。
+- 沒選的做法：任何時候都能改 task，`in-progress` 時會跟 orchestrator 讀到的內容打架；sqlite 軟刪除，每個查詢都要多一個條件。
+- 重新檢視：要在 `split-review` 調整依賴時（補 blockedBy 的寫入）；agent facade 的 `update_task`（agent-contract.md）做的時候，跟這裡共用驗證。

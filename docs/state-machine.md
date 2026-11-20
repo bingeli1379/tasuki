@@ -98,7 +98,9 @@ stateDiagram-v2
     Done --> [*]
 ```
 
-- `done` 是終點，engine 不重開。rework 一律開新 task。
+- `done` 是終點，engine 不重開，人也不行。rework 一律開新 task。
+- 人走的邊只有四條：`to-do`、`in-progress` 接手成 `manual`，`manual` 交回 `to-do` 或做完成 `done`。不在這四條上的移動拒絕（domain 的 `personMoveRefusal`）。
+- 人只能在 item 是 `split-review` 時改 task 的 title、body，或刪掉 task（D70）。
 - 目前 orchestrator 一個 item 起一個 process（M1），engine 看不到裡面的 subagent。把執行中的 task 改成 `manual` 只是 soft stop，之後不再派它。要立刻停掉那張 task，只能 hard stop 整個 orchestrator。
 - task 層的「review 沒過重做幾次」engine 管不到，由 orchestrator 的 prompt 約束。item 層用 Run 的重試次數與用量設上限。
 

@@ -110,7 +110,8 @@ type Outcome =
 | Attachment | `attachment` 表，內容是 BLOB | issue 的附件 |
 | body 裡的圖 | `![x](attachment:<id>)` 原樣存 | ADF 的 media 節點，用附件的 media id（D61） |
 | version | 欄位，每次改 title、body、status 加一 | title、description、status 的 hash |
-| ref | `<refPrefix>-<n>`，前綴在 plugin 的 `options.refPrefix`，預設 `TSK`；n 是流水號（D52） | issue key |
+| ref | `<refPrefix>-<n>`，前綴在 plugin 的 `options.refPrefix`，預設 `TSK`；n 是 `ref_counter` 發的流水號，刪掉的 task 的號碼不會再發（D52、D70） | issue key |
+| 刪 task | 同一個 transaction 刪掉它的 dependency（兩個方向）、comment、附件與它自己 | `DELETE /issue/{key}`，Jira 連 link、comment、附件一起刪 |
 | status 存什麼 | config 對照的 tracker key（預設是顯示名） | status id（D50） |
 
 item 與 task 各有自己的 workflow，所以 Jira 的 status mapping 要兩份。
@@ -166,6 +167,9 @@ CREATE TABLE attachment (
   created_at TEXT NOT NULL
 );
 CREATE INDEX attachment_by_target ON attachment(target, id);
+
+-- S7: the last number handed out. MAX(rowid) + 1 gave a deleted last row's ref out again.
+CREATE TABLE ref_counter (last INTEGER NOT NULL);
 ```
 
 runtime store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，見 `packages/server/src/runtime-store/migrations.ts`；cancel、session、usage 的欄位與 `engine_state` 等用到的切片再加）：
