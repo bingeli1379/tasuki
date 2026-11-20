@@ -41,4 +41,8 @@ export const TRACKER_MIGRATIONS: readonly string[] = [
     blocked_by TEXT NOT NULL REFERENCES work_unit(ref),
     PRIMARY KEY (task, blocked_by)
   );`,
+  // S7: deleting a task. Refs came from MAX(rowid) + 1, which hands the ref of a deleted last
+  // row out again; a counter never goes back.
+  `CREATE TABLE ref_counter (last INTEGER NOT NULL);
+  INSERT INTO ref_counter SELECT COALESCE(MAX(rowid), 0) FROM work_unit;`,
 ]

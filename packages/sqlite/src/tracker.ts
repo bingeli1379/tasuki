@@ -70,6 +70,13 @@ export function createSqliteTracker(
     return toWorkUnit(ctx, row)
   }
 
+  // One statement, so two creates cannot get the same number.
+  function nextRef(): string {
+    const row = db.prepare('UPDATE ref_counter SET last = last + 1 RETURNING last').get()
+    if (row === undefined) throw new Error('ref_counter has no row')
+    return `${refPrefix}-${String(row['last'])}`
+  }
+
   return {
     list(kind, statuses) {
       const keys = statuses.map((s) => ctx.statuses.toTracker(kind, s))
@@ -103,15 +110,13 @@ export function createSqliteTracker(
     },
     createItem(item) {
       const now = ctx.clock.now().toISOString()
-      // One statement, so two concurrent creates cannot get the same ref.
       const row = db
         .prepare(
           `INSERT INTO work_unit (ref, kind, title, body, status, created_at, updated_at)
-           VALUES (? || '-' || (SELECT COALESCE(MAX(rowid), 0) + 1 FROM work_unit), 'item', ?, ?, ?, ?, ?)
-           RETURNING *`,
+           VALUES (?, 'item', ?, ?, ?, ?, ?) RETURNING *`,
         )
         .get(
-          refPrefix,
+          nextRef(),
           item.title,
           item.body,
           ctx.statuses.toTracker('item', item.status),
@@ -136,11 +141,10 @@ export function createSqliteTracker(
       const row = db
         .prepare(
           `INSERT INTO work_unit (ref, kind, parent, title, body, status, origin, created_at, updated_at)
-           VALUES (? || '-' || (SELECT COALESCE(MAX(rowid), 0) + 1 FROM work_unit), 'task', ?, ?, ?, ?, ?, ?, ?)
-           RETURNING *`,
+           VALUES (?, 'task', ?, ?, ?, ?, ?, ?, ?) RETURNING *`,
         )
         .get(
-          refPrefix,
+          nextRef(),
           item,
           task.title,
           task.body,
@@ -190,6 +194,20 @@ export function createSqliteTracker(
         )
       if (row === undefined) throw new EditConflict(get(ref))
       return toWorkUnit(ctx, row)
+    },
+    async deleteTask(ref) {
+      if (get(ref).kind !== 'task') throw new NotFound(`${ref} is not a task`)
+      db.exec('BEGIN')
+      try {
+        db.prepare('DELETE FROM dependency WHERE task = ? OR blocked_by = ?').run(ref, ref)
+        db.prepare('DELETE FROM comment WHERE target = ?').run(ref)
+        db.prepare('DELETE FROM attachment WHERE target = ?').run(ref)
+        db.prepare('DELETE FROM work_unit WHERE ref = ?').run(ref)
+        db.exec('COMMIT')
+      } catch (e) {
+        db.exec('ROLLBACK')
+        throw e
+      }
     },
     async comments(target) {
       get(target)
