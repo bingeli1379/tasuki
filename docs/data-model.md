@@ -60,6 +60,8 @@ interface Run {                         // runtime store only
   workspace: string
   state: 'running' | 'finished'
   outcome?: Outcome
+  verdict?: Verdict                     // what report_result said; outcome is decided at exit (D63)
+  summary?: string
   leaseUntil: string
   startedAt: string
   lastActivityAt: string
@@ -165,7 +167,7 @@ CREATE TABLE attachment (
 CREATE INDEX attachment_by_target ON attachment(target, id);
 ```
 
-runtime store：
+runtime store（S4 只建了 `run` 表、只建了用到的欄位，見 `packages/server/src/runtime-store/migrations.ts`；cancel、session、produced、usage 的欄位與 `engine_state` 等用到的切片再加）：
 
 ```sql
 CREATE TABLE run (
@@ -179,6 +181,8 @@ CREATE TABLE run (
   state               TEXT NOT NULL CHECK (state IN ('running','finished')),
   outcome             TEXT CHECK (outcome IN
     ('succeeded','needs_input','blocked_manual','failed','max_attempts','cancelled','abandoned')),
+  verdict             TEXT CHECK (verdict IN ('succeeded','needs_input','blocked_manual','failed')),
+  summary             TEXT,
   lease_until         TEXT NOT NULL,
   started_at          TEXT NOT NULL,
   last_activity_at    TEXT NOT NULL,
@@ -200,6 +204,6 @@ CREATE INDEX run_by_target ON run(target, started_at DESC);
 CREATE TABLE engine_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- e.g. 'paused'
 ```
 
-## 待定
+## attempt
 
-- `attempt` 的歸零規則。候選是「人每次手動移動 item 的 status 就歸零」。engine 要能觀察到人的移動才做得到，細節待定。
+只有前一次 Run 是 `abandoned` 才加 1，其他結果之後都從 1 重算，`max_attempts` 也記成一筆 Run，所以人把 item 從 `blocked` 拉回來就是從 1 開始（D38）。engine 不觀察人的移動。

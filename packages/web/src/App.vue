@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ApiError, call, messageOf, sendJson, type Item } from './api'
 import ItemDetail from './components/ItemDetail.vue'
 import { previewText } from './markdown'
@@ -11,6 +11,8 @@ interface Column {
 }
 
 const columns = ref<Column[]>([])
+// Refs an agent is working on right now.
+const running = ref<string[]>([])
 const error = ref('')
 const open = ref(false)
 const title = ref('')
@@ -52,12 +54,36 @@ function place(item: Item): void {
 
 async function load(): Promise<void> {
   try {
-    columns.value = (await call<{ columns: Column[] }>('/api/board')).columns
+    const board = await call<{ columns: Column[]; running: string[] }>('/api/board')
+    columns.value = board.columns
+    running.value = board.running
     error.value = ''
   } catch (e) {
     error.value = messageOf(e)
   }
 }
+
+// The engine moves items on its own, so the board reads itself again every few seconds.
+// Not while a card is in someone's hand, and not right after a write of ours: the board can
+// lag behind writes (D54) and would put the card back where it was for a moment.
+// Not while the tab is hidden either, since each read is a search against the tracker;
+// coming back reads at once.
+const REFRESH_MS = 5000
+let lastWrite = 0
+const wrote = (): void => {
+  lastWrite = Date.now()
+}
+function reload(): void {
+  if (document.hidden || dragging.value || pending.value.length > 0) return
+  if (Date.now() - lastWrite < REFRESH_MS) return
+  void load()
+}
+const refresh = setInterval(reload, REFRESH_MS)
+document.addEventListener('visibilitychange', reload)
+onUnmounted(() => {
+  clearInterval(refresh)
+  document.removeEventListener('visibilitychange', reload)
+})
 
 async function create(): Promise<void> {
   saving.value = true
@@ -68,6 +94,7 @@ async function create(): Promise<void> {
     )
     // Not a reload: the board may lag behind writes (Jira search index).
     columns.value.find((c) => c.status === item.status)?.items.push(item)
+    wrote()
     title.value = ''
     body.value = ''
     error.value = ''
@@ -111,6 +138,7 @@ async function move(item: Item, to: string): Promise<void> {
     error.value = messageOf(e)
   } finally {
     pending.value = pending.value.filter((r) => r !== item.ref)
+    wrote()
   }
 }
 
@@ -186,7 +214,16 @@ onMounted(load)
             >
               <UCard :ui="{ root: 'relative', body: 'p-3 sm:p-3' }">
                 <div class="flex items-center justify-between">
-                  <p class="text-xs text-muted">{{ item.ref }}</p>
+                  <p class="flex items-center gap-2 text-xs text-muted">
+                    <span>{{ item.ref }}</span>
+                    <UBadge
+                      v-if="running.includes(item.ref)"
+                      label="Running"
+                      color="primary"
+                      variant="subtle"
+                      size="sm"
+                    />
+                  </p>
                   <UDropdownMenu
                     :items="
                       columns
@@ -238,7 +275,7 @@ onMounted(load)
       v-model:open="detailOpen"
       :item-ref="detailRef"
       :status-name="statusName"
-      @updated="place"
+      @updated="(item) => (place(item), wrote())"
     />
   </UApp>
 </template>

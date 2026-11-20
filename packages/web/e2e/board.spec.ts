@@ -61,14 +61,15 @@ test('dragging an item to another column moves it, and it stays there', async ({
   await createThroughApi(request, title)
   await page.goto('/')
   const refining = page.getByRole('region', { name: /^Refining/ })
-  const readyToSplit = page.getByRole('region', { name: /^Ready to Split/ })
+  // Not Ready to Split: a rule watches it, and the engine would take the item away.
+  const needsAnswers = page.getByRole('region', { name: /^Needs Answers/ })
   await reloadUntilVisible(page, refining.getByRole('article', { name: title }))
 
-  await refining.getByRole('article', { name: title }).dragTo(readyToSplit)
-  await expect(readyToSplit.getByRole('article', { name: title })).toBeVisible()
+  await refining.getByRole('article', { name: title }).dragTo(needsAnswers)
+  await expect(needsAnswers.getByRole('article', { name: title })).toBeVisible()
   await expect(refining.getByRole('article', { name: title })).toHaveCount(0)
 
-  await reloadUntilVisible(page, readyToSplit.getByRole('article', { name: title }))
+  await reloadUntilVisible(page, needsAnswers.getByRole('article', { name: title }))
 })
 
 test('moving an item someone else already moved says where it went', async ({ page, request }) => {
@@ -80,7 +81,7 @@ test('moving an item someone else already moved says where it went', async ({ pa
 
   // Someone else moves it while this page still shows it in Refining.
   const behind = await request.post(`/api/items/${ref}/transition`, {
-    data: { from: 'refining', to: 'ready-to-split' },
+    data: { from: 'refining', to: 'needs-answers' },
   })
   expect(behind.ok()).toBe(true)
 
@@ -92,7 +93,7 @@ test('moving an item someone else already moved says where it went', async ({ pa
     page.getByText(`${ref} was just moved by someone else`, { exact: true }),
   ).toBeVisible()
   await expect(
-    page.getByRole('region', { name: /^Ready to Split/ }).getByRole('article', { name: title }),
+    page.getByRole('region', { name: /^Needs Answers/ }).getByRole('article', { name: title }),
   ).toBeVisible()
   await expect(
     page.getByRole('region', { name: /^Done/ }).getByRole('article', { name: title }),
@@ -162,4 +163,38 @@ test('open an item, edit it in markdown with an image, comment, and find it all 
   await expect(dialog.locator('.markdown strong')).toHaveText('care')
   await expect(dialog.locator('.markdown img')).toBeVisible()
   await expect(dialog.locator('.markdown em')).toHaveText('fine')
+})
+
+test('an item dragged to Ready to Split is split by the agent and lands in Split Review', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000)
+  const title = `e2e split ${Date.now()}`
+  await createThroughApi(request, title)
+  await page.goto('/')
+  const refining = page.getByRole('region', { name: /^Refining/ })
+  await reloadUntilVisible(page, refining.getByRole('article', { name: title }))
+
+  await refining
+    .getByRole('article', { name: title })
+    .dragTo(page.getByRole('region', { name: /^Ready to Split/ }))
+
+  // The board reads itself again on its own; nobody reloads from here on.
+  const splitting = page.getByRole('region', { name: /^Splitting/ })
+  const card = splitting.getByRole('article', { name: title })
+  await expect(card).toBeVisible({ timeout: 60_000 })
+  await expect(card.getByText('Running')).toBeVisible()
+
+  const review = page.getByRole('region', { name: /^Split Review/ })
+  await expect(review.getByRole('article', { name: title })).toBeVisible({ timeout: 60_000 })
+  await expect(review.getByRole('article', { name: title }).getByText('Running')).toHaveCount(0)
+
+  await review.getByRole('button', { name: title, exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  const run = dialog.getByRole('listitem', { name: 'Run split attempt 1' })
+  await expect(run).toContainText('succeeded')
+  await expect(dialog.getByRole('article', { name: 'Comment by Engine' })).toContainText(
+    'Rule split, attempt 1: succeeded, moved to split-review.',
+  )
 })

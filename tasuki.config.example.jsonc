@@ -35,6 +35,27 @@
   // Jira needs statuses: the display-name default does not match any Jira status id.
   // "statuses": { "item": { "refining": "10003" } },
 
-  // agents and rules are not final yet.
-  // See docs/plugins.md and docs/config-and-rules.md.
+  // Agents are runner plugins, given the same way as the tracker. Only the fake runner
+  // exists so far: it stands in for an agent so the engine can be tried without an LLM.
+  // A title with [fake:needs_input], [fake:failed], [fake:blocked_manual] or [fake:hang]
+  // picks what it does; anything else succeeds after `seconds`.
+  "agents": { "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } } },
+
+  // Without rules the engine leaves every item alone. See docs/config-and-rules.md.
+  "rules": [
+    {
+      "id": "split",
+      "watch": "ready-to-split",
+      "claim": "splitting", // where the item waits while the agent works
+      "agent": "fake",
+      "mode": "split",
+      // failed and max_attempts go to blocked unless given here.
+      "on": { "succeeded": "split-review", "needs_input": "needs-answers" },
+    },
+  ],
+
+  // Defaults. leaseSeconds: a Run nobody renews for this long is abandoned and its item
+  // goes back to the watch status. poll: 5 seconds on sqlite, 30 on Jira.
+  // "limits": { "maxConcurrentRuns": 2, "leaseSeconds": 120, "defaultMaxAttempts": 3 },
+  // "poll": { "intervalSeconds": 5 },
 }

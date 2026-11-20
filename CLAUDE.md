@@ -1,6 +1,6 @@
 # Tasuki
 
-後端 engine 定時檢查 tracker（sqlite 或 Jira Cloud），命中規則就派 agent（claude / codex CLI）做事，結果寫回。規則、status 對照、agent 都在一份 config 裡。目前設計文件描述整個產品，不分版本。程式碼做到 S1：`core`（domain、port、plugin 契約、use case）、`testkit`（StoragePort 契約測試）、`sqlite` 與 `jira-cloud`（tracker plugin）、`server`（Hono，config 與 plugin 載入、runtime store）、`web`（Vue 3 SPA，Nuxt UI）。功能依 `docs/plan.md` 的切片清單，一次一個從畫面做到 DB。
+後端 engine 定時檢查 tracker（sqlite 或 Jira Cloud），命中規則就派 agent（claude / codex CLI）做事，結果寫回。規則、status 對照、agent 都在一份 config 裡。目前設計文件描述整個產品，不分版本。功能依 `docs/plan.md` 的切片清單，一次一個從畫面做到 DB，做到哪看 plan.md，套件怎麼分看 `docs/architecture.md`。
 
 ## 開發之前
 

@@ -80,10 +80,42 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       await expect
         .poll(
           async () =>
-            (await fixture.storage.list('item', 'refining')).find((u) => u.ref === item.ref),
+            (await fixture.storage.list('item', ['refining'])).find((u) => u.ref === item.ref),
           { timeout: 10_000, interval: 500 },
         )
         .toEqual(item)
+    })
+
+    it('lists several statuses in one call, each unit under its own', async () => {
+      const first = await fixture.storage.createItem({
+        title: 'contract: list many',
+        body: '',
+        status: 'refining',
+      })
+      const second = await fixture.storage.transition(
+        (
+          await fixture.storage.createItem({
+            title: 'contract: list many',
+            body: '',
+            status: 'refining',
+          })
+        ).ref,
+        'refining',
+        'ready-to-split',
+      )
+      await expect
+        .poll(
+          async () =>
+            (await fixture.storage.list('item', ['refining', 'ready-to-split']))
+              .filter((u) => u.ref === first.ref || u.ref === second.ref)
+              .map((u) => [u.ref, u.status]),
+          { timeout: 10_000, interval: 500 },
+        )
+        .toEqual([
+          [first.ref, 'refining'],
+          [second.ref, 'ready-to-split'],
+        ])
+      expect(await fixture.storage.list('item', [])).toEqual([])
     })
 
     it('get returns the unit as it is now', async () => {

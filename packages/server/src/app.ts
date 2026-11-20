@@ -12,13 +12,16 @@ import {
   NotFound,
   StatusConflict,
   updateItem,
+  type RuntimeStorePort,
   type StatusMap,
   type StoragePort,
 } from '@tasuki/core'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import type { DatabaseSync } from 'node:sqlite'
+import { createAgentMcpServer } from './agent-mcp'
 import { createMcpServer } from './mcp'
+import type { RunTokens } from './run-tokens'
 import { schemaVersion } from './runtime-store/migrate'
 
 // encodeURIComponent leaves ' ( ) * alone, which RFC 5987 does not allow unencoded.
@@ -33,10 +36,12 @@ const INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/we
 export interface AppDeps {
   db: DatabaseSync
   storage: StoragePort
+  runtime: RuntimeStorePort
   statuses: StatusMap
+  tokens: RunTokens
 }
 
-export function createApp({ db, storage, statuses }: AppDeps): Hono {
+export function createApp({ db, storage, runtime, statuses, tokens }: AppDeps): Hono {
   const app = new Hono()
   app.onError((e, c) => {
     if (e instanceof InvalidInput) return c.json({ error: e.message }, 400)
@@ -48,7 +53,7 @@ export function createApp({ db, storage, statuses }: AppDeps): Hono {
   })
   app.get('/api/health', (c) => c.json({ ok: true, schemaVersion: schemaVersion(db) }))
   app.get('/api/board', async (c) =>
-    c.json({ columns: await listBoard(storage, statuses.mapped('item')) }),
+    c.json(await listBoard(storage, runtime, statuses.mapped('item'))),
   )
   app.post('/api/items', async (c) => {
     const body = await c.req.json<{ title?: unknown; body?: unknown }>()
@@ -70,7 +75,9 @@ export function createApp({ db, storage, statuses }: AppDeps): Hono {
       }),
     )
   })
-  app.get('/api/items/:ref', async (c) => c.json(await getItem(storage, c.req.param('ref'))))
+  app.get('/api/items/:ref', async (c) =>
+    c.json(await getItem(storage, runtime, c.req.param('ref'))),
+  )
   app.patch('/api/items/:ref', async (c) => {
     const body = await c.req.json<{ expectedVersion?: unknown; title?: unknown; body?: unknown }>()
     if (typeof body.expectedVersion !== 'string')
@@ -126,7 +133,17 @@ export function createApp({ db, storage, statuses }: AppDeps): Hono {
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ storage, statuses }).connect(transport)
+    await createMcpServer({ storage, runtime, statuses }).connect(transport)
+    return transport.handleRequest(c.req.raw)
+  })
+  // The facade for agents the engine started: only a live Run's token gets in.
+  app.all('/agent-mcp', async (c) => {
+    const token = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '')?.[1]
+    const runId = token === undefined ? undefined : tokens.resolve(token)
+    const run = runId === undefined ? undefined : await runtime.getRun(runId)
+    if (run?.state !== 'running') return c.json({ error: 'not a live run token' }, 401)
+    const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
+    await createAgentMcpServer({ storage, runtime, run }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   return app

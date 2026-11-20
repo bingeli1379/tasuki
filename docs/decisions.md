@@ -209,11 +209,12 @@
 - 重新檢視：出現「同一個 mode 要搭不同權限」的需求時，才把 `role` 加回來。內建預設 prompt 的內容在 M3 寫。
 
 ## D38 attempt 只在 abandoned 之後累計，max_attempts 也是一筆 Run
-- 狀態：程式碼隨 M1 一起丟掉（D41），這條保留為設計假設，做到 S4 時用真正的規則重新確認。
+- 狀態：已確認（2026-11-20，S4 實作，見 D63）。
 - 決定：新 Run 的 `attempt` 是上一次 Run（同一張 item、同一條 rule）若為 `abandoned` 就加 1，否則回到 1。要開的 attempt 超過 `maxAttempts` 時，engine 不起 agent，而是建立一筆 outcome 為 `max_attempts` 的 Run，item 走該規則 `on.max_attempts` 的出口，並寫一則 `system` comment。
 - 理由：文件只明講 `abandoned` 之後 `attempt + 1`，而 `stop-and-recovery.md` 又說人在 loop 裡的來回不設上限，所以 `succeeded`、`needs_input`、`failed`、`cancelled` 之後都不該累計。把 `max_attempts` 記成一筆 Run，item 被人拉回去之後，上一筆是 `max_attempts` 就從 1 重算，等於「人手動拉回就歸零」，不用觀察人的移動。
-- 狀態：暫行做法，待釐清 3 還沒結案。作者確認前先照這個寫。
-- 重新檢視：出現 `failed` 要自動重試的需求，或需要 item 層累計成本上限時。
+- 作者的意圖是「人只要介入拉來拉去就重算」，這條在實務上等於做到了：人會介入的時機，item 都停在 `blocked`、`needs-answers`、`split-review` 這類出口，上一筆 Run 不是 `abandoned`，拉回去自然從 1 開始，engine 不用觀察是誰移動的。
+- 已知限制：Run 死掉、engine 剛把 item 送回 watch status，人在下一輪 Poller 之前把它拖走又拖回來，這時還是接著累計。要蓋到這個角落，engine 得分辨人的移動；Jira 上的人直接在 Jira 拖卡、不經過 tasuki，只能每輪讀 issue changelog，等於每張命中的 item 多一支 API，只記 tasuki 看板的移動又讓兩個 tracker 行為不同，所以不做。
+- 重新檢視：出現 `failed` 要自動重試的需求，或需要 item 層累計成本上限時；那個角落真的被踩到時。
 
 ## D39 M1 實作時補的假設
 - 狀態：程式碼隨 M1 一起丟掉（D41），這些假設保留，對應的切片寫到時逐條確認，不再整批沿用。
@@ -445,3 +446,30 @@
 - 已驗證（2026-11-20）：Dependabot 讀得懂 pnpm 12 的 lockfile 與 workspace，github-actions 的檢查也正常。repo 的資安更新原本就是開的。
 - 不修的警示：`esbuild` 0.27.x 的開發伺服器在 Windows 上能讀任意檔案（low），修在 0.28.1，但 esbuild 被 vite-plus 綁在 0.27.x。我們不用 esbuild 的開發伺服器、也不在 Windows 上跑，等 vite-plus 升版。
 - 重新檢視：Dependabot 的 PR 太吵或太少時調頻率；要發布 npm 套件（S11、S12）時，看被別人安裝的套件是否改回範圍。
+
+## D63 S4：規則命中，假 runner 跑 split
+- 決定：
+  - engine 在 `server`：每 `poll.intervalSeconds` 一輪，先復原 lease 過期的 Run，再認領。啟動時馬上跑第一輪。輪與輪不重疊。
+  - 認領照 architecture.md 的順序：先 `createRun`（拿 lease），再把 item 從 watch 轉到 claim；轉移撞上 `StatusConflict` 就把這筆 Run 記成 `cancelled`。attempt 照 D38 算，超過 `maxAttempts` 就記一筆 `max_attempts` 的 Run，item 走 `on.max_attempts`（預設 `blocked`），留一則 system comment。
+  - Run 結束：先轉移 item、再結束 Run、最後寫 system comment（outcome、去哪、原因、agent 的 summary）。中間當機只會留下會過期的 Run，不會留下卡在 claim status 又沒人管的 item。轉移撞上 `StatusConflict` 就是人接手，Run 記成 `cancelled`，不寫 comment。agent 回報的 verdict 在規則裡沒有出口時（例如 split 回 `blocked_manual`）當成 `failed`。
+  - lease 復原：過期的 Run 記成 `abandoned`，item 還在 claim status 就送回 watch status 並留 comment。已經被人移走的不動。attempt + 1 不在這裡寫，是下一輪認領時由 D38 算出來的。
+  - 每 `leaseSeconds / 3` 續約一次。`lastActivityAt` 還沒有更新的來源，先等於 `startedAt`。
+  - verdict 驗證先不做，直接採信，只處理「沒有 verdict」與「exit code 非零」兩種 `failed`。split 的 `succeeded` 要求 item 底下有 task，S5 才有 task，現在做的話每次都是 `failed`。
+  - MCP facade 提前一小塊：`/agent-mcp`，只收 `Authorization: Bearer <run token>`，tool 只有 `get_item`（不帶參數，讀被派的那張 item）與 `report_result`。run token 每個 Run 一個，只放記憶體，Run 結束就撤銷；engine 重啟本來就會讓所有 Run 變成 `abandoned`，token 不需要活過重啟。`report_result` 只收第一次，之後回錯。
+  - 假 runner 是一個 runner plugin `@tasuki/fake-runner`，跟真的 agent 一樣用 HTTP 打 facade，沒有任何第三方拿不到的東西（D44）。它讀 item 的標題決定回報什麼：`[fake:needs_input]`、`[fake:failed]`、`[fake:blocked_manual]`，`[fake:hang]` 永遠不結束（拿來試 lease 復原：跑到一半把 server 砍掉，超過 `leaseSeconds` 再開）；其他都是 `succeeded`。`options.seconds` 是回報前等幾秒，預設 3。
+  - config 的 agent 跟 tracker 同一種寫法：`{ plugin, options }`，原本說等 S8 再定的 `kind` 不用了。沒寫 `rules` 就是沒有規則，engine 不碰任何 item。啟動時檢查 config-and-rules.md 驗證的第 1 到 5 條，加上 `on` 只能用規則會移動的 outcome、規則名稱不重複。
+  - `RuntimeStorePort` 放在 `core`（use case 要用），實作在 `server`，不是 plugin 角色。`createRun` 撞上「一張 item 一個存活的 Run」的 unique index 時丟 `RunConflict`。`Run` 加 `verdict`、`summary` 兩欄，存 agent 回報的內容，Run 結束時才換算成 outcome。DDL 只建 S4 用到的欄位，cancel、session、produced、usage 等用到的切片再加。
+  - `getItem` 帶回 `runs`（新的在前），`listBoard` 帶回 `running`（有存活 Run 的 ref）。看板與使用者 MCP 都走這兩個 use case（D57）。看板卡片在有存活 Run 時顯示「Running」，詳情多一區 Runs。
+  - 看板每 5 秒自己重讀一次，因為 engine 會自己移動 item。拖拉中、移動等回應中、以及我們剛寫完的 5 秒內不重讀：Jira 的列表會比寫入慢（D54），馬上重讀會讓卡片跳回原位一下。
+  - E2E 的 engine 掛上假 runner 與 split 規則，poll 2 秒，假 runner 跑 10 秒，比看板重讀的間隔長，才看得到 Splitting 那一段。S2 的兩條 E2E 原本拖到 `ready-to-split`，現在會被 engine 認領，改拖到 `needs-answers`（第四欄，畫面內；第七欄的 In Review 在畫面外，Playwright 拖不到）。
+- 理由：S4 是 engine 第一次真的跑規則。facade 提前做，是因為 verdict 照合約只能從 `report_result` 回來；讓假 runner 直接呼叫 use case 就是給內建 plugin 開後門。看板輪詢比 SSE 或 WebSocket 少一整套東西，五秒的延遲對「agent 在做事」這種畫面夠用。
+- 重新檢視：Jira 的 rate limit 被輪詢打到時（看板 5 秒、engine 30 秒，D64 已經把每輪壓成一支搜尋）；要分辨人的移動時（D38 的已知限制）；S8 接上真的 CLI 時（RunSpec 加 prompt、env、session，RunHandle 加 terminate）。
+
+## D64 `StoragePort.list` 一次查多個 status，看板背景時不重讀
+- 決定：
+  - `list(kind, statuses)` 收多個 status，回傳落在任一個 status 的 unit，舊的在前。Jira 送一支 `status in (...)` 的 JQL，sqlite 用 `IN`。空陣列回空，不打 tracker。
+  - `listBoard` 一次撈整個看板，再依 unit 的 `status` 分欄；`claimItems` 一次撈所有規則的 watch status，再依規則順序認領。
+  - 看板在瀏覽器分頁隱藏時（`document.hidden`）不重讀，切回來馬上讀一次，同樣遵守拖拉中、等回應中與寫入後 5 秒內不重讀。
+- 理由：D63 的看板每 5 秒對每欄各送一支搜尋，10 欄就是 10 支，開幾個分頁就再乘幾倍。Jira 的 rate limit 是照呼叫算，合成一支之後看板一輪只剩一支（超過一頁才翻頁）。分頁隱藏時沒人在看，讀了也是白讀。
+- 沒選的做法：只讀捲到畫面內的欄位，合成一支之後省不到東西，還要每欄自己記讀過沒；server 端快取多個請求的結果，要等多人同時看才值得；只撈 `updated` 之後的變動，抓不到刪除與移出 project 的 issue；Jira webhook 要公開的 URL，本機跑的接不到。
+- 重新檢視：一個看板的 item 多到一支搜尋要翻很多頁時；多人同時看同一個看板時（再考慮 server 端快取）。

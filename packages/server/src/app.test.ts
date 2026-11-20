@@ -4,8 +4,11 @@ import { createStatusMap, type WorkUnit } from '@tasuki/core'
 import { createSqliteTracker, migrate as migrateTracker, TRACKER_MIGRATIONS } from '@tasuki/sqlite'
 import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
+import { createRunTokens } from './run-tokens'
 import { openDatabase } from './runtime-store/database'
 import { migrate } from './runtime-store/migrate'
+import { RUNTIME_MIGRATIONS } from './runtime-store/migrations'
+import { createRuntimeStore } from './runtime-store/run-store'
 
 const statuses = createStatusMap({
   item: { refining: 'Refining', 'ready-to-split': 'Ready to Split', done: 'Done' },
@@ -19,11 +22,19 @@ const memoryStorage = (): ReturnType<typeof createSqliteTracker> => {
   return createSqliteTracker({ clock: { now: () => new Date() }, dataDir: '', statuses }, db, 'M')
 }
 
+const memoryRuntime = (): ReturnType<typeof createRuntimeStore> => {
+  const db = openDatabase(':memory:')
+  migrate(db, RUNTIME_MIGRATIONS)
+  return createRuntimeStore(db, { now: () => new Date() }, '/logs')
+}
+
 const appWith = (db = openDatabase(':memory:')): ReturnType<typeof createApp> =>
   createApp({
     db,
     storage: memoryStorage(),
+    runtime: memoryRuntime(),
     statuses,
+    tokens: createRunTokens(),
   })
 
 describe('GET /api/health', () => {

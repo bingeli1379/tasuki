@@ -1,14 +1,133 @@
-import { ITEM_STATUS_DISPLAY, ITEM_STATUSES, type StatusMapping } from '@tasuki/core'
+import {
+  ITEM_STATUS_DISPLAY,
+  ITEM_STATUSES,
+  type Rule,
+  type RuleExit,
+  type RuleMode,
+  type StatusMapping,
+} from '@tasuki/core'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { parseJsonc } from './jsonc'
+
+export interface PluginRef {
+  plugin: string
+  options: unknown
+}
+
+export interface Limits {
+  maxConcurrentRuns: number
+  leaseSeconds: number
+  defaultMaxAttempts: number
+}
 
 export interface Config {
   configDir: string
   dataDir: string
   port: number
-  tracker: { plugin: string; options: unknown }
+  tracker: PluginRef
   statuses: StatusMapping
+  pollSeconds: number
+  limits: Limits
+  agents: Record<string, PluginRef>
+  rules: Rule[]
+}
+
+type Raw = Record<string, unknown>
+
+const MODES: readonly RuleMode[] = ['split', 'execute', 'rework']
+const EXITS: readonly RuleExit[] = [
+  'succeeded',
+  'needs_input',
+  'blocked_manual',
+  'failed',
+  'max_attempts',
+]
+
+const isObject = (value: unknown): value is Raw =>
+  value !== null && typeof value === 'object' && !Array.isArray(value)
+
+function positive(raw: Raw, key: string, fallback: number, path: string): number {
+  const value = raw[key] ?? fallback
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1)
+    throw new Error(`config ${path}.${key} must be a whole number of at least 1`)
+  return value
+}
+
+function pluginRef(value: unknown, path: string): PluginRef {
+  if (!isObject(value) || typeof value['plugin'] !== 'string')
+    throw new Error(`config ${path}.plugin must be a package name`)
+  return { plugin: value['plugin'], options: value['options'] ?? {} }
+}
+
+// The checks doctor also runs on rules (config-and-rules.md, 1 to 5).
+function parseRules(
+  value: unknown,
+  mapped: readonly string[],
+  agents: Record<string, PluginRef>,
+  defaultMaxAttempts: number,
+): Rule[] {
+  if (value === undefined) return []
+  if (!Array.isArray(value)) throw new Error('config rules must be a list')
+  const rules = value.map((raw: unknown, index): Rule => {
+    if (!isObject(raw)) throw new Error(`config rules[${index}] must be an object`)
+    const path = `rules[${index}]${typeof raw['id'] === 'string' ? ` (${raw['id']})` : ''}`
+    const text = (key: string): string => {
+      const v = raw[key]
+      if (typeof v !== 'string' || v === '') throw new Error(`config ${path}.${key} is required`)
+      return v
+    }
+    const status = (key: string, v: string): string => {
+      if (!mapped.includes(v))
+        throw new Error(`config ${path}.${key}: status "${v}" is not in statuses.item`)
+      return v
+    }
+    const id = text('id')
+    const watch = status('watch', text('watch'))
+    const claim = raw['claim'] === undefined ? undefined : status('claim', text('claim'))
+    if (claim === watch) throw new Error(`config ${path}.claim must differ from watch`)
+    const agent = text('agent')
+    if (agents[agent] === undefined)
+      throw new Error(`config ${path}.agent: no agent "${agent}" in agents`)
+    const mode = text('mode') as RuleMode
+    if (!MODES.includes(mode))
+      throw new Error(`config ${path}.mode must be one of ${MODES.join(', ')}`)
+    const on: Rule['on'] = {}
+    for (const [key, target] of Object.entries(isObject(raw['on']) ? raw['on'] : {})) {
+      if (!EXITS.includes(key as RuleExit))
+        throw new Error(`config ${path}.on.${key}: not an outcome a rule can move on`)
+      if (typeof target !== 'string') throw new Error(`config ${path}.on.${key} must be a status`)
+      on[key as RuleExit] = status(`on.${key}`, target)
+    }
+    // failed and max_attempts default to blocked; blocked_manual cannot come from a split.
+    const needed: RuleExit[] =
+      mode === 'execute'
+        ? ['succeeded', 'needs_input', 'blocked_manual']
+        : ['succeeded', 'needs_input']
+    for (const key of needed)
+      if (on[key] === undefined) throw new Error(`config ${path}.on.${key} is required`)
+    for (const key of ['failed', 'max_attempts'] as const)
+      if (on[key] === undefined) status(`on.${key} (default)`, 'blocked')
+    return {
+      id,
+      watch,
+      ...(claim === undefined ? {} : { claim }),
+      agent,
+      mode,
+      maxAttempts: positive(raw, 'maxAttempts', defaultMaxAttempts, path),
+      on,
+    }
+  })
+  for (const [i, rule] of rules.entries()) {
+    const other = rules.findIndex((r, j) => j !== i && (r.id === rule.id || r.watch === rule.watch))
+    if (other > i)
+      throw new Error(
+        rules[other]?.id === rule.id
+          ? `config rules: two rules are called ${rule.id}`
+          : `config rules: ${rule.id} and ${rules[other]?.id} both watch ${rule.watch}`,
+      )
+  }
+  return rules
 }
 
 function expandEnv(value: unknown, path: string): unknown {
@@ -37,11 +156,9 @@ export function loadConfig(path: string): Config {
   const envFile = join(configDir, '.env')
   if (existsSync(envFile)) process.loadEnvFile(envFile)
 
-  const raw = expandEnv(parseJsonc(readFileSync(file, 'utf8')), '') as Record<string, unknown>
-  const server = (raw['server'] ?? {}) as Record<string, unknown>
-  const tracker = (raw['tracker'] ?? { plugin: '@tasuki/sqlite' }) as Record<string, unknown>
-  if (typeof tracker['plugin'] !== 'string')
-    throw new Error('config tracker.plugin must be a package name')
+  const raw = expandEnv(parseJsonc(readFileSync(file, 'utf8')), '') as Raw
+  const server = (raw['server'] ?? {}) as Raw
+  const tracker = pluginRef(raw['tracker'] ?? { plugin: '@tasuki/sqlite' }, 'tracker')
 
   // Without a mapping, sqlite stores the display names (config-and-rules.md example).
   const statuses = (raw['statuses'] ?? { item: ITEM_STATUS_DISPLAY }) as StatusMapping
@@ -52,11 +169,40 @@ export function loadConfig(path: string): Config {
     throw new Error('config statuses.item must map refining: new items start there')
   }
 
+  const rawLimits = isObject(raw['limits']) ? raw['limits'] : {}
+  const limits: Limits = {
+    maxConcurrentRuns: positive(rawLimits, 'maxConcurrentRuns', 2, 'limits'),
+    leaseSeconds: positive(rawLimits, 'leaseSeconds', 120, 'limits'),
+    defaultMaxAttempts: positive(rawLimits, 'defaultMaxAttempts', 3, 'limits'),
+  }
+  const agents = Object.fromEntries(
+    Object.entries(isObject(raw['agents']) ? raw['agents'] : {}).map(([name, agent]) => [
+      name,
+      pluginRef(agent, `agents.${name}`),
+    ]),
+  )
+  // Jira searches are slower and rate limited, so it is polled less often.
+  const pollDefault = tracker.plugin === '@tasuki/jira-cloud' ? 30 : 5
+
   return {
     configDir,
     dataDir: resolve(configDir, typeof raw['dataDir'] === 'string' ? raw['dataDir'] : './data'),
     port: typeof server['port'] === 'number' ? server['port'] : 8787,
-    tracker: { plugin: tracker['plugin'], options: tracker['options'] ?? {} },
+    tracker,
     statuses,
+    pollSeconds: positive(
+      isObject(raw['poll']) ? raw['poll'] : {},
+      'intervalSeconds',
+      pollDefault,
+      'poll',
+    ),
+    limits,
+    agents,
+    rules: parseRules(
+      raw['rules'],
+      Object.keys(statuses.item ?? {}),
+      agents,
+      limits.defaultMaxAttempts,
+    ),
   }
 }

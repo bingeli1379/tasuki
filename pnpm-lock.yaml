@@ -170,6 +170,9 @@ importers:
 
   .:
     devDependencies:
+      '@tasuki/fake-runner':
+        specifier: workspace:*
+        version: link:packages/fake-runner
       '@tasuki/jira-cloud':
         specifier: workspace:*
         version: link:packages/jira-cloud
@@ -187,6 +190,15 @@ importers:
         version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(@vue/language-core@3.3.14)(esbuild@0.27.7)(jiti@2.7.0)(playwright@1.65.1)(typescript@7.0.2)(vue-tsc@3.3.14(typescript@7.0.2))
 
   packages/core: {}
+
+  packages/fake-runner:
+    dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: 1.32.2
+        version: 1.32.2(zod@4.6.7)
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/jira-cloud:
     dependencies:
@@ -219,6 +231,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@tasuki/fake-runner':
+        specifier: workspace:*
+        version: link:../fake-runner
       '@tasuki/sqlite':
         specifier: workspace:*
         version: link:../sqlite

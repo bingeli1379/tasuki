@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { MAX_ATTACHMENT_BYTES } from '../../domain/attachment'
 import type { WorkUnit } from '../../domain/work-unit'
+import { runtimeStub } from '../../testing/runtime-stub'
 import { storageStub } from '../../testing/storage-stub'
 import { NotFound } from '../not-found'
 import type { ItemPatch, NewAttachment, NewComment } from '../ports/storage'
@@ -20,22 +21,24 @@ const item: WorkUnit = {
 }
 
 describe('getItem', () => {
-  it('returns the item with its comments and attachments', async () => {
+  it('returns the item with its comments, attachments and Runs', async () => {
     const detail = await getItem(
       storageStub({
         get: () => Promise.resolve(item),
         comments: () => Promise.resolve([]),
         attachments: () => Promise.resolve([]),
       }),
+      runtimeStub({ runsFor: () => Promise.resolve([]) }),
       'X-1',
     )
-    expect(detail).toEqual({ item, comments: [], attachments: [] })
+    expect(detail).toEqual({ item, comments: [], attachments: [], runs: [] })
   })
 
   it('a missing item is NotFound before anything else is read', async () => {
     await expect(
       getItem(
         storageStub({ get: () => Promise.reject(new NotFound('X-9 does not exist')) }),
+        runtimeStub({}),
         'X-9',
       ),
     ).rejects.toBeInstanceOf(NotFound)

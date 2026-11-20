@@ -70,7 +70,7 @@ StoragePort 的每個方法各自生效，兩次呼叫之間沒有 transaction�
 
 ```ts
 interface StoragePort {
-  list(kind: Kind, status: string): Promise<WorkUnit[]>
+  list(kind: Kind, statuses: readonly string[]): Promise<WorkUnit[]>  // one query for all of them
   get(ref: Ref): Promise<WorkUnit>            // throws NotFound
   children(item: Ref): Promise<WorkUnit[]>
   dependencies(item: Ref): Promise<Dependency[]>
@@ -93,25 +93,32 @@ interface Clock {
   now(): Date
 }
 
+// Lives in core (use cases need it), implemented in server; not a plugin role.
+// What S4 has; the comments are what later slices add.
 interface RuntimeStorePort {
-  createRun(r: NewRun): Promise<Run>          // fails if target already has a live Run; the store assigns id and logPath
-  renewLease(id: string, until: string, lastActivityAt: string): Promise<void>
-  finishRun(id: string, outcome: Outcome, usage?: Usage): Promise<void>
-  requestCancel(id: string, mode: 'soft' | 'hard', by: Actor): Promise<void>   // idempotent, hard upgrades soft
-  bumpProduced(id: string, key: 'questions' | 'tasks'): Promise<void>
+  createRun(r: NewRun): Promise<Run>          // throws RunConflict if target already has a live Run; the store assigns id and logPath
+  getRun(id: string): Promise<Run>
+  renewLease(id: string, leaseSeconds: number): Promise<void>
+  report(id: string, verdict: Verdict, summary: string): Promise<void>   // first report only
+  finishRun(id: string, outcome: Outcome): Promise<void>                  // + usage
   liveRuns(): Promise<Run[]>
   runsFor(target: Ref): Promise<Run[]>        // newest first
-  getState(key: string): Promise<string | undefined>   // e.g. 'paused'
-  setState(key: string, value: string): Promise<void>
+  // requestCancel(id, mode, by), bumpProduced(id, key), getState / setState ('paused')
 }
 
 interface RunnerPort {
   start(spec: RunSpec): RunHandle    // spawn headless CLI, returns handle
 }
+interface RunSpec {                  // + prompt, env, session (S8)
+  runId: string
+  target: Ref
+  mode: 'split' | 'execute' | 'rework'
+  workspace: string                  // created by the engine, the agent's cwd
+  mcp: { url: string; token: string }   // the MCP facade, bound to this Run
+}
 interface RunHandle {
-  readonly sessionId: Promise<string | undefined>
   readonly exit: Promise<{ code: number | null; signal: string | null }>
-  terminate(grace: 'soft' | 'hard'): Promise<void>
+  // + sessionId, terminate(grace) (S7, S8)
 }
 
 interface AuthPort {
@@ -133,7 +140,7 @@ sequenceDiagram
     participant M as MCP facade
 
     P->>U: tick
-    U->>S: list('item', watch status)
+    U->>S: list('item', every rule's watch status)
     S-->>U: candidates
     Note over U: skip hold, skip items with a live Run, respect limits and pause
     U->>R: createRun (lease)
@@ -202,14 +209,21 @@ packages/
   jira-cloud/   tracker plugin
   claude-cli/   runner plugin
   codex-cli/    runner plugin
+  fake-runner/  runner plugin that stands in for an agent, for trying the engine without an LLM
   auth/         none, static, http
-  server/       composition root, REST, MCP facade, Poller, plugin loader, config loading,
-                runtime store (sqlite)
+  server/       composition root, REST, MCP facade (/agent-mcp), user MCP (/mcp), engine
+                (Poller and Run supervision), plugin loader, config loading, runtime store (sqlite)
   web/          Vue 3 + Vite SPA
   cli/          init, doctor, start
 ```
 
 一個技術一個套件，載入方式與契約見 plugins.md（D44）。runtime store 是 engine 自己的狀態，不是 plugin，放在 `server`，所以 Jira 模式下 `sqlite` 套件不是必裝。`auth` 內建實作怎麼分套件還沒定，見 plugins.md。
+
+測試用的東西照「誰在用它」分兩種，不合成一包：
+
+- 測試 import 的放進 `testkit`。新的 port 契約（runner、auth）就在這裡加一組 `describeXxxContract`，不另開套件。它依賴測試框架，只能當 devDependency。
+- 給 config 載入的假 plugin 一個角色一包，和真的 plugin 並排，例如 `fake-runner`。它走跟真 plugin 同一條載入路徑（D44），runtime 不能帶到測試框架。tracker 有 `sqlite` 可以當假的用，不另做。
+- `core/src/testing` 的 stub 只給 core 自己的單元測試用。它不能搬進 `testkit`，因為 `testkit` 依賴 `core`，搬過去會循環依賴。
 
 `core/src` 的內部分法（D40）：分 `domain/` 與 `application/`，`application/` 再分 `ports/`、`use-cases/`、`config/`。目錄隨切片長出來，不預先建空殼。
 

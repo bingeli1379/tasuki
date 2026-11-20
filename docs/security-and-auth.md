@@ -63,6 +63,8 @@ interface AuthPort {
 - 每個 Run 發一個，跟人登入的 token 是兩套，互不相干。
 - 綁定該 item 與它底下的 task，能用的 tool 由 rule 的 `mode` 決定（見 agent-contract.md）。
 - Run 結束、取消、`abandoned` 時立刻失效。
+- 只放在 engine 的記憶體，不落地。engine 重啟時所有 Run 本來就會變成 `abandoned`，token 不需要活過重啟（D63）。
+- agent 帶著它打 `/agent-mcp`（`Authorization: Bearer <token>`），對不到存活的 Run 一律 401。
 - agent 拿不到 tracker 的 token。Jira 的 token 只存在 engine 裡。
 
 ## 使用者 MCP

@@ -43,7 +43,7 @@
 | S1 | 建立 item，在看板上看到。含最小的 config 載入、`.env`、plugin 載入（tracker 角色），內建的 `sqlite` 與 `jira-cloud` 都走這條路（已完成） | 新增 item，重新整理後還在，出現在 `refining` 欄；sqlite 與 Jira 測試 project 各做一次 |
 | S2 | 人移動 item 的 status（已完成） | 拖拉或按鈕移動；兩邊同時改時顯示衝突 |
 | S3 | item 詳情與 comment，含編輯 title 與 body、markdown、附件（已完成，D61） | 點開 item 看內容、改內容、貼圖、留言 |
-| S4 | 規則命中，假 runner 跑 split | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
+| S4 | 規則命中，假 runner 跑 split（已完成，D63） | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
 | S5 | task 與 `split-review` 放行 | 看到拆出的 task，人放行或打回 |
 | S6 | execute：task 狀態與 verdict 驗證 | item 一路走到 `in-review`、`done` |
 | S7 | hold、Stop、pause、blocked 自動接回、rework | 對應的按鈕與狀態變化 |
@@ -80,16 +80,15 @@
 
 | 切片 | 要先定 | 為什麼卡 |
 |---|---|---|
-| S4 | `config-and-rules.md` 與 `agent-contract.md` 還是草稿 | 作者決定先寫 code，兩份文件等看過 code 再改成「已確認」。S4 是第一次真的讀規則，欄位在這時一定會被碰到 |
-| S4 | `attempt` 的歸零規則（待釐清 3） | `max_attempts` 會把 item 送進 `blocked`。人手動拉回來之後 attempt 要不要繼續累計，沒定就沒辦法寫那條復原測試 |
-| S4 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。用假 clock 測得出邏輯，但預設值要有依據 |
+| S5、S6 | verdict 驗證 | S4 直接採信 verdict（D63）。split 的 `succeeded` 要檢查 item 底下有 task，S5 有 task 時補上；`needs_input` 要檢查 `produced.questions`，facade 有 `add_comment` 時補上 |
+| S8 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。S4 先照草稿當預設值，邏輯用假 clock 測過；接上真的 claude 後，用實際的輸出間隔回頭調 |
 | S8 | 「待驗證」裡 headless CLI 那幾項：session resume、http MCP、取得 session id | 結果可能讓 runner 設計大改，例如只支援 stdio 時要加 shim |
 
 ## 待釐清（設計）
 
 1. 規則 schema 的最終欄位（config-and-rules.md 是草稿）。
 2. （已定，D61）Jira 上 comment 的 author、kind：agent 與 engine 的 comment 帶 comment property 加一行看得見的標記，沒有 property 的是人寫的。
-3. `attempt` 的歸零規則。D38 是當時的暫行做法，程式碼已隨 M1 丟掉，做到 S4 時重新確認。
+3. （已定，D38）`attempt` 的歸零規則：只有 `abandoned` 之後累計，`max_attempts` 也記成一筆 Run，人拉回來就從 1 重算。
 4. item 層的成本上限怎麼算、放哪裡。
 5. （已定，D57）sqlite 模式下，互動式 agent（refine 階段）怎麼寫回 tracker：engine 在 `/mcp` 提供綁使用者身分的 MCP，Claude Code 與 Codex 都能接。
 6. splitter 遇到 item 底下已經有 task（refine 階段建的 manual task、被打回後重拆）時的冪等準則，要寫進預設 prompt。方向已定（D30）：engine 不判斷，由 agent 讀 item 裡的 task 與 comment 記錄自己決定有沒有拆過，prompt 的措辭 S8 再寫。

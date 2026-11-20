@@ -13,7 +13,7 @@
 | env `TASUKI_TARGET` | item 的 ref |
 | env `TASUKI_MODE` | `split` / `execute` / `rework` |
 | env `TASUKI_WORKSPACE` | 同 cwd |
-| MCP | 指向 engine 的 MCP facade，帶 run token。由 runner 在 spawn 時注入，做法依 CLI 而定（待驗證） |
+| MCP | 指向 engine 的 MCP facade（`/agent-mcp`），帶 run token（`Authorization: Bearer <token>`）。runner 從 `RunSpec.mcp` 拿到網址與 token，在 spawn 時注入，做法依 CLI 而定（待驗證） |
 | session | rule 的 `session` 是 `per-item` 且找得到舊 session 時，runner 用 resume。找不到或 resume 失敗就開新的 |
 
 ## MCP tools
@@ -33,6 +33,8 @@
 
 刻意沒有的：任何改 item status 的 tool、刪除、跨 item 存取。
 
+目前做到的（S4，D63）：`get_item`（不帶參數，讀被派的那張 item）與 `report_result`。其他 tool 隨用到的切片長出來。
+
 為什麼 orchestrator 不能建 task：task 圖是人在 `split-review` 檢查過才放行的，放行後再讓 AI 加 task 等於繞過關卡。orchestrator 發現需要新工作時，用 `add_comment` 寫下來，由 verdict 帶出去。
 
 `set_task_status` 的限制：
@@ -50,7 +52,9 @@ interface ReportResult {
 }
 ```
 
-engine 不直接相信 verdict，先驗證再換算成 outcome：
+`report_result` 只收第一次，之後回錯誤。
+
+engine 不直接相信 verdict，先驗證再換算成 outcome。S4 還沒做這張表的檢查，verdict 直接採信，只有「沒有 verdict」與「exit code 非零」會變成 `failed`（D63）；verdict 在規則裡沒有出口時（例如 split 回 `blocked_manual`）也是 `failed`。
 
 | verdict | engine 檢查 | 檢查失敗 |
 |---|---|---|

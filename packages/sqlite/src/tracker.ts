@@ -67,10 +67,13 @@ export function createSqliteTracker(
   }
 
   return {
-    list(kind, status) {
+    list(kind, statuses) {
+      const keys = statuses.map((s) => ctx.statuses.toTracker(kind, s))
       const rows = db
-        .prepare('SELECT * FROM work_unit WHERE kind = ? AND status = ? ORDER BY rowid')
-        .all(kind, ctx.statuses.toTracker(kind, status))
+        .prepare(
+          `SELECT * FROM work_unit WHERE kind = ? AND status IN (${keys.map(() => '?').join(', ')}) ORDER BY rowid`,
+        )
+        .all(kind, ...keys)
       return Promise.resolve(rows.map((r) => toWorkUnit(ctx, r)))
     },
     // async so a throw becomes a rejection, like every other tracker.
