@@ -1,0 +1,31 @@
+# Dependencies are pinned (D62); this proposes the updates. Security fixes open on their
+# own as soon as an advisory lands; that needs "Dependabot security updates" turned on
+# in the repository settings.
+version: 2
+updates:
+  - package-ecosystem: npm # pnpm workspaces are handled under npm
+    directory: /
+    schedule:
+      # Dependabot has no every-two-weeks interval; the 1st and 15th come close.
+      interval: cron
+      cronjob: '0 9 1,15 * *'
+      timezone: Asia/Taipei
+    # Same 7 days as pnpm's minimumReleaseAge, so CI can install what is proposed.
+    cooldown:
+      default-days: 7
+    groups:
+      all:
+        patterns: ['*']
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: cron
+      cronjob: '0 9 1,15 * *'
+      timezone: Asia/Taipei
+    cooldown:
+      default-days: 7
+    groups:
+      all:
+        patterns: ['*']
