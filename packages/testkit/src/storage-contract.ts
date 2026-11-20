@@ -1,5 +1,6 @@
 import {
   EditConflict,
+  InvalidInput,
   NotFound,
   StatusConflict,
   type StoragePort,
@@ -13,7 +14,7 @@ export interface StorageFixture {
 }
 
 // Every tracker plugin runs this suite. The fixture must map the item statuses `refining`,
-// `ready-to-split` and `in-progress`.
+// `ready-to-split` and `in-progress`, and the task statuses `to-do`, `in-progress` and `manual`.
 // Trackers may already hold other items, so assertions look for what this suite created.
 // A 1x1 PNG, so trackers that inspect uploads (Jira renders images) get a real image.
 const PNG = Uint8Array.from(
@@ -281,6 +282,88 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       const updated = await fixture.storage.updateItem(item.ref, item.version, { body })
       expect(updated.body).toBe(body)
       expect((await fixture.storage.get(item.ref)).body).toBe(body)
+    })
+
+    describe('tasks', () => {
+      const task = (title: string, blockedBy: string[] = [], status = 'to-do') => ({
+        title,
+        body: '',
+        status,
+        origin: 'splitter' as const,
+        blockedBy,
+      })
+
+      it('an item without tasks has no children and no dependencies', async () => {
+        const item = await newItem('no tasks')
+        expect(await fixture.storage.children(item.ref)).toEqual([])
+        expect(await fixture.storage.dependencies(item.ref)).toEqual([])
+      })
+
+      // A verdict is checked right after the agent made its tasks, so no waiting here.
+      it('a created task is a child of its item at once, readable on its own', async () => {
+        const item = await newItem('with tasks')
+        const created = await fixture.storage.createTask(item.ref, task('first'))
+        expect(created).toMatchObject({
+          kind: 'task',
+          parent: item.ref,
+          title: 'first',
+          status: 'to-do',
+          origin: 'splitter',
+        })
+        const manual = await fixture.storage.createTask(item.ref, task('by hand', [], 'manual'))
+        expect(manual.status).toBe('manual')
+        expect(await fixture.storage.children(item.ref)).toEqual([created, manual])
+        expect(await fixture.storage.get(created.ref)).toEqual(created)
+      })
+
+      it('records which task waits for which, at once', async () => {
+        const item = await newItem('dependencies')
+        const first = await fixture.storage.createTask(item.ref, task('first'))
+        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
+        expect(await fixture.storage.dependencies(item.ref)).toEqual([
+          { task: second.ref, blockedBy: first.ref },
+        ])
+      })
+
+      it('refuses to wait for something that is not a task of the same item', async () => {
+        const item = await newItem('foreign blocker')
+        const other = await newItem('other item')
+        const foreign = await fixture.storage.createTask(other.ref, task('theirs'))
+        await expect(
+          fixture.storage.createTask(item.ref, task('mine', [foreign.ref])),
+        ).rejects.toBeInstanceOf(InvalidInput)
+        expect(await fixture.storage.children(item.ref)).toEqual([])
+      })
+
+      it('refuses a task under something that is not an item', async () => {
+        const item = await newItem('parent of a task')
+        const child = await fixture.storage.createTask(item.ref, task('child'))
+        await expect(
+          fixture.storage.createTask(child.ref, task('grandchild')),
+        ).rejects.toBeInstanceOf(NotFound)
+      })
+
+      it('moves a task with the same compare-and-set as an item', async () => {
+        const item = await newItem('task moves')
+        const created = await fixture.storage.createTask(item.ref, task('move me'))
+        const moved = await fixture.storage.transition(created.ref, 'to-do', 'in-progress')
+        expect(moved.status).toBe('in-progress')
+        await expect(
+          fixture.storage.transition(created.ref, 'to-do', 'manual'),
+        ).rejects.toBeInstanceOf(StatusConflict)
+      })
+
+      it('lists tasks by status with their item, after the usual lag', async () => {
+        const item = await newItem('listed tasks')
+        const created = await fixture.storage.createTask(item.ref, task('listed'))
+        await expect
+          .poll(
+            async () =>
+              (await fixture.storage.list('task', ['to-do'])).find((u) => u.ref === created.ref),
+            { timeout: 10_000, interval: 500 },
+          )
+          .toEqual(created)
+      })
     })
   })
 }
