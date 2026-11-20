@@ -78,7 +78,12 @@ interface StoragePort {
   createItem(i: NewItem): Promise<WorkUnit>
   // compare-and-set: throws StatusConflict (with the unit as it is now) if current status != expectedFrom
   transition(ref: Ref, expectedFrom: string, to: string): Promise<WorkUnit>
-  addComment(c: NewComment): Promise<void>
+  addComment(c: NewComment): Promise<Comment>
+  // compare-and-set on version: throws EditConflict (with the unit as it is now)
+  updateItem(ref: Ref, expectedVersion: string, patch: ItemPatch): Promise<WorkUnit>
+  attachments(target: Ref): Promise<Attachment[]>
+  addAttachment(target: Ref, a: NewAttachment): Promise<Attachment>
+  readAttachment(target: Ref, id: string): Promise<{ attachment: Attachment; data: Uint8Array }>
   createTask(item: Ref, t: NewTask): Promise<WorkUnit>
   updateTask(ref: Ref, patch: TaskPatch): Promise<void>
   setLabels(ref: Ref, labels: string[]): Promise<void>

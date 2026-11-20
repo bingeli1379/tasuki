@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
+import { ApiError, call, messageOf, sendJson, type Item } from './api'
+import ItemDetail from './components/ItemDetail.vue'
+import { previewText } from './markdown'
 
-interface Item {
-  ref: string
-  title: string
-  body: string
-  status: string
-}
 interface Column {
   status: string
   displayName: string
@@ -29,27 +26,28 @@ const target = computed(() =>
   dragging.value && over.value !== dragging.value.status ? over.value : undefined,
 )
 const toast = useToast()
+const detailOpen = ref(false)
+const detailRef = ref('')
 
-class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly data: { error?: string; item?: Item },
-  ) {
-    super(data.error ?? `HTTP ${status}`)
-  }
+function openDetail(item: Item): void {
+  detailRef.value = item.ref
+  detailOpen.value = true
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(path, init)
-  const data: unknown = await res.json()
-  if (!res.ok) throw new ApiError(res.status, data as { error?: string })
-  return data as T
-}
+const statusName = (status: string): string =>
+  columns.value.find((c) => c.status === status)?.displayName ?? status
 
-// Takes the card out of whichever column holds it and puts it in the one its status names.
+// Puts the card in the column its status names: in place when it is already there (an
+// edit), at the end when it moved.
 function place(item: Item): void {
+  const target = columns.value.find((c) => c.status === item.status)
+  const at = target?.items.findIndex((i) => i.ref === item.ref) ?? -1
+  if (target && at >= 0) {
+    target.items[at] = item
+    return
+  }
   for (const column of columns.value) column.items = column.items.filter((i) => i.ref !== item.ref)
-  columns.value.find((c) => c.status === item.status)?.items.push(item)
+  target?.items.push(item)
 }
 
 async function load(): Promise<void> {
@@ -57,18 +55,17 @@ async function load(): Promise<void> {
     columns.value = (await call<{ columns: Column[] }>('/api/board')).columns
     error.value = ''
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = messageOf(e)
   }
 }
 
 async function create(): Promise<void> {
   saving.value = true
   try {
-    const item = await call<Item & { status: string }>('/api/items', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title: title.value, body: body.value }),
-    })
+    const item = await call<Item>(
+      '/api/items',
+      sendJson('POST', { title: title.value, body: body.value }),
+    )
     // Not a reload: the board may lag behind writes (Jira search index).
     columns.value.find((c) => c.status === item.status)?.items.push(item)
     title.value = ''
@@ -76,7 +73,7 @@ async function create(): Promise<void> {
     error.value = ''
     open.value = false
   } catch (e) {
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = messageOf(e)
   } finally {
     saving.value = false
   }
@@ -90,11 +87,10 @@ async function move(item: Item, to: string): Promise<void> {
   try {
     // Not a reload, for the same reason as create.
     place(
-      await call<Item>(`/api/items/${item.ref}/transition`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from: item.status, to }),
-      }),
+      await call<Item>(
+        `/api/items/${item.ref}/transition`,
+        sendJson('POST', { from: item.status, to }),
+      ),
     )
     error.value = ''
   } catch (e) {
@@ -112,7 +108,7 @@ async function move(item: Item, to: string): Promise<void> {
       return
     }
     place(item)
-    error.value = e instanceof Error ? e.message : String(e)
+    error.value = messageOf(e)
   } finally {
     pending.value = pending.value.filter((r) => r !== item.ref)
   }
@@ -184,11 +180,11 @@ onMounted(load)
               :key="item.ref"
               :aria-label="item.title"
               :draggable="!pending.includes(item.ref)"
-              :class="pending.includes(item.ref) ? 'opacity-60' : 'cursor-grab'"
+              :class="{ 'opacity-60': pending.includes(item.ref) }"
               @dragstart="dragging = item"
               @dragend="((dragging = undefined), (over = undefined))"
             >
-              <UCard :ui="{ body: 'p-3 sm:p-3' }">
+              <UCard :ui="{ root: 'relative', body: 'p-3 sm:p-3' }">
                 <div class="flex items-center justify-between">
                   <p class="text-xs text-muted">{{ item.ref }}</p>
                   <UDropdownMenu
@@ -207,12 +203,21 @@ onMounted(load)
                       color="neutral"
                       variant="ghost"
                       size="xs"
+                      class="relative z-10"
                     />
                   </UDropdownMenu>
                 </div>
-                <p class="font-medium">{{ item.title }}</p>
-                <p v-if="item.body" class="mt-1 text-sm whitespace-pre-wrap text-toned">
-                  {{ item.body }}
+                <!-- Its ::after covers the whole card, so a click anywhere opens the item while
+                     keyboard users still get one focusable button. Move sits above it. -->
+                <button
+                  type="button"
+                  class="cursor-pointer text-left font-medium after:absolute after:inset-0 after:rounded-lg hover:underline focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary"
+                  @click="openDetail(item)"
+                >
+                  {{ item.title }}
+                </button>
+                <p v-if="item.body" class="mt-1 line-clamp-3 text-sm text-toned">
+                  {{ previewText(item.body) }}
                 </p>
               </UCard>
             </article>
@@ -226,5 +231,14 @@ onMounted(load)
         </div>
       </main>
     </div>
+    <!-- Keyed: each item gets a fresh editor, whose image extension is bound to its ref. -->
+    <ItemDetail
+      v-if="detailRef"
+      :key="detailRef"
+      v-model:open="detailOpen"
+      :item-ref="detailRef"
+      :status-name="statusName"
+      @updated="place"
+    />
   </UApp>
 </template>

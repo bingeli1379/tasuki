@@ -1,6 +1,11 @@
 import {
+  EditConflict,
   NotFound,
   StatusConflict,
+  type Attachment,
+  type Comment,
+  type CommentAuthor,
+  type CommentKind,
   type Kind,
   type PluginContext,
   type StoragePort,
@@ -20,6 +25,32 @@ function toWorkUnit(ctx: PluginContext, row: Row): WorkUnit {
     body: String(row['body']),
     status: ctx.statuses.fromTracker(kind, key) ?? key,
     labels: JSON.parse(String(row['labels'])) as string[],
+    version: String(row['version']),
+  }
+}
+
+function toComment(row: Row): Comment {
+  return {
+    id: String(row['id']),
+    target: String(row['target']),
+    author: row['author'] as CommentAuthor,
+    ...(typeof row['author_name'] === 'string' ? { authorName: row['author_name'] } : {}),
+    kind: row['kind'] as CommentKind,
+    body: String(row['body']),
+    createdAt: String(row['created_at']),
+  }
+}
+
+const ATTACHMENT_COLUMNS = 'id, target, filename, mime_type, size, created_at'
+
+function toAttachment(row: Row): Attachment {
+  return {
+    id: String(row['id']),
+    target: String(row['target']),
+    filename: String(row['filename']),
+    mimeType: String(row['mime_type']),
+    size: Number(row['size']),
+    createdAt: String(row['created_at']),
   }
 }
 
@@ -72,7 +103,8 @@ export function createSqliteTracker(
       // compare-and-set: a concurrent move makes this one update nothing.
       const row = db
         .prepare(
-          `UPDATE work_unit SET status = ?, updated_at = ? WHERE ref = ? AND status = ? RETURNING *`,
+          `UPDATE work_unit SET status = ?, updated_at = ?, version = version + 1
+           WHERE ref = ? AND status = ? RETURNING *`,
         )
         .get(
           ctx.statuses.toTracker(kind, to),
@@ -82,6 +114,81 @@ export function createSqliteTracker(
         )
       if (row === undefined) throw new StatusConflict(expectedFrom, get(ref))
       return toWorkUnit(ctx, row)
+    },
+    async updateItem(ref, expectedVersion, patch) {
+      get(ref)
+      // Same compare-and-set as transition: the version check is in the write itself.
+      const row = db
+        .prepare(
+          `UPDATE work_unit SET title = COALESCE(?, title), body = COALESCE(?, body),
+             updated_at = ?, version = version + 1
+           WHERE ref = ? AND version = ? RETURNING *`,
+        )
+        .get(
+          patch.title ?? null,
+          patch.body ?? null,
+          ctx.clock.now().toISOString(),
+          ref,
+          Number(expectedVersion),
+        )
+      if (row === undefined) throw new EditConflict(get(ref))
+      return toWorkUnit(ctx, row)
+    },
+    async comments(target) {
+      get(target)
+      return db
+        .prepare('SELECT * FROM comment WHERE target = ? ORDER BY id')
+        .all(target)
+        .map(toComment)
+    },
+    async addComment(comment) {
+      get(comment.target)
+      const row = db
+        .prepare(
+          `INSERT INTO comment (target, author, kind, body, created_at) VALUES (?, ?, ?, ?, ?)
+           RETURNING *`,
+        )
+        .get(
+          comment.target,
+          comment.author,
+          comment.kind,
+          comment.body,
+          ctx.clock.now().toISOString(),
+        )
+      if (row === undefined) throw new Error('insert returned no row')
+      return toComment(row)
+    },
+    async attachments(target) {
+      get(target)
+      return db
+        .prepare(`SELECT ${ATTACHMENT_COLUMNS} FROM attachment WHERE target = ? ORDER BY id`)
+        .all(target)
+        .map(toAttachment)
+    },
+    async addAttachment(target, attachment) {
+      get(target)
+      const row = db
+        .prepare(
+          `INSERT INTO attachment (target, filename, mime_type, size, data, created_at)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING ${ATTACHMENT_COLUMNS}`,
+        )
+        .get(
+          target,
+          attachment.filename,
+          attachment.mimeType,
+          attachment.data.byteLength,
+          attachment.data,
+          ctx.clock.now().toISOString(),
+        )
+      if (row === undefined) throw new Error('insert returned no row')
+      return toAttachment(row)
+    },
+    async readAttachment(target, id) {
+      const row = db
+        .prepare(`SELECT ${ATTACHMENT_COLUMNS}, data FROM attachment WHERE target = ? AND id = ?`)
+        .get(target, Number(id))
+      if (row === undefined) throw new NotFound(`${target} has no attachment ${id}`)
+      return { attachment: toAttachment(row), data: new Uint8Array(row['data'] as Uint8Array) }
     },
   }
 }

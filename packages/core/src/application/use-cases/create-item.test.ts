@@ -1,18 +1,16 @@
 import { describe, expect, it } from 'vite-plus/test'
+import { storageStub } from '../../testing/storage-stub'
 import type { NewItem, StoragePort } from '../ports/storage'
 import { createItem } from './create-item'
 
 const recording = (): { storage: StoragePort; created: NewItem[] } => {
   const created: NewItem[] = []
-  const storage: StoragePort = {
-    list: () => Promise.resolve([]),
-    get: () => Promise.reject(new Error('not used')),
-    transition: () => Promise.reject(new Error('not used')),
+  const storage = storageStub({
     createItem: (item) => {
       created.push(item)
-      return Promise.resolve({ ref: 'X-1', kind: 'item', labels: [], ...item })
+      return Promise.resolve({ ref: 'X-1', kind: 'item', labels: [], version: '1', ...item })
     },
-  }
+  })
   return { storage, created }
 }
 

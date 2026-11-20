@@ -11,6 +11,9 @@
 | status | 邏輯名（kebab-case）。config 的 status mapping 把它對到 tracker 的實際名稱。 |
 | logical name / display name | 邏輯名是 config 與程式用的 key（`ready-to-split`），顯示名是 UI 用的 Title Case（`Ready to Split`）。 |
 | manual task | status 為 `manual` 的 task，等人做。 |
+| attachment | item 上的附件。body 用 `![說明](attachment:<id>)` 引用。 |
+| embed token | body 或 comment 裡的 `[[embed:<標籤>\|<內容>]]`，代表 tracker 有但 markdown 表達不了的內容（Jira 的 mention、表格），存回去時原樣放回（D61）。 |
+| version | work unit 的不透明版本，title、body、status 改了就變。編輯帶著開始時的 version，被別人改過就是 `EditConflict`。 |
 | origin | task 是誰建立的，`refine`、`splitter`、`human` 三種。 |
 | hold | item 上的 label（名稱可設定）。貼上後 AI 不碰這張 item。 |
 | blocked | item 的 status，系統發現卡住了。跟 hold 不同，hold 是人叫 AI 別碰。 |

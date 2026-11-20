@@ -2,7 +2,7 @@ import { createStatusMap, type StoragePort } from '@tasuki/core'
 import { describeStorageContract } from '@tasuki/testkit'
 import { existsSync } from 'node:fs'
 import { describe, it } from 'vite-plus/test'
-import { createClient } from './client'
+import { createClient, createFetch } from './client'
 import { parseOptions } from './options'
 import { createJiraTracker } from './tracker'
 
@@ -28,7 +28,8 @@ if (configured) {
       project: env['JIRA_TEST_PROJECT'],
       issueTypes: { item: env['JIRA_TEST_ITEM_TYPE'] },
     })
-    const jira = createClient(options)
+    const jiraFetch = createFetch(options)
+    const jira = createClient(jiraFetch)
     const ctx = {
       clock: { now: () => new Date() },
       dataDir: '',
@@ -37,12 +38,10 @@ if (configured) {
         item: JSON.parse(String(env['JIRA_TEST_ITEM_STATUSES'])) as Record<string, string>,
       }),
     }
-    const inner = createJiraTracker(ctx, options, jira)
+    const inner = createJiraTracker(ctx, options, jira, jiraFetch)
     const created: string[] = []
     const storage: StoragePort = {
-      list: (kind, status) => inner.list(kind, status),
-      get: (ref) => inner.get(ref),
-      transition: (ref, from, to) => inner.transition(ref, from, to),
+      ...inner,
       createItem: async (item) => {
         const unit = await inner.createItem(item)
         created.push(unit.ref)
@@ -50,7 +49,7 @@ if (configured) {
       },
     }
     const teardown = async (): Promise<void> => {
-      for (const ref of created) await jira('DELETE', `/issue/${ref}`)
+      await Promise.all(created.map((ref) => jira('DELETE', `/issue/${ref}`)))
     }
     return Promise.resolve({ storage, teardown })
   })

@@ -13,4 +13,7 @@ export interface WorkUnit {
   assignee?: string
   labels: string[]
   origin?: 'refine' | 'splitter' | 'human'
+  // Opaque; changes when title, body or status does, not on comments or attachments.
+  // An edit carries the version it started from (EditConflict).
+  version: string
 }

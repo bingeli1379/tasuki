@@ -11,11 +11,16 @@
   },
   "dependencies": {
     "@nuxt/ui": "^4.12.0",
+    "@tasuki/core": "workspace:*",
+    "@tiptap/core": "^3.34.0",
+    "@tiptap/extension-image": "^3.34.0",
+    "markdown-it": "^15.0.3",
     "tailwindcss": "^4.3.5",
     "vue": "^3.5.44"
   },
   "devDependencies": {
     "@playwright/test": "^1.65.1",
+    "@types/markdown-it": "^14.2.0",
     "@vitejs/plugin-vue": "^6.0.10",
     "typescript": "~6.0.3",
     "vue-tsc": "3.3.14"

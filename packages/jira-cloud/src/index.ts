@@ -1,5 +1,5 @@
 import { API_VERSION, definePlugin, type Plugin } from '@tasuki/core'
-import { createClient } from './client'
+import { createClient, createFetch } from './client'
 import { parseOptions } from './options'
 import { createJiraTracker } from './tracker'
 
@@ -8,7 +8,8 @@ const plugin: Plugin = definePlugin({
   apiVersion: API_VERSION,
   tracker: (ctx, raw) => {
     const options = parseOptions(raw)
-    return createJiraTracker(ctx, options, createClient(options))
+    const jiraFetch = createFetch(options)
+    return createJiraTracker(ctx, options, createClient(jiraFetch), jiraFetch)
   },
 })
 

@@ -79,6 +79,16 @@ Claude Code 與 Codex 不會填登入表單，也不適合放一個 24 小時就
 
 已知風險：只綁 loopback 擋不住 DNS rebinding，惡意網頁可以讓瀏覽器把請求送到 `127.0.0.1:8787`。REST 與 `/mcp` 都受影響，S9 一起檢查 `Host` header：只接受 loopback 的名稱，以及 `server.publicUrl` 的 host。
 
+## 附件與內容
+
+附件與 ticket 內容都是任何人都能寫進來的東西，看板當成不可信內容處理（D61）：
+
+- 附件最大 10 MB，server 在讀完 body 之前就擋。
+- 只有 png、jpeg、gif、webp 在瀏覽器裡直接顯示；其他一律 `application/octet-stream` 加 `Content-Disposition: attachment` 強制下載。SVG 也算其他，因為它可以帶 script。
+- 每個附件回應都帶 `X-Content-Type-Options: nosniff` 與 `Content-Security-Policy: default-src 'none'; sandbox`。
+- 讀附件時檢查它屬於網址上那張 item，不能拿 A 的網址讀 B 的附件；Jira 模式下 tasuki 也只讀自己 project 的 item。
+- markdown 用 markdown-it 畫，關掉 HTML，`javascript:` 這類連結它本來就不產生。連結開新分頁並帶 `rel="noopener noreferrer"`。
+
 ## Plugin 的信任範圍
 
 - plugin 是 in-process 的 npm 套件，與 engine 同一個 process、同樣的權限。它是受信任的程式碼，信任程度等同 `package.json` 裡的其他相依。

@@ -406,3 +406,28 @@
   - 以帳號計數而不是 IP，不用信任 proxy 帶的 header；不鎖帳號，避免任何人都能把別人鎖在外面。
   - 作者確認目前不需要分權限。
 - 重新檢視：有使用者需要唯讀或只能看部分 item 的角色時；要支援多 instance 時（失敗計數要搬出記憶體）；有人要求 engine 直接對外提供 HTTPS 時。
+
+## D61 S3：item 詳情、編輯、markdown、comment 與附件
+- 範圍：作者決定 S3 除了看內容與留言，也做編輯 title 與 body、markdown、附件（上傳、下載、貼進 body）。詳情用置中的 modal。
+- 決定：
+  - `StoragePort` 加 `updateItem`、`comments`、`addComment`（回傳 Comment）、`attachments`、`addAttachment`、`readAttachment`。`WorkUnit` 加不透明的 `version`，編輯帶著開始時的 version，對不上丟 `EditConflict`（REST 409，帶 item 現在的樣子）。沒改的欄位不送。
+  - version 只跟 title、body、status 有關：sqlite 是每次改這三個欄位加一的整數，Jira 是這三個欄位的 hash。不用 Jira 的 `updated`，因為留言、上傳附件也會改它，「開始編輯、上傳圖、插進 body、存檔」這條最常見的路會被誤判成衝突。
+  - body 與 comment 是 markdown，單一換行就是換行。看板用 markdown-it 畫（關 HTML、關 linkify）；Jira 用 marklassian 轉 ADF，ADF 轉回 markdown 自己寫（找不到夠多人用、還在維護的套件）。
+  - markdown 表達不了的 Jira 內容（mention、表格、panel、沒對到附件的圖）寫成 embed token，帶著原本的節點，存回去原樣放回。底線、文字顏色、上下標、對齊會掉，作者接受。
+  - comment：人在看板上留的是 `human`、`note`；agent 與 engine 的 comment 在 Jira 帶 comment property `tasuki` 與一行看得見的「tasuki · agent · question」標記，讀的時候拿掉。沒有 property 的一律當人寫的，所以直接在 Jira 網頁留言也是 human。登入（S9）之前，sqlite 的人沒有名字，畫面顯示「You」；Jira 顯示 Jira 帳號的名字。
+  - 附件：最大 10 MB；sqlite 存成 BLOB；只有點陣圖在瀏覽器裡直接顯示，其餘強制下載（security-and-auth.md）。body 用 `![說明](attachment:<id>)` 引用。
+  - 使用者 MCP 加 `get_item`、`update_item`、`add_comment`、`add_attachment`、`get_attachment`。圖片附件用 MCP 的 image 回傳。
+  - Jira client 每個請求 30 秒 timeout。
+  - 編輯 body 用 Nuxt UI 的 `UEditor`（TipTap，所見即所得），作者選的。markdown 進、markdown 出，`breaks: true` 讓單一換行就是換行。embed token 在編輯器裡是一顆刪得掉、改不了的小方塊，存回去一字不差；圖片節點保留 `attachment:<id>`，只在畫面上換成下載網址。存檔前把 TipTap 的硬換行（行尾兩個空白）換回單一換行，字中間的 `\_` 還原成 `_`。`_em_` 會被改寫成 `*em*`，意思一樣，接受。
+  - 工具列用文字按鈕不用圖示：Nuxt UI 沒裝圖示集時會在執行時向 Iconify API 抓圖示，公司內網連不到就整排空白。
+  - `web` 直接依賴 `@tiptap/core` 與 `@tiptap/extension-image`（版本跟 Nuxt UI 用的同一份），並在 Vite 的 `optimizeDeps.exclude` 排除它們：預打包會讓頁面多一份 ProseMirror，編輯器起不來（`Adding different instances of a keyed plugin`）。只影響開發模式。
+  - 整張卡片都能點開詳情，靠標題按鈕的 `::after` 蓋住整張卡，鍵盤一樣只有一個可聚焦的按鈕；Move 疊在上面。
+- Jira 的實測（2026-11-19、20，KAN）：
+  - comment property 可以在建立 comment 時一起帶，`expand=properties` 一次讀回。
+  - ADF 的圖片節點只認附件的 media id（UUID），填數字的附件 id 回 `ATTACHMENT_VALIDATION_ERROR`。上傳 API 與附件 API 都不給 media id；`GET /attachment/content/{id}` 不跟轉址時，`Location` 是 `https://api.media.atlassian.com/file/<media id>/binary?...`，從這裡取。不是公開 API，見 plan.md 的風險。
+  - 讀的方向，media id 對附件 id 只有 `expand=renderedFields` 的 HTML 裡有（`href=".../attachment/content/<id>"` 與 `data-media-services-id`），所以只有 description 或 comment 真的有圖時才要 render。
+  - 圖片節點帶 `alt` 時，Jira render 會整張圖略過，所以寫進 Jira 不帶 `alt`，讀回來用附件檔名當說明。自訂的圖片說明存到 Jira 會變回檔名。
+  - 用 `external` 圖片節點指向 Jira 自己的附件網址，Jira 收下了，但讀那張 issue 的 render 會卡到逾時，所以絕對不寫這種節點；這也是加 timeout 的原因。
+  - 上傳附件要帶 `X-Atlassian-Token: no-check`。
+- 理由：作者要 Jira 與 sqlite 都能完整編輯，包含貼圖，而且編輯不能弄壞 Jira 上 tasuki 看不懂的內容。不能保留的只有樣式，字不會掉。
+- 重新檢視：Atlassian 公開取得 media id 的 API，或轉址格式改變時；有人需要底線、顏色這類樣式時；附件需要超過 10 MB 時。
