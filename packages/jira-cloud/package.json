@@ -14,7 +14,7 @@
   },
   "dependencies": {
     "@tasuki/core": "workspace:*",
-    "marklassian": "^1.2.1"
+    "marklassian": "1.2.1"
   },
   "devDependencies": {
     "@tasuki/testkit": "workspace:*"

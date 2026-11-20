@@ -1,6 +1,59 @@
 packages:
   - packages/*
 
+# Dependencies are pinned and only move through a reviewed update (D62).
+saveExact: true
+# A version must be public for 7 days before it can be installed: most hijacked releases
+# are caught and pulled within that window.
+minimumReleaseAge: 10080
+# Already locked and tested before the cooldown went from 1 day to 7; these exact versions
+# only, so a newer release of either still waits. Drop once they are 7 days old (2026-11-21).
+minimumReleaseAgeExclude:
+  - '@iconify/collections@1.0.765'
+  - '@playwright/test@1.65.1'
+  - '@tiptap/core@3.34.0'
+  - '@tiptap/extension-blockquote@3.34.0'
+  - '@tiptap/extension-bold@3.34.0'
+  - '@tiptap/extension-bubble-menu@3.34.0'
+  - '@tiptap/extension-bullet-list@3.34.0'
+  - '@tiptap/extension-code-block@3.34.0'
+  - '@tiptap/extension-code@3.34.0'
+  - '@tiptap/extension-collaboration@3.34.0'
+  - '@tiptap/extension-document@3.34.0'
+  - '@tiptap/extension-drag-handle-vue-3@3.34.0'
+  - '@tiptap/extension-drag-handle@3.34.0'
+  - '@tiptap/extension-dropcursor@3.34.0'
+  - '@tiptap/extension-floating-menu@3.34.0'
+  - '@tiptap/extension-gapcursor@3.34.0'
+  - '@tiptap/extension-hard-break@3.34.0'
+  - '@tiptap/extension-heading@3.34.0'
+  - '@tiptap/extension-horizontal-rule@3.34.0'
+  - '@tiptap/extension-image@3.34.0'
+  - '@tiptap/extension-italic@3.34.0'
+  - '@tiptap/extension-link@3.34.0'
+  - '@tiptap/extension-list-item@3.34.0'
+  - '@tiptap/extension-list-keymap@3.34.0'
+  - '@tiptap/extension-list@3.34.0'
+  - '@tiptap/extension-mention@3.34.0'
+  - '@tiptap/extension-node-range@3.34.0'
+  - '@tiptap/extension-ordered-list@3.34.0'
+  - '@tiptap/extension-paragraph@3.34.0'
+  - '@tiptap/extension-placeholder@3.34.0'
+  - '@tiptap/extension-strike@3.34.0'
+  - '@tiptap/extension-text@3.34.0'
+  - '@tiptap/extension-underline@3.34.0'
+  - '@tiptap/extensions@3.34.0'
+  - '@tiptap/markdown@3.34.0'
+  - '@tiptap/pm@3.34.0'
+  - '@tiptap/starter-kit@3.34.0'
+  - '@tiptap/suggestion@3.34.0'
+  - '@tiptap/vue-3@3.34.0'
+  - 'playwright-core@1.65.1'
+  - 'playwright@1.65.1'
+  - 'postcss@8.5.33'
+  - 'prosemirror-inputrules@1.6.0'
+  - 'tapable@2.3.4'
+
 allowBuilds:
   esbuild: false
   vue-demi: false

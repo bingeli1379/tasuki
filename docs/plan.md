@@ -100,7 +100,7 @@
 11. 不變量 3（`in-progress` 的 task 只有 item 有存活 Run 時才可信）目前只靠 agent 遵守，engine 端沒有對應程式碼，測試只留了 `it.todo`。要不要由 engine 在 Run 結束時把殘留的 `in-progress` task 改回 `to-do`，或維持由 agent 處理？
 12. 人能不能把 `done` 的 task 重開。task 圖沒有 `done` 的出口，實作時照圖，所有人都不行。
 13. config 的 JSON Schema 怎麼產生。D28 的 `isolatedDeclarations` 要求每個 export 有明確型別，zod 這類 schema 物件很難滿足，所以傾向型別手寫。要補 `$schema` 給編輯器用時再決定（手寫、或從型別產生）。
-14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。team-managed 的 workflow 可以用 `POST /workflows/update` 改，S2 設定 KAN 時用過（D59）。
+14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。team-managed 的 workflow 可以用 `POST /workflows/update` 改，S2 設定 KAN 時用過（D59）。Jira 看板的欄位也要一起檢查：`doctor` 用公開的 `GET /rest/agile/1.0/board/{id}/configuration` 比對，tasuki 用到的 status 沒有出現在任何一欄就警告（那些卡片在 Jira 看板上會看不到），欄位順序跟 state-machine.md 不同也提示。公開 API 不能改看板欄位，所以順序對不上時問使用者要不要「試著」自動排：用 Jira 網頁自己用的內部 API `PUT /rest/greenhopper/1.0/rapidviewconfig/columns`（2026-11-20 在 KAN 的 team-managed 看板上試過，回 500 但順序已經存進去），排完重讀一次確認；失敗或結果不對，就退回列出正確順序請使用者自己拖。內部 API 沒有文件、隨時會變，不能當成唯一的路。
 
 ## 待驗證（動手前對現行文件確認）
 
