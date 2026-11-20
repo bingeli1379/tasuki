@@ -1,4 +1,10 @@
-import { NotFound, StatusConflict, type StoragePort } from '@tasuki/core'
+import {
+  EditConflict,
+  NotFound,
+  StatusConflict,
+  type StoragePort,
+  type WorkUnit,
+} from '@tasuki/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test'
 
 export interface StorageFixture {
@@ -9,6 +15,33 @@ export interface StorageFixture {
 // Every tracker plugin runs this suite. The fixture must map the item statuses `refining`,
 // `ready-to-split` and `in-progress`.
 // Trackers may already hold other items, so assertions look for what this suite created.
+// A 1x1 PNG, so trackers that inspect uploads (Jira renders images) get a real image.
+const PNG = Uint8Array.from(
+  atob(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+  ),
+  (c) => c.charCodeAt(0),
+)
+
+// Markdown in the shape trackers write it back, so a round trip compares equal.
+// A single newline is a line break, as people expect when they press Enter.
+const MARKDOWN = [
+  '# Heading',
+  '',
+  'Some **bold**, _em_, `code`, ~~gone~~ and [a link](https://example.com).',
+  'second line, same paragraph',
+  '',
+  '- one',
+  '- two',
+  '  1. nested',
+  '',
+  '```ts',
+  'const x = 1',
+  '```',
+  '',
+  '> quoted',
+].join('\n')
+
 export function describeStorageContract(name: string, setup: () => Promise<StorageFixture>): void {
   // A remote tracker takes several round trips per test (create, re-read, transition).
   describe(`StoragePort contract: ${name}`, { timeout: 30_000 }, () => {
@@ -19,7 +52,7 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
     })
     afterAll(async () => {
       await fixture.teardown?.()
-    })
+    }, 60_000)
 
     it('createItem returns the item with a ref and the requested status', async () => {
       const item = await fixture.storage.createItem({
@@ -69,7 +102,8 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         status: 'refining',
       })
       const moved = await fixture.storage.transition(item.ref, 'refining', 'ready-to-split')
-      expect(moved).toEqual({ ...item, status: 'ready-to-split' })
+      expect(moved).toEqual({ ...item, status: 'ready-to-split', version: moved.version })
+      expect(moved.version).not.toBe(item.version)
       expect(await fixture.storage.get(item.ref)).toEqual(moved)
     })
 
@@ -93,6 +127,128 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       await expect(
         fixture.storage.transition(ref, 'refining', 'in-progress'),
       ).rejects.toBeInstanceOf(NotFound)
+    })
+
+    const newItem = (title: string, body = ''): Promise<WorkUnit> =>
+      fixture.storage.createItem({ title: `contract: ${title}`, body, status: 'refining' })
+
+    it('updateItem writes the fields given and leaves the rest', async () => {
+      const item = await newItem('update', 'keep me')
+      const updated = await fixture.storage.updateItem(item.ref, item.version, {
+        title: 'contract: updated',
+      })
+      expect(updated).toMatchObject({ title: 'contract: updated', body: 'keep me' })
+      expect(updated.version).not.toBe(item.version)
+      expect(await fixture.storage.get(item.ref)).toEqual(updated)
+    })
+
+    it('updateItem from a version someone replaced is an EditConflict', async () => {
+      const item = await newItem('edit conflict')
+      await fixture.storage.updateItem(item.ref, item.version, { body: 'theirs' })
+
+      const stale = fixture.storage.updateItem(item.ref, item.version, { body: 'mine' })
+      await expect(stale).rejects.toBeInstanceOf(EditConflict)
+      await expect(stale).rejects.toMatchObject({ current: { body: 'theirs' } })
+      expect((await fixture.storage.get(item.ref)).body).toBe('theirs')
+    })
+
+    it('a markdown body round-trips unchanged', async () => {
+      const item = await newItem('markdown', MARKDOWN)
+      expect(item.body).toBe(MARKDOWN)
+      expect((await fixture.storage.get(item.ref)).body).toBe(MARKDOWN)
+    })
+
+    it('comments come back oldest first with their author and kind', async () => {
+      const item = await newItem('comments')
+      const human = await fixture.storage.addComment({
+        target: item.ref,
+        author: 'human',
+        kind: 'note',
+        body: 'looks **good**',
+      })
+      await fixture.storage.addComment({
+        target: item.ref,
+        author: 'agent',
+        kind: 'question',
+        body: 'which locale?\nsecond line',
+      })
+      await fixture.storage.addComment({
+        target: item.ref,
+        author: 'engine',
+        kind: 'system',
+        body: 'run failed',
+      })
+      expect(human).toMatchObject({ target: item.ref, author: 'human', body: 'looks **good**' })
+
+      const comments = await fixture.storage.comments(item.ref)
+      expect(comments.map((c) => [c.author, c.kind, c.body])).toEqual([
+        ['human', 'note', 'looks **good**'],
+        ['agent', 'question', 'which locale?\nsecond line'],
+        ['engine', 'system', 'run failed'],
+      ])
+      expect(comments[0]).toEqual(human)
+    })
+
+    it('comments and attachments leave the version alone', async () => {
+      const item = await newItem('version')
+      await fixture.storage.addComment({
+        target: item.ref,
+        author: 'human',
+        kind: 'note',
+        body: 'x',
+      })
+      await fixture.storage.addAttachment(item.ref, {
+        filename: 'a.png',
+        mimeType: 'image/png',
+        data: PNG,
+      })
+      expect((await fixture.storage.get(item.ref)).version).toBe(item.version)
+    })
+
+    it('an attachment is listed and reads back byte for byte', async () => {
+      const item = await newItem('attachment')
+      const added = await fixture.storage.addAttachment(item.ref, {
+        filename: 'dot.png',
+        mimeType: 'image/png',
+        data: PNG,
+      })
+      expect(added).toMatchObject({
+        target: item.ref,
+        filename: 'dot.png',
+        mimeType: 'image/png',
+        size: PNG.byteLength,
+      })
+      expect(await fixture.storage.attachments(item.ref)).toEqual([added])
+
+      const read = await fixture.storage.readAttachment(item.ref, added.id)
+      expect(read.attachment).toEqual(added)
+      expect([...read.data]).toEqual([...PNG])
+    })
+
+    it("another unit's attachment is NotFound", async () => {
+      const owner = await newItem('attachment owner')
+      const other = await newItem('attachment other')
+      const added = await fixture.storage.addAttachment(owner.ref, {
+        filename: 'dot.png',
+        mimeType: 'image/png',
+        data: PNG,
+      })
+      await expect(fixture.storage.readAttachment(other.ref, added.id)).rejects.toBeInstanceOf(
+        NotFound,
+      )
+    })
+
+    it('a body embedding its own attachment round-trips unchanged', async () => {
+      const item = await newItem('embedded image')
+      const added = await fixture.storage.addAttachment(item.ref, {
+        filename: 'dot.png',
+        mimeType: 'image/png',
+        data: PNG,
+      })
+      const body = `before\n\n![dot.png](attachment:${added.id})\n\nafter`
+      const updated = await fixture.storage.updateItem(item.ref, item.version, { body })
+      expect(updated.body).toBe(body)
+      expect((await fixture.storage.get(item.ref)).body).toBe(body)
     })
   })
 }
