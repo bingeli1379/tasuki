@@ -9,7 +9,7 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
 ## 形狀
 
-`tracker` 用 `plugin` 加 `options` 指定（D48，見 plugins.md）。省略 `tracker` 時是 `@tasuki/sqlite`（D1）。`agents` 裡的 `kind` 也會改成指定 plugin，S8 做 runner 時再定。
+`tracker` 用 `plugin` 加 `options` 指定（D48，見 plugins.md）。省略 `tracker` 時是 `@tasuki/sqlite`（D1）。`agents` 的每一個 agent 也是 `plugin` 加 `options`，指定一個 runner plugin（D63）。
 
 ```jsonc
 {
@@ -70,16 +70,21 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
   "workspace": { "cleanup": "never" },         // "never" | "on-done"; root defaults to <dataDir>/workspaces
 
+  // A runner plugin each. The fields inside options are the claude-cli plugin's own and
+  // get settled in S8; only the fake runner exists so far.
   "agents": {
     "claude-main": {
-      "kind": "claude-cli",
-      "auth": "inherit-login",                 // "api-key" | "inherit-login" | "oauth-token"
-      "model": null,
-      "allowedTools": [],
-      "env": { "GITLAB_TOKEN": "${GITLAB_TOKEN}" },   // passed to the spawned CLI only
-      "requires": { "mcpServers": [], "skills": [] }   // optional preflight, see doctor
+      "plugin": "@tasuki/claude-cli",
+      "options": {
+        "auth": "inherit-login",               // "api-key" | "inherit-login" | "oauth-token"
+        "model": null,
+        "allowedTools": [],
+        "env": { "GITLAB_TOKEN": "${GITLAB_TOKEN}" },   // passed to the spawned CLI only
+        "requires": { "mcpServers": [], "skills": [] }   // optional preflight, see doctor
+      }
     },
-    "codex-main": { "kind": "codex-cli", "auth": "inherit-login", "env": {} }
+    "codex-main": { "plugin": "@tasuki/codex-cli", "options": { "auth": "inherit-login" } },
+    "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 3 } }
   },
 
   "rules": [ /* see Default rules */ ],
@@ -126,9 +131,9 @@ my-instance/
 
 資料夾放哪裡都可以，用 `tasuki start --config <路徑>` 指定，或先 `cd` 進去直接 `tasuki start`。container 裡把 `dataDir` 設成 `/data` 再掛 volume。
 
-範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例只寫了 `tracker`，`agents`、`rules` 的形狀還沒定，先不寫。
+範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 實際讀的欄位（S1）：`dataDir`、`server.port`、`tracker`、`statuses.item`。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。
+目前 server 實際讀的欄位（S4）：`dataDir`、`server.port`、`tracker`、`statuses.item`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。
 
 ## Rule 欄位
 

@@ -49,6 +49,7 @@ export default definePlugin({
 ```
 
 - 有提供的角色才寫那個 key（`tracker`、`runner`、`auth`），一個套件可以寫多個。
+- `runner` 工廠回傳 `RunnerPort`。engine 對每個 config 裡的 agent 呼叫一次工廠，`options` 是那個 agent 的 `options`。內建的 `@tasuki/fake-runner` 是最小的例子：它跟真的 agent 一樣用 HTTP 打 MCP facade（D63）。
 - `ctx` 是 engine 注入的東西：`Clock`、解析成絕對路徑的 `dataDir`、`statuses`（邏輯名與 tracker 端 status key 的雙向對照）。plugin 不自己取時間，也不自己決定資料放哪裡。port 進出的 status 一律是邏輯名，翻成 tracker 的 key 是 plugin 的事。logger 等第一個需要它的切片再加。
 - `options` 是 config 裡該 plugin 的 `options`，`${VAR}` 已經展開。
 - 工廠用函式而不是 class，因為注入點就是參數，第三方不用繼承 `core` 的任何東西。
