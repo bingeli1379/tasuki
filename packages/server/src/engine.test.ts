@@ -397,7 +397,7 @@ describe('the MCP facade for agents', () => {
       await splitInto()(client, t.started[0] as RunSpec)
       const again = await client.callTool({
         name: 'report_result',
-        arguments: { verdict: 'failed', summary: '' },
+        arguments: { verdict: 'failed', summary: 'Changed my mind.' },
       })
       expect(again.isError).toBe(true)
       return ok

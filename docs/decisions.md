@@ -506,6 +506,16 @@
 - 現在的狀態：S10 之前沒有任何偵測。同時開 `pnpm dev` 跟 Jira E2E 就會撞到，跑 Jira E2E 前要先關掉 dev。
 - 重新檢視：engine 自己掛掉的停機時間變得不能接受時（目前靠 lease 復原，重開就接回去）；有人需要多個 engine 分工時。
 
+## D67 engine 與它派出的 agent 移動東西都要留原因
+- 決定：
+  - 非人的移動，也就是 engine 與 engine 派出的 agent 造成的 item 或 task status 改變，一律在被移動的那張留一則 `system` comment 寫原因。人移動的不用，透過使用者 MCP 叫 AI 移動也算人（D57），`move_item` 不加 reason。
+  - item：engine 照 verdict 移動時，comment 一定有 `Why:`（engine 自己判的）或 agent 的 summary。`report_result` 的 summary 空白直接回錯誤，不記錄。lease 過期送回、`max_attempts` 原本就有原因。
+  - task：`set_task_status` 每次都要帶不能空白的 `reason`，engine 寫成該 task 的 comment。原本只有改成 `manual` 時要留 comment。S6 做 `set_task_status` 時照這條做。
+  - 原因一兩句講重點，不寫成報告。tool 的描述照這樣要求 agent，prompt 在 S8 寫。
+  - 認領（watch 移到 claim status）不留 comment：看板上的 Run 就是原因，每次都寫只會洗版。
+- 理由：人回來看到 item 進了 `blocked`、task 被改成 `manual`，要不用翻 log 就知道為什麼。S5 以前 agent 回報 `failed` 時 summary 可以給空字串，comment 只剩 `failed, moved to blocked.`。reason 做成 tool 的必填參數而不是要求 agent 另外 `add_comment`，是因為參數 engine 擋得住，另外留言只能靠 prompt。
+- 重新檢視：原因的 comment 多到洗掉人寫的討論時（例如 orchestrator 一個 Run 改幾十次 task status）。
+
 ## D68 看板每欄標出輪到 engine 還是人
 - 決定：
   - `listBoard` 每欄多一個 `turn`：規則 watch 的欄是 `engine`，`AWAITING_PERSON`（`needs-answers`、`split-review`、`in-review`、`blocked`）是 `person`，其他不標。engine 那組從 config 的 rules 算，不寫死。看板與使用者 MCP 的 `list_board` 拿到同一份（D57）。
