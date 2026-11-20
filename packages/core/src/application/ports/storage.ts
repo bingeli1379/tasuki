@@ -1,9 +1,29 @@
+import type { Attachment } from '../../domain/attachment'
+import type { Comment, CommentAuthor, CommentKind } from '../../domain/comment'
 import type { Kind, Ref, WorkUnit } from '../../domain/work-unit'
 
 export interface NewItem {
   title: string
   body: string
   status: string
+}
+
+export interface ItemPatch {
+  title?: string
+  body?: string
+}
+
+export interface NewComment {
+  target: Ref
+  author: CommentAuthor
+  kind: CommentKind
+  body: string
+}
+
+export interface NewAttachment {
+  filename: string
+  mimeType: string
+  data: Uint8Array
 }
 
 // Each call takes effect on its own; there is no transaction across calls (D47).
@@ -17,4 +37,14 @@ export interface StoragePort {
   // Compare-and-set: throws StatusConflict when the unit is not in expectedFrom, NotFound
   // when it does not exist. Returns the unit after the move.
   transition(ref: Ref, expectedFrom: string, to: string): Promise<WorkUnit>
+  // Throws EditConflict when the unit is no longer at expectedVersion. Fields left out
+  // of the patch are not written at all.
+  updateItem(ref: Ref, expectedVersion: string, patch: ItemPatch): Promise<WorkUnit>
+  // Oldest first.
+  comments(target: Ref): Promise<Comment[]>
+  addComment(comment: NewComment): Promise<Comment>
+  attachments(target: Ref): Promise<Attachment[]>
+  addAttachment(target: Ref, attachment: NewAttachment): Promise<Attachment>
+  // Throws NotFound when the id is not an attachment of target.
+  readAttachment(target: Ref, id: string): Promise<{ attachment: Attachment; data: Uint8Array }>
 }
