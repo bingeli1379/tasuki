@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { agentMoveRefusal, isRunnable, type TaskNode } from './task'
+import { agentMoveRefusal, isRunnable, personMoveRefusal, type TaskNode } from './task'
 
 const task = (ref: string, status: string, blockedBy: string[] = []): TaskNode => ({
   ref,
@@ -49,5 +49,28 @@ describe('agentMoveRefusal', () => {
     expect(agentMoveRefusal(all[1] as TaskNode, 'in-progress', all)).toBe(
       'B waits for tasks that are not done',
     )
+  })
+})
+
+// state-machine.md, the task diagram, as a person walks it.
+describe('personMoveRefusal', () => {
+  it.each([
+    ['to-do', 'manual'],
+    ['in-progress', 'manual'],
+    ['manual', 'done'],
+    ['manual', 'to-do'],
+  ])('lets a person move %s to %s', (from, to) => {
+    expect(personMoveRefusal('A', from, to)).toBeUndefined()
+  })
+
+  it.each([
+    ['to-do', 'done', 'A cannot go from to-do to done'],
+    ['to-do', 'in-progress', 'A cannot go from to-do to in-progress'],
+    ['in-review', 'manual', 'A cannot go from in-review to manual'],
+    ['manual', 'in-progress', 'A cannot go from manual to in-progress'],
+    // invariant 4
+    ['done', 'manual', 'A is done; done tasks are never reopened'],
+  ])('refuses %s to %s', (from, to, why) => {
+    expect(personMoveRefusal('A', from, to)).toBe(why)
   })
 })

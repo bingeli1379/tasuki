@@ -58,6 +58,10 @@ export interface StoragePort {
   // Throws EditConflict when the unit is no longer at expectedVersion. Fields left out
   // of the patch are not written at all.
   updateItem(ref: Ref, expectedVersion: string, patch: ItemPatch): Promise<WorkUnit>
+  // Removes the task with its dependencies either way, comments and attachments; a task that
+  // waited for it no longer does. Its ref is never handed out again. Throws NotFound when ref
+  // is not a task.
+  deleteTask(ref: Ref): Promise<void>
   // Oldest first.
   comments(target: Ref): Promise<Comment[]>
   addComment(comment: NewComment): Promise<Comment>
