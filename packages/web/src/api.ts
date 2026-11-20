@@ -23,10 +23,22 @@ export interface Attachment {
   size: number
 }
 
+export interface Run {
+  id: string
+  rule: string
+  attempt: number
+  state: 'running' | 'finished'
+  outcome?: string
+  startedAt: string
+  finishedAt?: string
+}
+
 export interface ItemDetail {
   item: Item
   comments: Comment[]
   attachments: Attachment[]
+  // Newest first.
+  runs: Run[]
 }
 
 export class ApiError extends Error {

@@ -21,9 +21,29 @@ const withJira = jiraVars.every((v) => process.env[v])
 process.env['TASUKI_E2E_DIR'] ??= mkdtempSync(join(tmpdir(), 'tasuki-e2e-'))
 const dir = process.env['TASUKI_E2E_DIR']
 
+// Rule split on the fake runner (S4). Polling every 2 seconds keeps the Jira run short; the
+// agent takes 10, longer than the board needs to read itself again and show it in Splitting.
+const engineRules = {
+  poll: { intervalSeconds: 2 },
+  agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 10 } } },
+  rules: [
+    {
+      id: 'split',
+      watch: 'ready-to-split',
+      claim: 'splitting',
+      agent: 'fake',
+      mode: 'split',
+      on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+    },
+  ],
+}
+
 function engine(name: string, port: number, config: object): string {
   const file = join(dir, `${name}.config.jsonc`)
-  writeFileSync(file, JSON.stringify({ dataDir: `./${name}`, server: { port }, ...config }))
+  writeFileSync(
+    file,
+    JSON.stringify({ dataDir: `./${name}`, server: { port }, ...engineRules, ...config }),
+  )
   return file
 }
 

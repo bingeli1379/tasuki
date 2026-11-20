@@ -11,6 +11,7 @@ import {
   type Comment,
   type Item,
   type ItemDetail,
+  type Run,
 } from '../api'
 import { AttachmentImage, Embed, toStoredMarkdown } from '../editor'
 import { renderMarkdown } from '../markdown'
@@ -186,6 +187,16 @@ const size = (bytes: number): string =>
     : bytes < 1024 * 1024
       ? `${(bytes / 1024).toFixed(1)} KB`
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+const outcomeColor = (r: Run): 'primary' | 'success' | 'warning' | 'error' | 'neutral' =>
+  r.outcome === undefined
+    ? 'primary'
+    : r.outcome === 'succeeded'
+      ? 'success'
+      : r.outcome === 'failed' || r.outcome === 'max_attempts'
+        ? 'error'
+        : r.outcome === 'needs_input' || r.outcome === 'blocked_manual'
+          ? 'warning'
+          : 'neutral'
 const authorOf = (c: Comment): string =>
   c.author === 'human' ? (c.authorName ?? 'You') : c.author === 'agent' ? 'Agent' : 'Engine'
 </script>
@@ -287,6 +298,32 @@ const authorOf = (c: Comment): string =>
                     color="neutral"
                     variant="outline"
                     @click="insert(a)"
+                  />
+                </span>
+              </li>
+            </ul>
+          </section>
+
+          <section aria-labelledby="runs-heading" class="flex flex-col gap-2">
+            <h3 id="runs-heading" class="text-sm font-medium">Runs</h3>
+            <p v-if="detail.runs.length === 0" class="text-sm text-muted">
+              No agent has worked on it.
+            </p>
+            <ul class="flex flex-col gap-1">
+              <li
+                v-for="r in detail.runs"
+                :key="r.id"
+                :aria-label="`Run ${r.rule} attempt ${r.attempt}`"
+                class="flex items-center justify-between gap-2 text-sm"
+              >
+                <span>{{ r.rule }} · attempt {{ r.attempt }}</span>
+                <span class="flex shrink-0 items-center gap-2 text-muted">
+                  <time :datetime="r.startedAt">{{ new Date(r.startedAt).toLocaleString() }}</time>
+                  <UBadge
+                    :label="r.outcome ?? 'running'"
+                    :color="outcomeColor(r)"
+                    variant="subtle"
+                    size="sm"
                   />
                 </span>
               </li>
