@@ -14,7 +14,7 @@
   "devDependencies": {
     "@tasuki/jira-cloud": "workspace:*",
     "@tasuki/sqlite": "workspace:*",
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.6",
     "typescript": "7.0.2",
     "vite-plus": "1.6.0"
   },
