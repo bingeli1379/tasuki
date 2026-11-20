@@ -7,6 +7,7 @@ import { TRACKER_MIGRATIONS } from './tracker-migrations'
 
 export * from './database'
 export * from './migrate'
+export * from './tracker'
 export * from './tracker-migrations'
 
 const plugin: Plugin = definePlugin({
