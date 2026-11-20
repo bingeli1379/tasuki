@@ -65,8 +65,9 @@ item 在 Run 被 `abandoned` 之後怎麼處理：
 | item 當時的 status | 處理 |
 |---|---|
 | claim status（例如 `splitting`） | 送回該 Run 那條規則的 watch status，`attempt + 1`。達到上限就走 `max_attempts` 的出口 |
-| 沒有 claim 的 watch status（例如 `in-progress`） | 不動。Poller 下一輪會再起新的 Run，`attempt + 1` |
-| task 還停在 `in-progress` | 不由 engine 處理。不變量 3：沒有存活 Run 的 `in-progress` task 不可信，orchestrator 重啟後當成 `to-do` |
+| 沒有 claim 的 watch status（例如 `in-progress`） | 不動，留一則 comment 說下一輪再試。Poller 下一輪會再起新的 Run，`attempt + 1` |
+| 已經不在 tracker（被人刪了） | Run 記成 `abandoned`，其他都不做。不擋下來的話，每一輪復原都會在這裡丟錯，後面的認領全部停擺（D69） |
+| task 還停在 `in-progress` | 送回 `to-do`，每張留一則原因（不變量 3，D69）。Run 正常結束時也一樣，只有 `cancelled` 不動（不變量 6） |
 
 被中斷的 workspace 會留著改到一半的檔案。engine 不清理，只有 `workspace.cleanup = on-done` 時在 item 完成後才刪。agent 續跑時要能接受這個狀態。
 

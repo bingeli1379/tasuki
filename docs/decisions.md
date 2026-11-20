@@ -523,3 +523,17 @@
   - 圖示打包進 bundle：`web` 裝 `@iconify-json/lucide`，Vite 的 `ui()` 用 `icon.clientBundle.icons` 點名要用的圖示，少一個 build 就失敗。裝了圖示集之後 Nuxt UI 自己元件的圖示也一起打包。D61 工具列用文字按鈕的理由（沒有圖示集會去打 Iconify API）因此不成立了，工具列先維持文字，要換時不用再顧慮這點。
 - 理由：十欄外觀一樣，作者要讀欄名才知道哪幾欄在等自己、哪幾欄 engine 會自己處理。`refining` 是人在寫需求，不是在等確認，作者決定不標。
 - 重新檢視：狀態機加了新的 status 時（決定它屬於哪一組）；規則能設成「等人」的 status 時。
+
+## D69 S6：execute 與其餘的 verdict 驗證
+- 決定：
+  - 規則 B（`watch: in-progress`，沒有 claim）照 D63 的認領路徑跑，不加新的機制。item 一直留在 `in-progress`，靠「一張 item 一個存活的 Run」擋重複。lease 過期時 item 不動，但留一則 comment 說下一輪再試；item 已經被人移走就不留。
+  - verdict 驗證補齊 agent-contract.md 表上的每一列：execute 的 `succeeded` 要所有 task 都 `done`；rework 的 `succeeded` 要這次 Run 建過 task；`blocked_manual` 要至少一張 `manual`，而且沒有任何 `to-do` 的 blockedBy 已全部 done。`Evidence` 從 task 數改成整份 task 清單（含 blockedBy），驗證跟 `set_task_status` 用同一個 `isRunnable`。execute 底下沒有 task 時，「全部 done」照字面成立。
+  - facade 加 `set_task_status`，照 task 圖檢查（domain 的 `agentMoveRefusal`），reason 必填，engine 寫成那張 task 上的 `system` comment（D67）。facade 照規則的 mode 掛 tool：split 與 rework 有 `create_task`，execute 有 `set_task_status`，兩邊互斥。
+  - 不變量 3 由 engine 做：Run 結束時（`cancelled` 除外）與 lease 過期時，把 item 底下殘留的 `in-progress` task 送回 `to-do`，每張留一則原因。`cancelled` 是人接手了，照不變量 6 不動任何 status，殘留的留給下一個 agent 照合約自己處理。
+  - lease 過期時先讀一次 item，已經不在 tracker 就只把 Run 記成 `abandoned`。原本 NotFound 會從復原丟出去，每一輪 poll 都在同一筆 Run 停下，後面的認領全部停擺；split 規則的 transition 本來就有這個洞，S6 加的讀取與送回 task 讓每條規則都會撞到。Run 結束時 item 不在，`finishRun` 一樣會丟錯，Run 留著等 lease 過期，再由這裡收掉。
+  - 有 execute 規則時，`statuses.task` 五個都要對照。
+  - 人的操作：詳情在 `in-review` 時多一顆 Accept，移到 `done`，走 `moveItem`，使用者 MCP 一樣用 `move_item`（D57）。打回 `ready-to-rework` 的按鈕跟規則 C 一起放 S7。Send back、Approve、Accept 成功後關掉詳情，決定做完就沒有事要在這裡做了；撞上 `StatusConflict` 時留著，讓人看到它現在在哪。
+  - 假 runner 照 `RunSpec.mode` 分：execute 依序把能跑的 task 走完 `in-progress`、`in-review`、`done`，剩下 manual 就回報 `blocked_manual`。split 多一個 `[fake:manual]`，讓第二張 task 是 manual，拿來走 blocked 那條。
+  - 人改 task status（接手、交回、manual 做完）放 S7，跟 blocked 自動接回一起做。
+- 理由：沒有 Run 的 item 底下掛著 In Progress 的 task，人要多想一下才知道它是假的。engine 送回去的代價是 Run 結束時多讀一次 task、多幾個 transition，換到的是看板不說謊，而且不變量 3 變成測得到的行為。之前把它留給 agent，是因為 M1 的 orchestrator 才知道 subagent 在做什麼。但 Run 一結束，這件事就沒有人知道了，engine 送回去不會跟 agent 衝突。
+- 重新檢視：M2 由 engine 自己派 task 時（送回改成 engine 派發的一部分）；人在詳情看不到 task 上的 comment（sqlite 模式下 D67 的原因只在 DB 裡），做 task 詳情時一起補。

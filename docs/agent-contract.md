@@ -33,12 +33,13 @@
 
 刻意沒有的：任何改 item status 的 tool、刪除、跨 item 存取。
 
-目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`create_task`、`add_comment`、`report_result`（S4 D63、S5 D65）。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`update_task`、`list_comments`、`set_task_status` 隨用到的切片長出來。
+目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`update_task`、`list_comments` 隨用到的切片長出來。
 
 為什麼 orchestrator 不能建 task：task 圖是人在 `split-review` 檢查過才放行的，放行後再讓 AI 加 task 等於繞過關卡。orchestrator 發現需要新工作時，用 `add_comment` 寫下來，由 verdict 帶出去。
 
 `set_task_status` 的限制：
 
+- 只能走 state-machine.md 的 task 圖：`to-do` → `in-progress`（blockedBy 全部 done 才行）→ `in-review` → `done`，`in-review` 可以退回 `in-progress`，`in-progress` 可以退回 `to-do`，`to-do` 與 `in-progress` 可以改成 `manual`。
 - manual task 只有人能移出 `manual`。
 - `done` 的 task 不能再改。
 - 每次呼叫都要帶 `reason`，不能空白。engine 把它寫成那張 task 上的 `system` comment，人看得到每次 AI 為什麼移動它（D67）。改成 `manual`（發現需要人決定）時，reason 寫要人決定什麼。
@@ -54,7 +55,7 @@ interface ReportResult {
 
 `report_result` 只收第一次，之後回錯誤。summary 是空白時回錯誤、不記錄，agent 可以補上再呼叫一次。engine 照 verdict 移動 item，summary 就是給人看的原因（D67），一兩句講重點，不重述做了什麼。`set_task_status` 的 reason 也一樣短。
 
-engine 不直接相信 verdict，先驗證再換算成 outcome。目前檢查的是 `succeeded`（split）與 `needs_input` 兩列（D65），其他列 S6 以後跟著對應的規則補上，在那之前直接採信。verdict 在規則裡沒有出口時（例如 split 回 `blocked_manual`）也是 `failed`。檢查失敗時，system comment 的 `Why:` 寫出沒做到的那一項。
+engine 不直接相信 verdict，先驗證再換算成 outcome，下表每一列都檢查（D65、D69）。verdict 在規則裡沒有出口時（例如 split 回 `blocked_manual`）也是 `failed`。檢查失敗時，system comment 的 `Why:` 寫出沒做到的那一項。
 
 | verdict | engine 檢查 | 檢查失敗 |
 |---|---|---|
