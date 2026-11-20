@@ -33,10 +33,21 @@ export interface Run {
   finishedAt?: string
 }
 
+export interface Task {
+  ref: string
+  title: string
+  status: string
+  origin?: 'refine' | 'splitter' | 'human'
+  // Refs of tasks it waits for.
+  blockedBy: string[]
+}
+
 export interface ItemDetail {
   item: Item
   comments: Comment[]
   attachments: Attachment[]
+  // Oldest first.
+  tasks: Task[]
   // Newest first.
   runs: Run[]
 }

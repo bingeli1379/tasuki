@@ -14,6 +14,9 @@ const jiraVars = [
   'JIRA_TEST_PROJECT',
   'JIRA_TEST_ITEM_TYPE',
   'JIRA_TEST_ITEM_STATUSES',
+  'JIRA_TEST_TASK_TYPE',
+  'JIRA_TEST_TASK_STATUSES',
+  'JIRA_TEST_LINK_TYPE',
 ]
 const withJira = jiraVars.every((v) => process.env[v])
 
@@ -64,10 +67,17 @@ const trackers = [
                 email: '${JIRA_EMAIL}',
                 apiToken: '${JIRA_API_TOKEN}',
                 project: process.env['JIRA_TEST_PROJECT'],
-                issueTypes: { item: process.env['JIRA_TEST_ITEM_TYPE'] },
+                issueTypes: {
+                  item: process.env['JIRA_TEST_ITEM_TYPE'],
+                  task: process.env['JIRA_TEST_TASK_TYPE'],
+                },
+                dependencyLinkType: process.env['JIRA_TEST_LINK_TYPE'],
               },
             },
-            statuses: { item: JSON.parse(String(process.env['JIRA_TEST_ITEM_STATUSES'])) },
+            statuses: {
+              item: JSON.parse(String(process.env['JIRA_TEST_ITEM_STATUSES'])),
+              task: JSON.parse(String(process.env['JIRA_TEST_TASK_STATUSES'])),
+            },
           },
         },
       ]
