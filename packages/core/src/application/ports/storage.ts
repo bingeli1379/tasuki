@@ -30,7 +30,8 @@ export interface NewAttachment {
 export interface StoragePort {
   // May lag behind writes by a few seconds: Jira serves it from a search index.
   // Callers that just wrote must use what the write returned, not re-list.
-  list(kind: Kind, status: string): Promise<WorkUnit[]>
+  // Every unit in any of the statuses, oldest first, in one query: Jira rate-limits per call.
+  list(kind: Kind, statuses: readonly string[]): Promise<WorkUnit[]>
   // Throws NotFound when the tracker has no such unit.
   get(ref: Ref): Promise<WorkUnit>
   createItem(item: NewItem): Promise<WorkUnit>
