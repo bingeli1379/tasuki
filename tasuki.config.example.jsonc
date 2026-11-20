@@ -38,13 +38,15 @@
   //   }
   // },
   // Jira needs statuses: the display-name default does not match any Jira status id.
+  // A split rule needs task to-do and manual mapped; an execute rule needs all five.
   // "statuses": { "item": { "refining": "10003" }, "task": { "to-do": "10003", "manual": "10012" } },
 
   // Agents are runner plugins, given the same way as the tracker. Only the fake runner
   // exists so far: it stands in for an agent so the engine can be tried without an LLM.
   // A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or
   // [fake:no_tasks] picks what it does; anything else makes two tasks and succeeds after
-  // `seconds`.
+  // `seconds`, [fake:manual] making the second one manual. Executing, it walks every task it
+  // can to done and reports blocked_manual when only manual ones are left.
   "agents": { "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } } },
 
   // Without rules the engine leaves every item alone. See docs/config-and-rules.md.
@@ -57,6 +59,14 @@
       "mode": "split",
       // failed and max_attempts go to blocked unless given here.
       "on": { "succeeded": "split-review", "needs_input": "needs-answers" },
+    },
+    {
+      "id": "execute",
+      "watch": "in-progress",
+      // No claim: the item stays in in-progress and only the lease keeps a second Run off it.
+      "agent": "fake",
+      "mode": "execute",
+      "on": { "succeeded": "in-review", "needs_input": "blocked", "blocked_manual": "blocked" },
     },
   ],
 
