@@ -130,6 +130,32 @@ describe('loadConfig', () => {
     )
   })
 
+  it('refuses an execute rule unless every task status is mapped', () => {
+    const path = write(
+      JSON.stringify({
+        statuses: {
+          item: Object.fromEntries(
+            ['refining', 'in-progress', 'in-review', 'blocked'].map((s) => [s, s]),
+          ),
+          task: { 'to-do': 'T', manual: 'M', done: 'D' },
+        },
+        agents: { fake: { plugin: 'x' } },
+        rules: [
+          {
+            id: 'execute',
+            watch: 'in-progress',
+            agent: 'fake',
+            mode: 'execute',
+            on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
+          },
+        ],
+      }),
+    )
+    expect(() => loadConfig(path)).toThrow(
+      'config statuses.task must map in-progress, in-review: rule execute runs tasks',
+    )
+  })
+
   it('refuses an unknown task status', () => {
     expect(() =>
       loadConfig(
