@@ -53,7 +53,12 @@ export function createApp({ db, storage, runtime, statuses, tokens }: AppDeps): 
   })
   app.get('/api/health', (c) => c.json({ ok: true, schemaVersion: schemaVersion(db) }))
   app.get('/api/board', async (c) =>
-    c.json(await listBoard(storage, runtime, statuses.mapped('item'))),
+    c.json(
+      await listBoard(storage, runtime, {
+        item: statuses.mapped('item'),
+        task: statuses.mapped('task'),
+      }),
+    ),
   )
   app.post('/api/items', async (c) => {
     const body = await c.req.json<{ title?: unknown; body?: unknown }>()

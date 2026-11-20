@@ -8,6 +8,9 @@ import {
   type Comment,
   type CommentAuthor,
   type CommentKind,
+  type Dependency,
+  type Kind,
+  type Origin,
   type PluginContext,
   type StoragePort,
   type WorkUnit,
@@ -17,7 +20,18 @@ import { adfToMarkdown, markdownToAdf, mediaIds, type AdfDoc, type MediaMap } fr
 import { JiraHttpError, type JiraFetch, type JiraRequest } from './client'
 import type { JiraOptions } from './options'
 
-const FIELDS = ['summary', 'description', 'status', 'labels', 'issuetype', 'project', 'attachment']
+const FIELDS = [
+  'summary',
+  'description',
+  'status',
+  'labels',
+  'issuetype',
+  'project',
+  'attachment',
+  'parent',
+  'subtasks',
+  'issuelinks',
+]
 
 interface JiraAttachment {
   id: string
@@ -37,8 +51,15 @@ interface Issue {
     issuetype: { id: string }
     project: { key: string }
     attachment: JiraAttachment[]
+    parent?: { key: string }
+    // Read straight off the issue, so a sub-task shows here the moment it exists; a search
+    // for it may lag (D54).
+    subtasks?: { key: string }[]
+    // As seen from this issue: inwardIssue is the other end of an "is blocked by".
+    issuelinks?: { type: { id: string }; inwardIssue?: { key: string } }[]
   }
   renderedFields?: { description?: string | null }
+  properties?: Record<string, unknown>
 }
 
 interface JiraComment {
@@ -101,11 +122,18 @@ export function createJiraTracker(
   const getIssue = (key: string, rendered = false): Promise<Issue> =>
     jira(
       'GET',
-      `/issue/${key}?fields=${FIELDS.join(',')}${rendered ? '&expand=renderedFields' : ''}`,
+      `/issue/${key}?fields=${FIELDS.join(',')}&properties=${PROPERTY}${rendered ? '&expand=renderedFields' : ''}`,
     )
 
-  // Only items exist so far; an issue outside the project or of another type is not ours.
-  async function getItem(key: string): Promise<Issue> {
+  const kindOf = (issue: Issue): Kind | undefined =>
+    issue.fields.issuetype.id === options.issueTypes.item
+      ? 'item'
+      : issue.fields.issuetype.id === options.issueTypes.task
+        ? 'task'
+        : undefined
+
+  // An issue outside the project or of a type tasuki does not use is not ours.
+  async function getUnit(key: string): Promise<Issue> {
     let issue: Issue
     try {
       issue = await getIssue(key)
@@ -114,12 +142,50 @@ export function createJiraTracker(
         throw new NotFound(`${key} does not exist`)
       throw e
     }
-    if (
-      issue.fields.project.key !== options.project ||
-      issue.fields.issuetype.id !== options.issueTypes.item
-    )
-      throw new NotFound(`${key} is not a tasuki item in ${options.project}`)
+    if (issue.fields.project.key !== options.project || kindOf(issue) === undefined)
+      throw new NotFound(`${key} is not a tasuki item or task in ${options.project}`)
     return issue
+  }
+
+  async function getItem(key: string): Promise<Issue> {
+    const issue = await getUnit(key)
+    if (kindOf(issue) !== 'item') throw new NotFound(`${key} is not an item`)
+    return issue
+  }
+
+  async function search(jql: string): Promise<Issue[]> {
+    const issues: Issue[] = []
+    let nextPageToken: string | undefined
+    do {
+      const page = await jira<{ issues: Issue[]; nextPageToken?: string }>('POST', '/search/jql', {
+        jql,
+        fields: FIELDS,
+        properties: [PROPERTY],
+        maxResults: 100,
+        ...(nextPageToken === undefined ? {} : { nextPageToken }),
+      })
+      issues.push(...page.issues)
+      nextPageToken = page.nextPageToken
+    } while (nextPageToken !== undefined)
+    return issues
+  }
+
+  // Bulk fetch reads the issues themselves; a search, even `key in (...)`, can miss one made
+  // a moment ago (D54). Ordered as the parent lists them, which is creation order.
+  async function childIssues(item: string): Promise<Issue[]> {
+    const keys = ((await getItem(item)).fields.subtasks ?? []).map((t) => t.key)
+    const issues: Issue[] = []
+    for (let i = 0; i < keys.length; i += 100) {
+      const page = await jira<{ issues: Issue[] }>('POST', '/issue/bulkfetch', {
+        issueIdsOrKeys: keys.slice(i, i + 100),
+        fields: FIELDS,
+        properties: [PROPERTY],
+      })
+      issues.push(...page.issues)
+    }
+    return issues
+      .filter((issue) => kindOf(issue) === 'task')
+      .sort((a, b) => keys.indexOf(a.key) - keys.indexOf(b.key))
   }
 
   async function toWorkUnit(issue: Issue): Promise<WorkUnit> {
@@ -133,13 +199,19 @@ export function createJiraTracker(
       mediaMap = mediaMapFrom(html, issue.fields.attachment)
     }
     const key = issue.fields.status.id
+    const kind = kindOf(issue) ?? 'item'
+    // A sub-task made in Jira by hand carries no property: a person's.
+    const origin = (issue.properties?.[PROPERTY] as { origin?: Origin } | undefined)?.origin
     return {
       ref: issue.key,
-      kind: 'item',
+      kind,
+      // An item's parent is its epic, which tasuki does not track.
+      ...(kind === 'task' && issue.fields.parent ? { parent: issue.fields.parent.key } : {}),
       title: issue.fields.summary,
       body: adfToMarkdown(description, mediaMap),
-      status: ctx.statuses.fromTracker('item', key) ?? key,
+      status: ctx.statuses.fromTracker(kind, key) ?? key,
       labels: issue.fields.labels,
+      ...(kind === 'task' ? { origin: origin ?? 'human' } : {}),
       version: versionOf(issue),
     }
   }
@@ -198,24 +270,61 @@ export function createJiraTracker(
       // `status in ()` is not valid JQL.
       if (statuses.length === 0) return []
       const keys = statuses.map((s) => ctx.statuses.toTracker(kind, s))
-      const jql = `project = "${options.project}" AND issuetype = ${options.issueTypes.item} AND status in (${keys.join(', ')}) ORDER BY created ASC`
-      const issues: Issue[] = []
-      let nextPageToken: string | undefined
-      do {
-        const page = await jira<{ issues: Issue[]; nextPageToken?: string }>(
-          'POST',
-          '/search/jql',
-          {
-            jql,
-            fields: FIELDS,
-            maxResults: 100,
-            ...(nextPageToken === undefined ? {} : { nextPageToken }),
-          },
-        )
-        issues.push(...page.issues)
-        nextPageToken = page.nextPageToken
-      } while (nextPageToken !== undefined)
+      const issues = await search(
+        `project = "${options.project}" AND issuetype = ${options.issueTypes[kind]} AND status in (${keys.join(', ')}) ORDER BY created ASC`,
+      )
       return Promise.all(issues.map(toWorkUnit))
+    },
+
+    async children(item) {
+      return Promise.all((await childIssues(item)).map(toWorkUnit))
+    },
+
+    async dependencies(item) {
+      const issues = await childIssues(item)
+      const siblings = new Set(issues.map((i) => i.key))
+      return issues.flatMap((issue): Dependency[] =>
+        (issue.fields.issuelinks ?? [])
+          .filter((l) => l.type.id === options.dependencyLinkType)
+          .flatMap((l) =>
+            l.inwardIssue && siblings.has(l.inwardIssue.key)
+              ? [{ task: issue.key, blockedBy: l.inwardIssue.key }]
+              : [],
+          ),
+      )
+    },
+
+    // Three kinds of call, none atomic together (D47): if a link fails the task exists
+    // without it, and the error says so.
+    async createTask(item, task) {
+      const parent = await getItem(item)
+      const siblings = new Set((parent.fields.subtasks ?? []).map((t) => t.key))
+      const foreign = task.blockedBy.filter((ref) => !siblings.has(ref))
+      if (foreign.length > 0)
+        throw new InvalidInput(`${foreign.join(', ')} is not a task of ${item}`)
+      const statusId = ctx.statuses.toTracker('task', task.status)
+      const fields: Record<string, unknown> = {
+        project: { key: options.project },
+        issuetype: { id: options.issueTypes.task },
+        parent: { key: item },
+        summary: task.title,
+      }
+      if (task.body !== '')
+        fields['description'] = await markdownToAdf(task.body, (id) =>
+          Promise.reject(new InvalidInput(`a new task has no attachment ${id} yet`)),
+        )
+      const { key } = await jira<{ key: string }>('POST', '/issue', {
+        fields,
+        properties: [{ key: PROPERTY, value: { origin: task.origin } }],
+      })
+      if ((await getIssue(key)).fields.status.id !== statusId) await moveTo(key, statusId)
+      for (const blocker of task.blockedBy)
+        await jira('POST', '/issueLink', {
+          type: { id: options.dependencyLinkType },
+          inwardIssue: { key: blocker },
+          outwardIssue: { key },
+        })
+      return toWorkUnit(await getIssue(key))
     },
 
     async createItem(item) {
@@ -242,22 +351,23 @@ export function createJiraTracker(
     },
 
     async get(ref) {
-      return toWorkUnit(await getItem(ref))
+      return toWorkUnit(await getUnit(ref))
     },
 
     // Jira has no conditional transition, so this re-reads right before moving and accepts
     // the small window between the two calls (stop-and-recovery.md).
     async transition(ref, expectedFrom, to) {
-      const issue = await getItem(ref)
-      if (issue.fields.status.id !== ctx.statuses.toTracker('item', expectedFrom))
+      const issue = await getUnit(ref)
+      const kind = kindOf(issue) ?? 'item'
+      if (issue.fields.status.id !== ctx.statuses.toTracker(kind, expectedFrom))
         throw new StatusConflict(expectedFrom, await toWorkUnit(issue))
-      await moveTo(ref, ctx.statuses.toTracker('item', to))
+      await moveTo(ref, ctx.statuses.toTracker(kind, to))
       return toWorkUnit(await getIssue(ref))
     },
 
     // Same re-read before writing as transition.
     async updateItem(ref, expectedVersion, patch) {
-      const issue = await getItem(ref)
+      const issue = await getUnit(ref)
       if (versionOf(issue) !== expectedVersion) throw new EditConflict(await toWorkUnit(issue))
       const fields: Record<string, unknown> = {}
       if (patch.title !== undefined) fields['summary'] = patch.title
@@ -269,7 +379,7 @@ export function createJiraTracker(
     },
 
     async comments(target) {
-      await getItem(target)
+      await getUnit(target)
       const fetchAll = async (expand: string): Promise<JiraComment[]> => {
         const all: JiraComment[] = []
         let total = 0
@@ -298,7 +408,7 @@ export function createJiraTracker(
     },
 
     async addComment(comment) {
-      const issue = await getItem(comment.target)
+      const issue = await getUnit(comment.target)
       const body = await markdownToAdf(comment.body, mediaResolver(issue))
       const human = comment.author === 'human'
       if (!human)
@@ -330,12 +440,12 @@ export function createJiraTracker(
     },
 
     async attachments(target) {
-      const issue = await getItem(target)
+      const issue = await getUnit(target)
       return issue.fields.attachment.map((a) => toAttachment(target, a))
     },
 
     async addAttachment(target, attachment) {
-      await getItem(target)
+      await getUnit(target)
       const form = new FormData()
       form.append(
         'file',
@@ -354,7 +464,7 @@ export function createJiraTracker(
     },
 
     async readAttachment(target, id) {
-      const issue = await getItem(target)
+      const issue = await getUnit(target)
       const found = issue.fields.attachment.find((a) => String(a.id) === id)
       if (found === undefined) throw new NotFound(`${target} has no attachment ${id}`)
       // Someone may have put a far bigger file on the issue in Jira; the engine would hold

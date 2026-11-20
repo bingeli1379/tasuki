@@ -3,8 +3,11 @@ export interface JiraOptions {
   email: string
   apiToken: string
   project: string
-  // Issue type ids, not names: names are translated per user locale (D50).
-  issueTypes: { item: string }
+  // Issue type ids, not names: names are translated per user locale (D50). task is a
+  // sub-task type.
+  issueTypes: { item: string; task: string }
+  // The issue link type id for "blocks" between tasks.
+  dependencyLinkType: string
 }
 
 function requireString(value: unknown, path: string): string {
@@ -21,6 +24,10 @@ export function parseOptions(raw: unknown): JiraOptions {
     email: requireString(o['email'], 'email'),
     apiToken: requireString(o['apiToken'], 'apiToken'),
     project: requireString(o['project'], 'project'),
-    issueTypes: { item: requireString(types['item'], 'issueTypes.item') },
+    issueTypes: {
+      item: requireString(types['item'], 'issueTypes.item'),
+      task: requireString(types['task'], 'issueTypes.task'),
+    },
+    dependencyLinkType: requireString(o['dependencyLinkType'], 'dependencyLinkType'),
   }
 }

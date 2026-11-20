@@ -16,14 +16,17 @@ test.afterAll(async () => {
   const { JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN } = process.env
   const auth = Buffer.from(`${JIRA_EMAIL}:${JIRA_API_TOKEN}`).toString('base64')
   for (const ref of created) {
-    await fetch(`${JIRA_BASE_URL}/rest/api/3/issue/${ref}`, {
+    await fetch(`${JIRA_BASE_URL}/rest/api/3/issue/${ref}?deleteSubtasks=true`, {
       method: 'DELETE',
       headers: { Authorization: `Basic ${auth}` },
     })
   }
 })
 
-test('a new item shows up in Refining and is still there after a reload', async ({ page }) => {
+test('a new item shows up in Refining and is still there after a reload', async ({
+  page,
+  request,
+}) => {
   const title = `e2e ${Date.now()}`
   await page.goto('/')
   const refining = page.getByRole('region', { name: /^Refining/ })
@@ -32,7 +35,17 @@ test('a new item shows up in Refining and is still there after a reload', async 
   await page.getByRole('button', { name: 'New item' }).click()
   const dialog = page.getByRole('dialog', { name: 'New item' })
   await dialog.getByLabel('Title').fill(title)
-  await dialog.getByLabel('Body').fill('first line\nsecond line')
+  // The same editor as in the item detail, so formatting is markdown from the start.
+  const editor = dialog.getByLabel('Body')
+  // Anywhere in the box, not only its first line, puts the cursor in the editor.
+  await editor.click({ position: { x: 20, y: 140 } })
+  await expect(editor).toBeFocused()
+  await page.keyboard.type('first line')
+  await page.keyboard.press('Shift+Enter')
+  await page.keyboard.type('second line ')
+  await dialog.getByRole('button', { name: 'Bold' }).click()
+  await expect(editor).toBeFocused()
+  await page.keyboard.type('loud')
   await dialog.getByRole('button', { name: 'Create' }).click()
   await expect(dialog).toBeHidden()
 
@@ -41,6 +54,10 @@ test('a new item shows up in Refining and is still there after a reload', async 
   const ref = (await card.getByText(/^[A-Z][A-Z0-9]*-\d+$/).textContent()) ?? ''
   expect(ref).not.toBe('')
   created.push(ref)
+  const stored = (await (await request.get(`/api/items/${ref}`)).json()) as {
+    item: { body: string }
+  }
+  expect(stored.item.body).toBe('first line\nsecond line **loud**')
 
   await reloadUntilVisible(page, refining.getByRole('article', { name: title }))
 })
@@ -165,7 +182,7 @@ test('open an item, edit it in markdown with an image, comment, and find it all 
   await expect(dialog.locator('.markdown em')).toHaveText('fine')
 })
 
-test('an item dragged to Ready to Split is split by the agent and lands in Split Review', async ({
+test('an item dragged to Ready to Split is split into tasks, reviewed, and approved', async ({
   page,
   request,
 }) => {
@@ -197,4 +214,16 @@ test('an item dragged to Ready to Split is split by the agent and lands in Split
   await expect(dialog.getByRole('article', { name: 'Comment by Engine' })).toContainText(
     'Rule split, attempt 1: succeeded, moved to split-review.',
   )
+
+  // The fake runner made two tasks, the second waiting for the first.
+  await expect(dialog.getByRole('listitem', { name: /^Task / })).toHaveCount(2)
+  await expect(dialog.getByRole('listitem', { name: 'Task Prepare' })).toContainText('To Do')
+  await expect(dialog.getByRole('listitem', { name: 'Task Build' })).toContainText('after Prepare')
+  await dialog.getByRole('button', { name: 'Approve' }).click()
+  await expect(dialog).toContainText('In Progress')
+  await page.keyboard.press('Escape')
+
+  const inProgress = page.getByRole('region', { name: /^In Progress/ })
+  await expect(inProgress.getByRole('article', { name: title })).toContainText('0/2 tasks')
+  await reloadUntilVisible(page, inProgress.getByRole('article', { name: title }))
 })

@@ -338,6 +338,7 @@
 - 沒選的做法：讓 Jira adapter 記住剛寫入的 key，`list` 時補撈。轉 status 也有同樣的延遲，要記的東西會一路變多，換到的只是 `list` 看起來即時。
 - 影響：Poller 可能晚一輪才看到 item 進入觸發 status，不影響正確性，因為認領走 `transition` 的 compare-and-set，讀的是 issue 本身。
 - 重新檢視：出現「寫完馬上要 list 才正確」的 use case 時。
+- 2026-11-20 補記：S5 檢查 split 的 verdict 要馬上看到 agent 剛建的 task，就是上面那種 use case。實測 `key in (...)` 加上 issuetype 條件的 JQL 也會漏掉剛建的 sub-task，所以「`key = X` 馬上查得到」不能推到搜尋上。`children` 與 `dependencies` 改用 `POST /issue/bulkfetch` 直接讀 issue（D65）。
 
 ## D55 測試分三層，每層擋一種壞法
 - 決定：
@@ -432,6 +433,7 @@
   - 上傳附件要帶 `X-Atlassian-Token: no-check`。
 - 理由：作者要 Jira 與 sqlite 都能完整編輯，包含貼圖，而且編輯不能弄壞 Jira 上 tasuki 看不懂的內容。不能保留的只有樣式，字不會掉。
 - 重新檢視：Atlassian 公開取得 media id 的 API，或轉址格式改變時；有人需要底線、顏色這類樣式時；附件需要超過 10 MB 時。
+- 2026-11-20 補記：S3 只把詳情的編輯換成 `UEditor`，新增 item 的 Body 還是純文字框，作者發現兩邊不一致。新增也改用同一個編輯器與工具列（設定放在 `web/src/editor.ts` 共用），存檔前一樣經過 `toStoredMarkdown`。新增時還沒有 item，不能插附件的圖，所以只有文字的工具列。
 
 ## D62 依賴定版，升版經過 Dependabot
 - 決定：
@@ -473,3 +475,34 @@
 - 理由：D63 的看板每 5 秒對每欄各送一支搜尋，10 欄就是 10 支，開幾個分頁就再乘幾倍。Jira 的 rate limit 是照呼叫算，合成一支之後看板一輪只剩一支（超過一頁才翻頁）。分頁隱藏時沒人在看，讀了也是白讀。
 - 沒選的做法：只讀捲到畫面內的欄位，合成一支之後省不到東西，還要每欄自己記讀過沒；server 端快取多個請求的結果，要等多人同時看才值得；只撈 `updated` 之後的變動，抓不到刪除與移出 project 的 issue；Jira webhook 要公開的 URL，本機跑的接不到。
 - 重新檢視：一個看板的 item 多到一支搜尋要翻很多頁時；多人同時看同一個看板時（再考慮 server 端快取）。
+
+## D65 S5：task 與 `split-review` 放行
+- 決定：
+  - `StoragePort` 加 `children(item)`、`dependencies(item)`、`createTask(item, task)`。`children` 與 `dependencies` 要馬上看得到剛建的 task，因為 verdict 在 agent 建完之後立刻檢查。Jira 從 item 的 `subtasks` 欄位拿 key，再用 `POST /issue/bulkfetch` 讀，不走搜尋（D54 補記）。`createTask` 的 `blockedBy` 只能指同一張 item 的 task，否則丟 `InvalidInput`；指的不是 item 丟 `NotFound`。建 task 與建 link 是分開的呼叫（D47）。
+  - `list('task', statuses)` 照 kind 用對應的 issue type。看板多一次 `list('task')` 算每張 item 的 task 數，卡片顯示「done/總數 tasks」，不為每張 item 各讀一次。
+  - Jira：task 是 sub-task，`dependencyLinkType` 是 Blocks 的 link type id，從被擋住的 task 看 `inwardIssue` 是擋住它的那張（2026-11-20 在 KAN 實測）。origin 存在 issue property `tasuki`（`{ origin }`），跟 D61 的 comment property 同一個 key；沒有 property 的 sub-task 是人在 Jira 建的，當成 `human`。作者選 property 而不是 label：label 人可以隨手刪改，也會跟 `hold` 這種真正的 label 混在一起。`issueTypes.task` 與 `dependencyLinkType` 改成必填。Jira 的 `POST /issueLink` 回 201 沒有 body，client 遇到空 body 回 `undefined`。
+  - KAN 的設定（2026-11-20）：team-managed 的 workflow 是所有 issue type 共用，原本就有 `待辦事項`、`進行中`、`審核中`、`完成`，對到 task 的 `to-do`、`in-progress`、`in-review`、`done`。用 D59 的同一支 API 加了 `Manual`（`10012`），一條 GLOBAL 轉移。Subtask 的 type id 是 `10007`，Blocks 是 `10000`。
+  - facade 加 `list_tasks`、`create_task`（`initialStatus` 只能 `to-do` 或 `manual`，origin 一律 `splitter`）、`add_comment`（item 或它的 task，`kind` 是 `note` 或 `question`）。use case 在 `create_task` 與 `question` 時累加 Run 的 `produced`，存在 runtime store 的 `produced_tasks`、`produced_questions`。
+  - verdict 驗證先做兩列：split 的 `succeeded` 要 item 底下至少一張 task（不論誰建的，D30）；`needs_input` 要這次 Run 至少一則 question。沒做到就是 `failed`，`Why:` 寫出缺什麼。其他列等 S6 以後對應的規則。
+  - 放行與打回沒有新的 use case：詳情在 `split-review` 時多兩顆按鈕，Approve 移到 `in-progress`、Send back 移回 `refining`，走 `moveItem`，使用者 MCP 一樣用 `move_item`（D57）。打回時 task 留著，下次 split 由 agent 決定要不要重拆（D30）。沒有 task 時 Approve 不能按。
+  - config：`statuses.task` 不認識的 status 拒絕啟動；有 split 規則時一定要對照 `to-do` 與 `manual`。省略整個 `statuses` 時 task 也對到顯示名。
+  - 假 runner：沒有標記時，item 還沒有 task 就建兩張（第二張等第一張），再回報 `succeeded`；`[fake:needs_input]` 先留一則 question；`[fake:no_tasks]` 不建 task 就回報 `succeeded`，拿來看驗證擋下來的樣子。
+  - `update_task`、`list_comments` 與詳情裡編輯 task 都還沒做，S5 用不到。
+- 理由：S5 要讓人在 `split-review` 看得到 agent 拆了什麼再決定。verdict 驗證放在這裡，是因為有了 task 才驗得了 split，S4 先採信的那段（D63）在這裡收掉。
+- 重新檢視：一個 project 的 sub-task 多到看板那支 `list('task')` 要翻很多頁時（改成只撈看板上 item 的 task）；S6 補其餘 verdict 驗證時；做 task 編輯時。
+
+## D66 一個 tracker project 只接一個 engine，用心跳擋第二個
+- 決定：
+  - 一個 tracker project 同一時間只有一個 engine 在跑規則。不做多 engine 分工，`plan.md` 的「多 instance、高可用」維持不做。
+  - 要跑更多 agent，往 runner 擴：先調大 `maxConcurrentRuns`；一台機器不夠，就寫一個把 agent 開在別台（container、k8s Job）的 runner plugin。engine 還是一個，`RunnerPort` 不用改。agent 在別台時，facade 的網址要改成對外的，這要等 S9 有 auth。
+  - 擋第二個 engine 用心跳：engine 每輪在 tracker 寫一次 `{ engineId, lastSeen }`，Jira 用 project property。啟動時看到別人的心跳還新鮮，就拒絕啟動，並說出是哪一個 engine。sqlite 的 DB 檔只會被一個 process 開，不需要。放在 S10，跟 `doctor` 一起做。
+- 理由：2026-11-20 跑 Jira E2E 時，作者的 `pnpm dev` 也接著 KAN、掛著同一條 split 規則，同一張 item 被兩個 engine 認領，假 runner 建了兩組 task。原因有兩個：
+  - Run 與 lease 存在各自的 `runtime.db`（D2），不變量 1 只在一個 engine 裡擋得住。
+  - Jira 的認領是先讀 status 再轉移（D59），兩個 engine 會同時通過。
+  要讓多個 engine 安全分工，得把 runtime store 換成共用的資料庫，再加上分散式鎖。可是 engine 本身只負責 poll 跟看著 process，吃資源的是 agent，所以多個 engine 換不到什麼。真正會發生的是團隊每個人各跑一份 local 版、接同一個公司 Jira project。這時要的不是支援多個，而是擋下第二個。
+- 沒選的做法：
+  - 認領時在 issue 上寫 engine id 再讀回來比對。這只能把空窗縮小，擋不掉。
+  - 共用 runtime store 加鎖。這是為了不存在的需求做分散式系統。
+- 現在的狀態：S10 之前沒有任何偵測。同時開 `pnpm dev` 跟 Jira E2E 就會撞到，跑 Jira E2E 前要先關掉 dev。
+- 重新檢視：engine 自己掛掉的停機時間變得不能接受時（目前靠 lease 復原，重開就接回去）；有人需要多個 engine 分工時。
+

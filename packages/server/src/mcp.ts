@@ -32,10 +32,17 @@ export function createMcpServer({ storage, runtime, statuses }: McpDeps): McpSer
     {
       description:
         'List the board: one column per item status in board order, each with its items, ' +
-        'and `running`, the refs an agent is working on right now. ' +
+        'and `running`, the refs an agent is working on right now, and `tasks`, per item ref ' +
+        'that has tasks, how many are done out of how many. ' +
         'Items created a few seconds ago may not be listed yet when the tracker is Jira.',
     },
-    async () => json(await listBoard(storage, runtime, statuses.mapped('item'))),
+    async () =>
+      json(
+        await listBoard(storage, runtime, {
+          item: statuses.mapped('item'),
+          task: statuses.mapped('task'),
+        }),
+      ),
   )
   server.registerTool(
     'create_item',
@@ -69,7 +76,10 @@ export function createMcpServer({ storage, runtime, statuses }: McpDeps): McpSer
     {
       description:
         'Read one item: its fields (body is markdown), its comments oldest first, its ' +
-        'attachments, and its runs newest first (each agent run on it: rule, attempt, outcome). ' +
+        'attachments, its tasks oldest first (status, origin, and blockedBy: the tasks each ' +
+        'waits for), and its runs newest first (each agent run on it: rule, attempt, outcome). ' +
+        'An item in split-review is waiting for a person to approve its tasks (move it to ' +
+        'in-progress) or send it back (to refining). ' +
         '`version` is what update_item needs. In the body, ![x](attachment:<id>) ' +
         'is an attachment of this item; [[embed:<label>|...]] is tracker content markdown ' +
         'cannot express (a Jira mention, table...): keep the token as is to keep that content.',

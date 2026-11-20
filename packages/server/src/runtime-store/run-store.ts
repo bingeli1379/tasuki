@@ -29,6 +29,10 @@ function toRun(row: Row): Run {
     ...(optional('outcome', row['outcome']) as { outcome?: Outcome }),
     ...(optional('verdict', row['verdict']) as { verdict?: Verdict }),
     ...optional('summary', row['summary']),
+    produced: {
+      questions: Number(row['produced_questions']),
+      tasks: Number(row['produced_tasks']),
+    },
     leaseUntil: String(row['lease_until']),
     startedAt: String(row['started_at']),
     lastActivityAt: String(row['last_activity_at']),
@@ -103,6 +107,10 @@ export function createRuntimeStore(
           run.state === 'finished' ? 'this Run is over' : 'the result was already reported',
         )
       }
+    },
+    async bumpProduced(id, key) {
+      const column = key === 'questions' ? 'produced_questions' : 'produced_tasks'
+      db.prepare(`UPDATE run SET ${column} = ${column} + 1 WHERE id = ?`).run(id)
     },
     async finishRun(id, outcome) {
       db.prepare(

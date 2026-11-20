@@ -21,17 +21,36 @@ const item: WorkUnit = {
 }
 
 describe('getItem', () => {
-  it('returns the item with its comments, attachments and Runs', async () => {
+  it('returns the item with its comments, attachments, tasks and Runs', async () => {
+    const task = (ref: string): WorkUnit => ({
+      ...item,
+      ref,
+      kind: 'task',
+      parent: 'X-1',
+      status: 'to-do',
+      origin: 'splitter',
+    })
     const detail = await getItem(
       storageStub({
         get: () => Promise.resolve(item),
         comments: () => Promise.resolve([]),
         attachments: () => Promise.resolve([]),
+        children: () => Promise.resolve([task('X-2'), task('X-3')]),
+        dependencies: () => Promise.resolve([{ task: 'X-3', blockedBy: 'X-2' }]),
       }),
       runtimeStub({ runsFor: () => Promise.resolve([]) }),
       'X-1',
     )
-    expect(detail).toEqual({ item, comments: [], attachments: [], runs: [] })
+    expect(detail).toEqual({
+      item,
+      comments: [],
+      attachments: [],
+      tasks: [
+        { ...task('X-2'), blockedBy: [] },
+        { ...task('X-3'), blockedBy: ['X-2'] },
+      ],
+      runs: [],
+    })
   })
 
   it('a missing item is NotFound before anything else is read', async () => {

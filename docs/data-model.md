@@ -100,7 +100,8 @@ type Outcome =
 |---|---|---|
 | item | `work_unit` 一列 | Issue（type 可設定，例如 Story） |
 | task | `work_unit` 一列，帶 `parent` | Sub-task |
-| Dependency | `dependency` 表 | issue link（type 可設定，例如 Blocks，config 寫 id） |
+| Dependency | `dependency` 表 | issue link（type 可設定，例如 Blocks，config 寫 id）。從被擋住的 task 看，`inwardIssue` 是擋住它的那張 |
+| task 的 origin | 欄位 | issue property `tasuki`（`{ origin }`），建 task 時一起寫。沒有 property 的 sub-task 是人在 Jira 上建的，當成 `human`（D65） |
 | Comment | `comment` 表 | comment |
 | labels | JSON 欄位 | labels |
 | assignee | 欄位 | assignee |
@@ -167,7 +168,7 @@ CREATE TABLE attachment (
 CREATE INDEX attachment_by_target ON attachment(target, id);
 ```
 
-runtime store（S4 只建了 `run` 表、只建了用到的欄位，見 `packages/server/src/runtime-store/migrations.ts`；cancel、session、produced、usage 的欄位與 `engine_state` 等用到的切片再加）：
+runtime store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，見 `packages/server/src/runtime-store/migrations.ts`；cancel、session、usage 的欄位與 `engine_state` 等用到的切片再加）：
 
 ```sql
 CREATE TABLE run (

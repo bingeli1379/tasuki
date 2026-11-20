@@ -18,6 +18,7 @@ describe('loadConfig', () => {
     expect(config.tracker).toEqual({ plugin: '@tasuki/sqlite', options: {} })
     expect(config.dataDir).toBe(join(config.configDir, 'data'))
     expect(config.statuses.item?.['refining']).toBe('Refining')
+    expect(config.statuses.task?.['to-do']).toBe('To Do')
   })
 
   it('expands ${VAR} from a .env next to the config', () => {
@@ -102,6 +103,39 @@ describe('loadConfig', () => {
     ],
   ])('refuses a rule that cannot work: %j', (rule, message) => {
     expect(() => loadConfig(withRules([rule]))).toThrow(message)
+  })
+
+  it('refuses a split rule when the task statuses its tasks start in are not mapped', () => {
+    const path = write(
+      JSON.stringify({
+        statuses: {
+          item: Object.fromEntries(
+            [
+              'refining',
+              'ready-to-split',
+              'splitting',
+              'split-review',
+              'needs-answers',
+              'blocked',
+            ].map((s) => [s, s]),
+          ),
+          task: { 'to-do': 'T' },
+        },
+        agents: { fake: { plugin: 'x' } },
+        rules: [split],
+      }),
+    )
+    expect(() => loadConfig(path)).toThrow(
+      'config statuses.task must map manual: rule split splits items into tasks',
+    )
+  })
+
+  it('refuses an unknown task status', () => {
+    expect(() =>
+      loadConfig(
+        write('{ "statuses": { "item": { "refining": "R" }, "task": { "doing": "D" } } }'),
+      ),
+    ).toThrow('config statuses.task: unknown status doing')
   })
 
   it('refuses two rules watching the same status', () => {

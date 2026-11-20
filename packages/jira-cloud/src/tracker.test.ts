@@ -17,6 +17,9 @@ const configured = [
   'JIRA_TEST_PROJECT',
   'JIRA_TEST_ITEM_TYPE',
   'JIRA_TEST_ITEM_STATUSES',
+  'JIRA_TEST_TASK_TYPE',
+  'JIRA_TEST_TASK_STATUSES',
+  'JIRA_TEST_LINK_TYPE',
 ].every((k) => env[k])
 
 if (configured) {
@@ -26,7 +29,8 @@ if (configured) {
       email: env['JIRA_EMAIL'],
       apiToken: env['JIRA_API_TOKEN'],
       project: env['JIRA_TEST_PROJECT'],
-      issueTypes: { item: env['JIRA_TEST_ITEM_TYPE'] },
+      issueTypes: { item: env['JIRA_TEST_ITEM_TYPE'], task: env['JIRA_TEST_TASK_TYPE'] },
+      dependencyLinkType: env['JIRA_TEST_LINK_TYPE'],
     })
     const jiraFetch = createFetch(options)
     const jira = createClient(jiraFetch)
@@ -36,6 +40,7 @@ if (configured) {
       // Logical status -> Jira status id, as JSON.
       statuses: createStatusMap({
         item: JSON.parse(String(env['JIRA_TEST_ITEM_STATUSES'])) as Record<string, string>,
+        task: JSON.parse(String(env['JIRA_TEST_TASK_STATUSES'])) as Record<string, string>,
       }),
     }
     const inner = createJiraTracker(ctx, options, jira, jiraFetch)
@@ -49,7 +54,7 @@ if (configured) {
       },
     }
     const teardown = async (): Promise<void> => {
-      await Promise.all(created.map((ref) => jira('DELETE', `/issue/${ref}`)))
+      await Promise.all(created.map((ref) => jira('DELETE', `/issue/${ref}?deleteSubtasks=true`)))
     }
     return Promise.resolve({ storage, teardown })
   })

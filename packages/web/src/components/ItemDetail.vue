@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { EditorToolbarItem } from '@nuxt/ui'
+import { TASK_STATUS_DISPLAY } from '@tasuki/core'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import {
   ApiError,
@@ -13,7 +13,14 @@ import {
   type ItemDetail,
   type Run,
 } from '../api'
-import { AttachmentImage, Embed, toStoredMarkdown } from '../editor'
+import {
+  AttachmentImage,
+  EDITOR_PROPS,
+  EDITOR_TOOLBAR,
+  Embed,
+  MARKDOWN_OPTIONS,
+  toStoredMarkdown,
+} from '../editor'
 import { renderMarkdown } from '../markdown'
 
 const props = defineProps<{ itemRef: string; statusName: (status: string) => string }>()
@@ -29,32 +36,18 @@ const saving = ref(false)
 const commentDraft = ref('')
 const commenting = ref(false)
 const uploading = ref(false)
+const moving = ref(false)
 const toast = useToast()
 const bodyEditor = useTemplateRef('bodyEditor')
 
 // Passed to UEditor once: a new object on each render makes it rebuild the editor and
 // register its plugins twice ("Adding different instances of a keyed plugin").
 const extensions = [Embed, AttachmentImage.configure({ itemRef: props.itemRef })]
-const markdownOptions = { markedOptions: { gfm: true, breaks: true } }
-const editorProps = { attributes: { 'aria-label': 'Body' } }
-const editorUi = { content: 'markdown min-h-[60vh] px-3 py-2' }
-// Text buttons rather than icons: icons would be fetched from the Iconify API at runtime,
-// which an offline company network cannot reach.
-const toolbar: EditorToolbarItem[][] = [
-  [
-    { kind: 'heading', level: 2, label: 'H2', 'aria-label': 'Heading' },
-    { kind: 'mark', mark: 'bold', label: 'B', 'aria-label': 'Bold' },
-    { kind: 'mark', mark: 'italic', label: 'I', 'aria-label': 'Italic' },
-    { kind: 'mark', mark: 'strike', label: 'S', 'aria-label': 'Strikethrough' },
-    { kind: 'mark', mark: 'code', label: '<>', 'aria-label': 'Inline code' },
-  ],
-  [
-    { kind: 'bulletList', label: '•', 'aria-label': 'Bullet list' },
-    { kind: 'orderedList', label: '1.', 'aria-label': 'Numbered list' },
-    { kind: 'blockquote', label: '❝', 'aria-label': 'Quote' },
-    { kind: 'codeBlock', label: '{ }', 'aria-label': 'Code block' },
-  ],
-]
+// On the editable element itself, not the wrapper: padding and height on the wrapper are
+// blank space a click does not reach the editor through.
+const editorUi = {
+  content: 'markdown [&_.ProseMirror]:min-h-[60vh] [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2',
+}
 
 const body = computed(() =>
   detail.value ? renderMarkdown(detail.value.item.body, detail.value.item.ref) : '',
@@ -180,6 +173,40 @@ function insert(attachment: Attachment): void {
     .run()
 }
 
+// split-review is where a person checks the tasks before any of them runs.
+async function decide(to: string): Promise<void> {
+  const current = detail.value
+  if (!current) return
+  moving.value = true
+  try {
+    const item = await call<Item>(
+      `/api/items/${encodeURIComponent(current.item.ref)}/transition`,
+      sendJson('POST', { from: current.item.status, to }),
+    )
+    current.item = item
+    error.value = ''
+    emit('updated', item)
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409 && e.data.item) {
+      current.item = e.data.item
+      emit('updated', e.data.item)
+      toast.add({
+        title: `${e.data.item.ref} was moved by someone else`,
+        description: `It is in ${props.statusName(e.data.item.status)} now.`,
+        color: 'warning',
+      })
+      return
+    }
+    error.value = messageOf(e)
+  } finally {
+    moving.value = false
+  }
+}
+
+const taskStatus = (status: string): string => TASK_STATUS_DISPLAY[status] ?? status
+const taskTitle = (ref: string): string =>
+  detail.value?.tasks.find((t) => t.ref === ref)?.title ?? ref
+
 const isImage = (a: Attachment): boolean => a.mimeType.startsWith('image/')
 const size = (bytes: number): string =>
   bytes < 1024
@@ -241,17 +268,17 @@ const authorOf = (c: Comment): string =>
                 v-slot="{ editor }"
                 v-model="draftBody"
                 content-type="markdown"
-                :markdown="markdownOptions"
+                :markdown="MARKDOWN_OPTIONS"
                 :image="false"
                 :mention="false"
                 :extensions="extensions"
-                :editor-props="editorProps"
+                :editor-props="EDITOR_PROPS"
                 class="rounded-md border border-default"
                 :ui="editorUi"
               >
                 <UEditorToolbar
                   :editor="editor"
-                  :items="toolbar"
+                  :items="EDITOR_TOOLBAR"
                   class="border-b border-default px-2 py-1"
                 />
               </UEditor>
@@ -302,6 +329,56 @@ const authorOf = (c: Comment): string =>
                 </span>
               </li>
             </ul>
+          </section>
+
+          <section aria-labelledby="tasks-heading" class="flex flex-col gap-2">
+            <div class="flex items-center justify-between gap-2">
+              <h3 id="tasks-heading" class="text-sm font-medium">Tasks</h3>
+              <span v-if="detail.item.status === 'split-review'" class="flex gap-2">
+                <UButton
+                  label="Send back"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  :disabled="moving"
+                  @click="decide('refining')"
+                />
+                <UButton
+                  label="Approve"
+                  size="sm"
+                  :loading="moving"
+                  :disabled="detail.tasks.length === 0"
+                  @click="decide('in-progress')"
+                />
+              </span>
+            </div>
+            <p v-if="detail.tasks.length === 0" class="text-sm text-muted">No tasks yet.</p>
+            <ol class="flex flex-col gap-1">
+              <li
+                v-for="t in detail.tasks"
+                :key="t.ref"
+                :aria-label="`Task ${t.title}`"
+                class="flex items-center justify-between gap-2 text-sm"
+              >
+                <span class="flex min-w-0 flex-col">
+                  <span class="truncate">
+                    <span class="text-muted">{{ t.ref }}</span> {{ t.title }}
+                  </span>
+                  <span v-if="t.blockedBy.length > 0" class="text-xs text-muted">
+                    after {{ t.blockedBy.map(taskTitle).join(', ') }}
+                  </span>
+                </span>
+                <span class="flex shrink-0 items-center gap-2 text-muted">
+                  <span v-if="t.origin" class="text-xs">{{ t.origin }}</span>
+                  <UBadge
+                    :label="taskStatus(t.status)"
+                    color="neutral"
+                    variant="subtle"
+                    size="sm"
+                  />
+                </span>
+              </li>
+            </ol>
           </section>
 
           <section aria-labelledby="runs-heading" class="flex flex-col gap-2">

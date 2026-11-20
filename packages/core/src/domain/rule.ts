@@ -31,10 +31,22 @@ export interface RunExit {
   signal: string | null
 }
 
-// Verdicts are taken as reported for now: checking them against the tasks needs tasks (S5).
+// What the engine looked up to check a verdict.
+export interface Evidence {
+  // Tasks under the item now, made by this Run or earlier (D30).
+  tasks: number
+  // Questions this Run left.
+  questions: number
+}
+
+// The agent's verdict is a claim; the engine checks it before acting on it
+// (agent-contract.md). Execute, rework and blocked_manual checks arrive with the slices that
+// run them; until then those verdicts are taken as reported.
 export function outcomeOf(
+  mode: RuleMode,
   verdict: Verdict | undefined,
   exit: RunExit,
+  evidence: Evidence,
 ): { outcome: Verdict; reason?: string } {
   if (exit.code !== 0)
     return {
@@ -47,5 +59,9 @@ export function outcomeOf(
             : 'the agent could not be started',
     }
   if (verdict === undefined) return { outcome: 'failed', reason: 'the agent reported no verdict' }
+  if (mode === 'split' && verdict === 'succeeded' && evidence.tasks === 0)
+    return { outcome: 'failed', reason: 'the agent reported succeeded but the item has no tasks' }
+  if (verdict === 'needs_input' && evidence.questions === 0)
+    return { outcome: 'failed', reason: 'the agent reported needs_input but asked no question' }
   return { outcome: verdict }
 }

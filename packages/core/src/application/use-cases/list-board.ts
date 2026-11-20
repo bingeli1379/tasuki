@@ -13,20 +13,34 @@ export interface Board {
   columns: BoardColumn[]
   // Items an agent is working on right now.
   running: Ref[]
+  // Per item that has tasks, how many are done.
+  tasks: Record<Ref, { done: number; total: number }>
 }
 
-// One column per item status the config maps, in board order.
+// One column per item status the config maps, in board order. Tasks come from one more
+// list, not one read per item.
 export async function listBoard(
   storage: StoragePort,
   runtime: RuntimeStorePort,
-  mapped: readonly string[],
+  mapped: { item: readonly string[]; task: readonly string[] },
 ): Promise<Board> {
-  const statuses = ITEM_STATUSES.filter((s) => mapped.includes(s))
-  const [items, live] = await Promise.all([storage.list('item', statuses), runtime.liveRuns()])
+  const statuses = ITEM_STATUSES.filter((s) => mapped.item.includes(s))
+  const [items, tasks, live] = await Promise.all([
+    storage.list('item', statuses),
+    storage.list('task', mapped.task),
+    runtime.liveRuns(),
+  ])
   const columns = statuses.map((status) => ({
     status,
     displayName: ITEM_STATUS_DISPLAY[status] ?? status,
     items: items.filter((i) => i.status === status),
   }))
-  return { columns, running: live.map((r) => r.target) }
+  const counts: Board['tasks'] = {}
+  for (const t of tasks) {
+    if (t.parent === undefined) continue
+    const count = (counts[t.parent] ??= { done: 0, total: 0 })
+    count.total++
+    if (t.status === 'done') count.done++
+  }
+  return { columns, running: live.map((r) => r.target), tasks: counts }
 }

@@ -46,6 +46,8 @@ export function createClient(jiraFetch: JiraFetch): JiraRequest {
     const init: RequestInit = { method, headers: { 'Content-Type': 'application/json' } }
     if (body !== undefined) init.body = JSON.stringify(body)
     const res = await jiraFetch(path, init)
-    return (res.status === 204 ? undefined : await res.json()) as T
+    // Some writes answer 201 with no body (creating an issue link).
+    const text = await res.text()
+    return (text === '' ? undefined : JSON.parse(text)) as T
   }
 }

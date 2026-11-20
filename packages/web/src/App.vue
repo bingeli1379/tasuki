@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { ApiError, call, messageOf, sendJson, type Item } from './api'
 import ItemDetail from './components/ItemDetail.vue'
+import { EDITOR_PROPS, EDITOR_TOOLBAR, MARKDOWN_OPTIONS, toStoredMarkdown } from './editor'
 import { previewText } from './markdown'
 
 interface Column {
@@ -13,6 +14,7 @@ interface Column {
 const columns = ref<Column[]>([])
 // Refs an agent is working on right now.
 const running = ref<string[]>([])
+const tasks = ref<Record<string, { done: number; total: number }>>({})
 const error = ref('')
 const open = ref(false)
 const title = ref('')
@@ -28,6 +30,11 @@ const target = computed(() =>
   dragging.value && over.value !== dragging.value.status ? over.value : undefined,
 )
 const toast = useToast()
+// A constant, not a literal in the template: a new object each render rebuilds the editor.
+// Height and padding go on the editable element, so all of the box takes a click.
+const newItemEditorUi = {
+  content: 'markdown [&_.ProseMirror]:min-h-40 [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2',
+}
 const detailOpen = ref(false)
 const detailRef = ref('')
 
@@ -54,9 +61,14 @@ function place(item: Item): void {
 
 async function load(): Promise<void> {
   try {
-    const board = await call<{ columns: Column[]; running: string[] }>('/api/board')
+    const board = await call<{
+      columns: Column[]
+      running: string[]
+      tasks: Record<string, { done: number; total: number }>
+    }>('/api/board')
     columns.value = board.columns
     running.value = board.running
+    tasks.value = board.tasks
     error.value = ''
   } catch (e) {
     error.value = messageOf(e)
@@ -90,7 +102,7 @@ async function create(): Promise<void> {
   try {
     const item = await call<Item>(
       '/api/items',
-      sendJson('POST', { title: title.value, body: body.value }),
+      sendJson('POST', { title: title.value, body: toStoredMarkdown(body.value) }),
     )
     // Not a reload: the board may lag behind writes (Jira search index).
     columns.value.find((c) => c.status === item.status)?.items.push(item)
@@ -165,18 +177,45 @@ onMounted(load)
         class="flex items-center justify-between border-b border-default bg-default px-6 py-3"
       >
         <h1 class="text-lg font-semibold">Tasuki</h1>
-        <UModal v-model:open="open" title="New item">
+        <UModal v-model:open="open" title="New item" :ui="{ content: 'sm:max-w-3xl' }">
           <UButton label="New item" />
           <template #body>
-            <form class="flex flex-col gap-4" @submit.prevent="create">
-              <UFormField label="Title" required>
-                <UInput v-model="title" required autofocus class="w-full" />
-              </UFormField>
-              <UFormField label="Body">
-                <UTextarea v-model="body" :rows="4" autoresize class="w-full" />
-              </UFormField>
-              <UButton type="submit" label="Create" :loading="saving" class="self-end" />
-            </form>
+            <!-- Only the title is a form, so Enter there creates the item; the editor toolbar
+                 buttons would submit a form around them. -->
+            <div class="flex flex-col gap-4">
+              <form @submit.prevent="create">
+                <UFormField label="Title" required>
+                  <UInput v-model="title" required autofocus class="w-full" />
+                </UFormField>
+              </form>
+              <div class="flex flex-col gap-1">
+                <span class="text-sm font-medium">Body</span>
+                <UEditor
+                  v-slot="{ editor }"
+                  v-model="body"
+                  content-type="markdown"
+                  :markdown="MARKDOWN_OPTIONS"
+                  :image="false"
+                  :mention="false"
+                  :editor-props="EDITOR_PROPS"
+                  class="rounded-md border border-default"
+                  :ui="newItemEditorUi"
+                >
+                  <UEditorToolbar
+                    :editor="editor"
+                    :items="EDITOR_TOOLBAR"
+                    class="border-b border-default px-2 py-1"
+                  />
+                </UEditor>
+              </div>
+              <UButton
+                label="Create"
+                :loading="saving"
+                :disabled="title.trim() === ''"
+                class="self-end"
+                @click="create"
+              />
+            </div>
           </template>
         </UModal>
       </header>
@@ -221,6 +260,13 @@ onMounted(load)
                       label="Running"
                       color="primary"
                       variant="subtle"
+                      size="sm"
+                    />
+                    <UBadge
+                      v-if="tasks[item.ref]"
+                      :label="`${tasks[item.ref]?.done}/${tasks[item.ref]?.total} tasks`"
+                      color="neutral"
+                      variant="outline"
                       size="sm"
                     />
                   </p>

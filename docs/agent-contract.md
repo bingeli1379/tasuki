@@ -33,7 +33,7 @@
 
 刻意沒有的：任何改 item status 的 tool、刪除、跨 item 存取。
 
-目前做到的（S4，D63）：`get_item`（不帶參數，讀被派的那張 item）與 `report_result`。其他 tool 隨用到的切片長出來。
+目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`create_task`、`add_comment`、`report_result`（S4 D63、S5 D65）。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`update_task`、`list_comments`、`set_task_status` 隨用到的切片長出來。
 
 為什麼 orchestrator 不能建 task：task 圖是人在 `split-review` 檢查過才放行的，放行後再讓 AI 加 task 等於繞過關卡。orchestrator 發現需要新工作時，用 `add_comment` 寫下來，由 verdict 帶出去。
 
@@ -54,7 +54,7 @@ interface ReportResult {
 
 `report_result` 只收第一次，之後回錯誤。
 
-engine 不直接相信 verdict，先驗證再換算成 outcome。S4 還沒做這張表的檢查，verdict 直接採信，只有「沒有 verdict」與「exit code 非零」會變成 `failed`（D63）；verdict 在規則裡沒有出口時（例如 split 回 `blocked_manual`）也是 `failed`。
+engine 不直接相信 verdict，先驗證再換算成 outcome。目前檢查的是 `succeeded`（split）與 `needs_input` 兩列（D65），其他列 S6 以後跟著對應的規則補上，在那之前直接採信。verdict 在規則裡沒有出口時（例如 split 回 `blocked_manual`）也是 `failed`。檢查失敗時，system comment 的 `Why:` 寫出沒做到的那一項。
 
 | verdict | engine 檢查 | 檢查失敗 |
 |---|---|---|

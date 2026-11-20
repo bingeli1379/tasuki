@@ -133,7 +133,7 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 實際讀的欄位（S4）：`dataDir`、`server.port`、`tracker`、`statuses.item`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。
+目前 server 實際讀的欄位（S5）：`dataDir`、`server.port`、`tracker`、`statuses.item`、`statuses.task`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。有 `mode: split` 的規則時，`statuses.task` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
 ## Rule 欄位
 
@@ -216,7 +216,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 
 啟動時與 `doctor` 指令都跑同一組檢查，錯誤要指出是哪條規則、哪個欄位。
 
-1. 規則用到的每個 status 都存在於 `statuses.item`。
+1. 規則用到的每個 status 都存在於 `statuses.item`。`statuses` 裡沒有不認識的 status。有 split 規則時，`statuses.task` 對照了 `to-do` 與 `manual`。
 2. 不同規則的 `watch` 不重複。兩條規則監看同一個 status 會產生歧義。
 3. `claim` 不等於 `watch`（可省略）。
 4. `on` 的每個目標都存在，而且規則可能產生的每個 outcome 都有目標。`failed` 與 `max_attempts` 有預設，`blocked_manual` 對 split / rework 不會發生，這三個可省略。

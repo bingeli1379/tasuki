@@ -1,7 +1,30 @@
+import type { EditorToolbarItem } from '@nuxt/ui'
 import { ATTACHMENT_SCHEME, formatEmbed } from '@tasuki/core'
 import { mergeAttributes, Node } from '@tiptap/core'
 import Image, { type ImageOptions } from '@tiptap/extension-image'
 import { attachmentUrl } from './api'
+
+// Shared by every UEditor, and module constants on purpose: a new object on each render
+// makes UEditor rebuild the editor.
+export const MARKDOWN_OPTIONS = { markedOptions: { gfm: true, breaks: true } }
+export const EDITOR_PROPS = { attributes: { 'aria-label': 'Body' } }
+// Text buttons rather than icons: icons would be fetched from the Iconify API at runtime,
+// which an offline company network cannot reach.
+export const EDITOR_TOOLBAR: EditorToolbarItem[][] = [
+  [
+    { kind: 'heading', level: 2, label: 'H2', 'aria-label': 'Heading' },
+    { kind: 'mark', mark: 'bold', label: 'B', 'aria-label': 'Bold' },
+    { kind: 'mark', mark: 'italic', label: 'I', 'aria-label': 'Italic' },
+    { kind: 'mark', mark: 'strike', label: 'S', 'aria-label': 'Strikethrough' },
+    { kind: 'mark', mark: 'code', label: '<>', 'aria-label': 'Inline code' },
+  ],
+  [
+    { kind: 'bulletList', label: '•', 'aria-label': 'Bullet list' },
+    { kind: 'orderedList', label: '1.', 'aria-label': 'Numbered list' },
+    { kind: 'blockquote', label: '❝', 'aria-label': 'Quote' },
+    { kind: 'codeBlock', label: '{ }', 'aria-label': 'Code block' },
+  ],
+]
 
 const EMBED_AT_START = /^\[\[embed:([^|\]\n]*)\|([A-Za-z0-9+/=]+)\]\]/
 
