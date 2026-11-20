@@ -1,4 +1,9 @@
-import { createStatusMap, ITEM_STATUS_DISPLAY, type PluginContext } from '@tasuki/core'
+import {
+  createStatusMap,
+  ITEM_STATUS_DISPLAY,
+  TASK_STATUS_DISPLAY,
+  type PluginContext,
+} from '@tasuki/core'
 import { describeStorageContract } from '@tasuki/testkit'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -13,7 +18,7 @@ import { TRACKER_MIGRATIONS } from './tracker-migrations'
 const ctx = (dataDir = ':memory:'): PluginContext => ({
   clock: { now: () => new Date('2026-11-16T12:00:00Z') },
   dataDir,
-  statuses: createStatusMap({ item: ITEM_STATUS_DISPLAY }),
+  statuses: createStatusMap({ item: ITEM_STATUS_DISPLAY, task: TASK_STATUS_DISPLAY }),
 })
 
 const memoryTracker = (refPrefix: string): ReturnType<typeof createSqliteTracker> => {

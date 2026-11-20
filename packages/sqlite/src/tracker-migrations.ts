@@ -34,4 +34,11 @@ export const TRACKER_MIGRATIONS: readonly string[] = [
     created_at TEXT NOT NULL
   );
   CREATE INDEX attachment_by_target ON attachment(target, id);`,
+  // S5: tasks. work_unit already has parent and origin.
+  `CREATE INDEX work_unit_by_parent ON work_unit(parent);
+  CREATE TABLE dependency (
+    task       TEXT NOT NULL REFERENCES work_unit(ref),
+    blocked_by TEXT NOT NULL REFERENCES work_unit(ref),
+    PRIMARY KEY (task, blocked_by)
+  );`,
 ]

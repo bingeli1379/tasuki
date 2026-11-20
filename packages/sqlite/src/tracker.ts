@@ -1,5 +1,6 @@
 import {
   EditConflict,
+  InvalidInput,
   NotFound,
   StatusConflict,
   type Attachment,
@@ -7,6 +8,7 @@ import {
   type CommentAuthor,
   type CommentKind,
   type Kind,
+  type Origin,
   type PluginContext,
   type StoragePort,
   type WorkUnit,
@@ -21,10 +23,12 @@ function toWorkUnit(ctx: PluginContext, row: Row): WorkUnit {
   return {
     ref: String(row['ref']),
     kind,
+    ...(typeof row['parent'] === 'string' ? { parent: row['parent'] } : {}),
     title: String(row['title']),
     body: String(row['body']),
     status: ctx.statuses.fromTracker(kind, key) ?? key,
     labels: JSON.parse(String(row['labels'])) as string[],
+    ...(typeof row['origin'] === 'string' ? { origin: row['origin'] as Origin } : {}),
     version: String(row['version']),
   }
 }
@@ -80,6 +84,23 @@ export function createSqliteTracker(
     async get(ref) {
       return get(ref)
     },
+    async children(item) {
+      get(item)
+      return db
+        .prepare('SELECT * FROM work_unit WHERE parent = ? ORDER BY rowid')
+        .all(item)
+        .map((r) => toWorkUnit(ctx, r))
+    },
+    async dependencies(item) {
+      get(item)
+      return db
+        .prepare(
+          `SELECT d.task, d.blocked_by FROM dependency d JOIN work_unit t ON t.ref = d.task
+           WHERE t.parent = ? ORDER BY t.rowid, d.blocked_by`,
+        )
+        .all(item)
+        .map((r) => ({ task: String(r['task']), blockedBy: String(r['blocked_by']) }))
+    },
     createItem(item) {
       const now = ctx.clock.now().toISOString()
       // One statement, so two concurrent creates cannot get the same ref.
@@ -99,6 +120,39 @@ export function createSqliteTracker(
         )
       if (row === undefined) throw new Error('insert returned no row')
       return Promise.resolve(toWorkUnit(ctx, row))
+    },
+    async createTask(item, task) {
+      if (get(item).kind !== 'item') throw new NotFound(`${item} is not an item`)
+      const siblings = new Set(
+        db
+          .prepare('SELECT ref FROM work_unit WHERE parent = ?')
+          .all(item)
+          .map((r) => String(r['ref'])),
+      )
+      const foreign = task.blockedBy.filter((ref) => !siblings.has(ref))
+      if (foreign.length > 0)
+        throw new InvalidInput(`${foreign.join(', ')} is not a task of ${item}`)
+      const now = ctx.clock.now().toISOString()
+      const row = db
+        .prepare(
+          `INSERT INTO work_unit (ref, kind, parent, title, body, status, origin, created_at, updated_at)
+           VALUES (? || '-' || (SELECT COALESCE(MAX(rowid), 0) + 1 FROM work_unit), 'task', ?, ?, ?, ?, ?, ?, ?)
+           RETURNING *`,
+        )
+        .get(
+          refPrefix,
+          item,
+          task.title,
+          task.body,
+          ctx.statuses.toTracker('task', task.status),
+          task.origin,
+          now,
+          now,
+        )
+      if (row === undefined) throw new Error('insert returned no row')
+      const insert = db.prepare('INSERT INTO dependency (task, blocked_by) VALUES (?, ?)')
+      for (const blocker of task.blockedBy) insert.run(row['ref'] as string, blocker)
+      return toWorkUnit(ctx, row)
     },
     async transition(ref, expectedFrom, to) {
       const kind = get(ref).kind
