@@ -1,0 +1,122 @@
+import {
+  InvalidInput,
+  NotFound,
+  RunConflict,
+  type Clock,
+  type Outcome,
+  type Run,
+  type RuntimeStorePort,
+  type Verdict,
+} from '@tasuki/core'
+import { randomUUID } from 'node:crypto'
+import { join } from 'node:path'
+import type { DatabaseSync } from 'node:sqlite'
+
+type Row = Record<string, unknown>
+
+const optional = <K extends string>(key: K, value: unknown): Partial<Record<K, string>> =>
+  typeof value === 'string' ? ({ [key]: value } as Record<K, string>) : {}
+
+function toRun(row: Row): Run {
+  return {
+    id: String(row['id']),
+    target: String(row['target']),
+    rule: String(row['rule']),
+    agent: String(row['agent']),
+    attempt: Number(row['attempt']),
+    workspace: String(row['workspace']),
+    state: row['state'] as Run['state'],
+    ...(optional('outcome', row['outcome']) as { outcome?: Outcome }),
+    ...(optional('verdict', row['verdict']) as { verdict?: Verdict }),
+    ...optional('summary', row['summary']),
+    leaseUntil: String(row['lease_until']),
+    startedAt: String(row['started_at']),
+    lastActivityAt: String(row['last_activity_at']),
+    ...optional('finishedAt', row['finished_at']),
+    logPath: String(row['log_path']),
+  }
+}
+
+// rowid breaks ties: a fake clock can start two Runs in the same millisecond.
+const NEWEST_FIRST = 'ORDER BY started_at DESC, rowid DESC'
+
+export function createRuntimeStore(
+  db: DatabaseSync,
+  clock: Clock,
+  logDir: string,
+): RuntimeStorePort {
+  const later = (seconds: number): string =>
+    new Date(clock.now().getTime() + seconds * 1000).toISOString()
+
+  function get(id: string): Run {
+    const row = db.prepare('SELECT * FROM run WHERE id = ?').get(id)
+    if (row === undefined) throw new NotFound(`Run ${id} does not exist`)
+    return toRun(row)
+  }
+
+  return {
+    async createRun(run) {
+      const id = randomUUID()
+      const now = clock.now().toISOString()
+      try {
+        db.prepare(
+          `INSERT INTO run (id, target, rule, agent, attempt, workspace, state, lease_until,
+             started_at, last_activity_at, log_path)
+           VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
+        ).run(
+          id,
+          run.target,
+          run.rule,
+          run.agent,
+          run.attempt,
+          run.workspace,
+          later(run.leaseSeconds),
+          now,
+          now,
+          join(logDir, `${id}.log`),
+        )
+      } catch (e) {
+        if (e instanceof Error && e.message.includes('UNIQUE constraint failed'))
+          throw new RunConflict(`${run.target} already has a live Run`)
+        throw e
+      }
+      return get(id)
+    },
+    async getRun(id) {
+      return get(id)
+    },
+    async renewLease(id, leaseSeconds) {
+      db.prepare("UPDATE run SET lease_until = ? WHERE id = ? AND state = 'running'").run(
+        later(leaseSeconds),
+        id,
+      )
+    },
+    async report(id, verdict, summary) {
+      const { changes } = db
+        .prepare(
+          "UPDATE run SET verdict = ?, summary = ? WHERE id = ? AND state = 'running' AND verdict IS NULL",
+        )
+        .run(verdict, summary, id)
+      if (changes === 0) {
+        const run = get(id)
+        throw new InvalidInput(
+          run.state === 'finished' ? 'this Run is over' : 'the result was already reported',
+        )
+      }
+    },
+    async finishRun(id, outcome) {
+      db.prepare(
+        "UPDATE run SET state = 'finished', outcome = ?, finished_at = ? WHERE id = ? AND state = 'running'",
+      ).run(outcome, clock.now().toISOString(), id)
+    },
+    async liveRuns() {
+      return db
+        .prepare(`SELECT * FROM run WHERE state = 'running' ${NEWEST_FIRST}`)
+        .all()
+        .map(toRun)
+    },
+    async runsFor(target) {
+      return db.prepare(`SELECT * FROM run WHERE target = ? ${NEWEST_FIRST}`).all(target).map(toRun)
+    },
+  }
+}

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
-import { loadTracker } from './plugin-loader'
+import { loadRunner, loadTracker } from './plugin-loader'
 
 const ctx = (dataDir: string): PluginContext => ({
   clock: { now: () => new Date('2026-11-16T12:00:00Z') },
@@ -53,5 +53,22 @@ describe('loadTracker', () => {
     ['bad-options', 'plugin "bad-options": create tracker: options.x is required'],
   ])('refuses %s with the step that failed', async (name, message) => {
     await expect(loadTracker(name, {}, dir, ctx(dir))).rejects.toThrow(message)
+  })
+})
+
+describe('loadRunner', () => {
+  it('loads the fake runner from the config folder', async () => {
+    const repoRoot = resolve(import.meta.dirname, '../../..')
+    const runner = await loadRunner('@tasuki/fake-runner', { seconds: 0 }, repoRoot, ctx(repoRoot))
+    expect(typeof runner.start).toBe('function')
+  })
+
+  it('refuses a plugin without a runner', async () => {
+    const dir = configDirWith({
+      'only-tracker': "{ name: 'x', apiVersion: 1, tracker: () => ({}) }",
+    })
+    await expect(loadRunner('only-tracker', {}, dir, ctx(dir))).rejects.toThrow(
+      'plugin "only-tracker": check export: does not provide a runner',
+    )
   })
 })

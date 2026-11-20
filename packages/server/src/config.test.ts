@@ -45,4 +45,89 @@ describe('loadConfig', () => {
       loadConfig(write('{ "statuses": { "item": { "refining": "R", "doing": "D" } } }')),
     ).toThrow('unknown status doing')
   })
+
+  const withRules = (rules: unknown[]): string =>
+    write(
+      JSON.stringify({
+        agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } } },
+        rules,
+      }),
+    )
+  const split = {
+    id: 'split',
+    watch: 'ready-to-split',
+    claim: 'splitting',
+    agent: 'fake',
+    mode: 'split',
+    on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+  }
+
+  it('reads agents and rules, filling maxAttempts and the limits from the defaults', () => {
+    const config = loadConfig(withRules([split]))
+    expect(config.agents).toEqual({
+      fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } },
+    })
+    expect(config.rules).toEqual([{ ...split, maxAttempts: 3 }])
+    expect(config.limits).toEqual({
+      maxConcurrentRuns: 2,
+      leaseSeconds: 120,
+      defaultMaxAttempts: 3,
+    })
+    expect(config.pollSeconds).toBe(5)
+  })
+
+  it('has no rules when it lists none, so the engine leaves every item alone', () => {
+    expect(loadConfig(write('{}')).rules).toEqual([])
+  })
+
+  it.each([
+    [
+      { ...split, watch: 'ready' },
+      'rules[0] (split).watch: status "ready" is not in statuses.item',
+    ],
+    [{ ...split, claim: 'ready-to-split' }, 'rules[0] (split).claim must differ from watch'],
+    [{ ...split, agent: 'claude' }, 'rules[0] (split).agent: no agent "claude" in agents'],
+    [{ ...split, mode: 'review' }, 'rules[0] (split).mode must be one of split, execute, rework'],
+    [
+      { ...split, on: { succeeded: 'split-review' } },
+      'rules[0] (split).on.needs_input is required',
+    ],
+    [
+      { ...split, on: { ...split.on, cancelled: 'done' } },
+      'rules[0] (split).on.cancelled: not an outcome',
+    ],
+    [
+      { ...split, maxAttempts: 0 },
+      'rules[0] (split).maxAttempts must be a whole number of at least 1',
+    ],
+  ])('refuses a rule that cannot work: %j', (rule, message) => {
+    expect(() => loadConfig(withRules([rule]))).toThrow(message)
+  })
+
+  it('refuses two rules watching the same status', () => {
+    expect(() => loadConfig(withRules([split, { ...split, id: 'again' }]))).toThrow(
+      'config rules: split and again both watch ready-to-split',
+    )
+  })
+
+  it('refuses a rule whose default failed exit, blocked, is not on the board', () => {
+    const path = write(
+      JSON.stringify({
+        statuses: {
+          item: {
+            refining: 'R',
+            'ready-to-split': 'S',
+            splitting: 'P',
+            'split-review': 'V',
+            'needs-answers': 'N',
+          },
+        },
+        agents: { fake: { plugin: 'x' } },
+        rules: [split],
+      }),
+    )
+    expect(() => loadConfig(path)).toThrow(
+      'on.failed (default): status "blocked" is not in statuses.item',
+    )
+  })
 })

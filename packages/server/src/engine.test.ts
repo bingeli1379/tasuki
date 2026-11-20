@@ -1,0 +1,376 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
+import {
+  createStatusMap,
+  ITEM_STATUS_DISPLAY,
+  type Rule,
+  type RunExit,
+  type RunnerPort,
+  type RunSpec,
+  type WorkUnit,
+} from '@tasuki/core'
+import { createSqliteTracker, migrate as migrateTracker, TRACKER_MIGRATIONS } from '@tasuki/sqlite'
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { describe, expect, it } from 'vite-plus/test'
+import { createApp } from './app'
+import { createEngine } from './engine'
+import { createRunTokens } from './run-tokens'
+import { openDatabase } from './runtime-store/database'
+import { migrate } from './runtime-store/migrate'
+import { RUNTIME_MIGRATIONS } from './runtime-store/migrations'
+import { createRuntimeStore } from './runtime-store/run-store'
+
+const statuses = createStatusMap({ item: ITEM_STATUS_DISPLAY })
+
+const split: Rule = {
+  id: 'split',
+  watch: 'ready-to-split',
+  claim: 'splitting',
+  agent: 'fake',
+  mode: 'split',
+  maxAttempts: 2,
+  on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+}
+
+// What a scripted agent does once started: it gets an MCP client already connected to the
+// facade with its Run's token, and returns how its process exits.
+type Script = (mcp: Client, spec: RunSpec) => Promise<RunExit>
+
+const ok: RunExit = { code: 0, signal: null }
+const report =
+  (verdict: string): Script =>
+  async (mcp) => {
+    await mcp.callTool({
+      name: 'report_result',
+      arguments: { verdict, summary: `said ${verdict}` },
+    })
+    return ok
+  }
+const hang: Script = () => new Promise(() => {})
+
+// The real sqlite tracker and runtime store, a clock the test moves, and the app serving
+// the facade, so a scripted agent goes through the same HTTP path as the fake runner.
+function setup(
+  runtimeDb = openDatabase(':memory:'),
+  trackerDb = openDatabase(':memory:'),
+  now = { t: Date.parse('2026-11-20T12:00:00Z') },
+) {
+  migrate(runtimeDb, RUNTIME_MIGRATIONS)
+  migrateTracker(trackerDb, TRACKER_MIGRATIONS)
+  const clock = { now: () => new Date(now.t) }
+  const storage = createSqliteTracker({ clock, dataDir: '', statuses }, trackerDb, 'T')
+  const runtime = createRuntimeStore(runtimeDb, clock, '/logs')
+  const tokens = createRunTokens()
+  const app = createApp({ db: runtimeDb, storage, runtime, statuses, tokens })
+  const scripts: Script[] = []
+  const started: RunSpec[] = []
+  const runner: RunnerPort = {
+    start(spec) {
+      started.push(spec)
+      const script = scripts.shift() ?? report('succeeded')
+      const exit = (async () => {
+        const mcp = new Client({ name: 'agent', version: '0' })
+        await mcp.connect(
+          new StreamableHTTPClientTransport(new URL(spec.mcp.url), {
+            fetch: (url, init) => Promise.resolve(app.request(String(url), init)),
+            requestInit: { headers: { Authorization: `Bearer ${spec.mcp.token}` } },
+          }),
+        )
+        return script(mcp, spec)
+      })()
+      return { exit }
+    },
+  }
+  const logs: string[] = []
+  const engine = (rules: Rule[] = [split], maxConcurrentRuns = 2) =>
+    createEngine({
+      storage,
+      runtime,
+      clock,
+      rules,
+      limits: { maxConcurrentRuns, leaseSeconds: 120, defaultMaxAttempts: 3 },
+      workspaceRoot: mkdtempSync(join(tmpdir(), 'tasuki-ws-')),
+      runners: { fake: runner },
+      tokens,
+      mcpUrl: 'http://localhost/agent-mcp',
+      log: (m) => logs.push(m),
+    })
+  const readyItem = async (title = 'Login page'): Promise<WorkUnit> => {
+    const item = await storage.createItem({ title, body: '', status: 'refining' })
+    return storage.transition(item.ref, 'refining', 'ready-to-split')
+  }
+  return {
+    storage,
+    runtime,
+    app,
+    scripts,
+    started,
+    engine,
+    readyItem,
+    now,
+    logs,
+    runtimeDb,
+    trackerDb,
+  }
+}
+
+describe('rule split on a fake agent', () => {
+  it('claims a ready item into splitting while the agent works, and shows the Run', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const item = await t.readyItem()
+    await t.engine().tick()
+
+    expect((await t.storage.get(item.ref)).status).toBe('splitting')
+    const [run] = await t.runtime.runsFor(item.ref)
+    expect(run).toMatchObject({ rule: 'split', attempt: 1, state: 'running' })
+    expect(t.started).toMatchObject([{ target: item.ref, mode: 'split' }])
+    const board = (await (await t.app.request('/api/board')).json()) as { running: string[] }
+    expect(board.running).toEqual([item.ref])
+  })
+
+  it.each([
+    ['succeeded', 'split-review'],
+    ['needs_input', 'needs-answers'],
+    ['failed', 'blocked'],
+  ])('moves the item on the reported %s and says so in a system comment', async (verdict, to) => {
+    const t = setup()
+    t.scripts.push(report(verdict))
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item.ref)).status).toBe(to)
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      state: 'finished',
+      outcome: verdict,
+      verdict,
+      summary: `said ${verdict}`,
+    })
+    const [comment] = await t.storage.comments(item.ref)
+    expect(comment).toMatchObject({ author: 'engine', kind: 'system' })
+    expect(comment?.body).toBe(
+      `Rule split, attempt 1: ${verdict}, moved to ${to}.\n\nsaid ${verdict}`,
+    )
+  })
+
+  it('is failed when the agent exits without a verdict, or with a non-zero code', async () => {
+    const t = setup()
+    t.scripts.push(
+      () => Promise.resolve(ok),
+      async (mcp) => {
+        await report('succeeded')(mcp, t.started[1] as RunSpec)
+        return { code: 3, signal: null }
+      },
+    )
+    const silent = await t.readyItem('silent')
+    const crashed = await t.readyItem('crashed')
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+
+    for (const [item, why] of [
+      [silent, 'the agent reported no verdict'],
+      [crashed, 'exit code 3'],
+    ] as const) {
+      expect((await t.storage.get(item.ref)).status).toBe('blocked')
+      expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
+      expect((await t.storage.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
+    }
+  })
+
+  it('a split agent saying blocked_manual has nowhere to go, so it is failed', async () => {
+    const t = setup()
+    t.scripts.push(report('blocked_manual'))
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
+  })
+
+  it('a person moving the item while the agent works wins: cancelled, no status written (invariant 6)', async () => {
+    const t = setup()
+    let release = (): void => {}
+    const moved = new Promise<void>((r) => (release = r))
+    t.scripts.push(async (mcp) => {
+      await moved
+      return report('succeeded')(mcp, t.started[0] as RunSpec)
+    })
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await t.storage.transition(item.ref, 'splitting', 'refining')
+    release()
+    await engine.settled()
+
+    expect((await t.storage.get(item.ref)).status).toBe('refining')
+    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('cancelled')
+    expect(await t.storage.comments(item.ref)).toEqual([])
+  })
+
+  it('never runs two agents on one item at once (invariant 1)', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    // Back in the watch status while its Run is still alive, e.g. a person dragged it back.
+    await t.storage.transition(item.ref, 'splitting', 'ready-to-split')
+    await engine.tick()
+
+    expect(t.started).toHaveLength(1)
+    expect(await t.runtime.liveRuns()).toHaveLength(1)
+  })
+
+  it('starts no more agents than maxConcurrentRuns; the rest wait for the next round', async () => {
+    const t = setup()
+    t.scripts.push(hang, hang)
+    await t.readyItem('a')
+    await t.readyItem('b')
+    const engine = t.engine([split], 1)
+    await engine.tick()
+    await engine.tick()
+
+    expect(t.started.map((s) => s.target)).toEqual(['T-1'])
+    expect((await t.storage.get('T-2')).status).toBe('ready-to-split')
+  })
+})
+
+describe('lease expiry (stop-and-recovery.md, D38)', () => {
+  // The engine process dies mid-Run: a new one on the same databases finds a Run nobody
+  // renews any more.
+  const restart = (t: ReturnType<typeof setup>): ReturnType<typeof setup> =>
+    setup(t.runtimeDb, t.trackerDb, t.now)
+
+  it('sends the item back to ready-to-split, and the next round runs attempt 2', async () => {
+    const first = setup()
+    first.scripts.push(hang)
+    const item = await first.readyItem()
+    await first.engine().tick()
+
+    const second = restart(first)
+    second.scripts.push(hang)
+    second.now.t += 60_000
+    await second.engine().tick()
+    expect((await second.runtime.runsFor(item.ref))[0]?.state).toBe('running')
+
+    second.now.t += 61_000
+    await second.engine().tick()
+    const runs = await second.runtime.runsFor(item.ref)
+    expect(runs.map((r) => [r.attempt, r.state, r.outcome])).toEqual([
+      [2, 'running', undefined],
+      [1, 'finished', 'abandoned'],
+    ])
+    expect((await second.storage.get(item.ref)).status).toBe('splitting')
+    expect((await second.storage.comments(item.ref))[0]?.body).toBe(
+      'Rule split, attempt 1: the agent stopped answering. Moved back to ready-to-split to try again.',
+    )
+  })
+
+  it('past maxAttempts it goes to blocked; pulled back by a person it starts over at 1', async () => {
+    let t = setup()
+    t.scripts.push(hang)
+    const item = await t.readyItem()
+    await t.engine().tick()
+    // maxAttempts is 2: two Runs die, and the round after the second gives up.
+    t = restart(t)
+    t.scripts.push(hang)
+    t.now.t += 121_000
+    await t.engine().tick()
+    t = restart(t)
+    t.now.t += 121_000
+    await t.engine().tick()
+
+    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+    const runs = await t.runtime.runsFor(item.ref)
+    expect(runs.map((r) => [r.attempt, r.outcome])).toEqual([
+      [3, 'max_attempts'],
+      [2, 'abandoned'],
+      [1, 'abandoned'],
+    ])
+    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+      'Rule split gave up after 2 attempts that never finished. Moved to blocked.',
+    )
+
+    await t.storage.transition(item.ref, 'blocked', 'ready-to-split')
+    t.scripts.push(report('succeeded'))
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      attempt: 1,
+      outcome: 'succeeded',
+    })
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('leaves an item a person already moved out of the claim status where it is', async () => {
+    const first = setup()
+    first.scripts.push(hang)
+    const item = await first.readyItem()
+    await first.engine().tick()
+    await first.storage.transition(item.ref, 'splitting', 'refining')
+
+    const second = restart(first)
+    second.now.t += 121_000
+    await second.engine().tick()
+    expect((await second.storage.get(item.ref)).status).toBe('refining')
+    expect((await second.runtime.runsFor(item.ref))[0]?.outcome).toBe('abandoned')
+  })
+})
+
+describe('the MCP facade for agents', () => {
+  it('reads only its own item, takes one report, and shuts the door once the Run is over', async () => {
+    const t = setup()
+    let mcp: Client | undefined
+    t.scripts.push(async (client) => {
+      mcp = client
+      const read = await client.callTool({ name: 'get_item', arguments: {} })
+      const text = (read.content as { text: string }[])[0]?.text ?? ''
+      expect(JSON.parse(text)).toMatchObject({ ref: 'T-1', status: 'splitting' })
+      await report('succeeded')(client, t.started[0] as RunSpec)
+      const again = await client.callTool({
+        name: 'report_result',
+        arguments: { verdict: 'failed', summary: '' },
+      })
+      expect(again.isError).toBe(true)
+      return ok
+    })
+    await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.runtime.runsFor('T-1'))[0]?.outcome).toBe('succeeded')
+    await expect(mcp?.callTool({ name: 'get_item', arguments: {} })).rejects.toThrow()
+  })
+
+  it('has no tool that moves the item (invariant 2)', async () => {
+    const t = setup()
+    let names: string[] = []
+    t.scripts.push(async (client) => {
+      names = (await client.listTools()).tools.map((tool) => tool.name)
+      return report('succeeded')(client, t.started[0] as RunSpec)
+    })
+    await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+    expect(names).toEqual(['get_item', 'report_result'])
+  })
+
+  it('turns away a request without a live Run token', async () => {
+    const res = await setup().app.request('/agent-mcp', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer nope', 'Content-Type': 'application/json' },
+      body: '{}',
+    })
+    expect(res.status).toBe(401)
+  })
+})

@@ -6,6 +6,7 @@ import {
   listBoard,
   moveItem,
   updateItem,
+  type RuntimeStorePort,
   type StatusMap,
   type StoragePort,
 } from '@tasuki/core'
@@ -14,6 +15,7 @@ import { z } from 'zod'
 
 export interface McpDeps {
   storage: StoragePort
+  runtime: RuntimeStorePort
   statuses: StatusMap
 }
 
@@ -23,16 +25,17 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 
 // The user's own AI client (Claude Code, Codex) acting as the user: the same use cases as
 // the board, so whatever a person can do on the board this can do too (D57).
-export function createMcpServer({ storage, statuses }: McpDeps): McpServer {
+export function createMcpServer({ storage, runtime, statuses }: McpDeps): McpServer {
   const server = new McpServer({ name: 'tasuki', version: '0.0.0' })
   server.registerTool(
     'list_board',
     {
       description:
-        'List the board: one column per item status in board order, each with its items. ' +
+        'List the board: one column per item status in board order, each with its items, ' +
+        'and `running`, the refs an agent is working on right now. ' +
         'Items created a few seconds ago may not be listed yet when the tracker is Jira.',
     },
-    async () => json({ columns: await listBoard(storage, statuses.mapped('item')) }),
+    async () => json(await listBoard(storage, runtime, statuses.mapped('item'))),
   )
   server.registerTool(
     'create_item',
@@ -65,13 +68,14 @@ export function createMcpServer({ storage, statuses }: McpDeps): McpServer {
     'get_item',
     {
       description:
-        'Read one item: its fields (body is markdown), its comments oldest first, and its ' +
-        'attachments. `version` is what update_item needs. In the body, ![x](attachment:<id>) ' +
+        'Read one item: its fields (body is markdown), its comments oldest first, its ' +
+        'attachments, and its runs newest first (each agent run on it: rule, attempt, outcome). ' +
+        '`version` is what update_item needs. In the body, ![x](attachment:<id>) ' +
         'is an attachment of this item; [[embed:<label>|...]] is tracker content markdown ' +
         'cannot express (a Jira mention, table...): keep the token as is to keep that content.',
       inputSchema: { ref: z.string().describe('The item ref, e.g. TSK-12') },
     },
-    async ({ ref }) => json(await getItem(storage, ref)),
+    async ({ ref }) => json(await getItem(storage, runtime, ref)),
   )
   server.registerTool(
     'update_item',
