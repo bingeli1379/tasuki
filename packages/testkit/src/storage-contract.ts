@@ -353,6 +353,45 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         ).rejects.toBeInstanceOf(StatusConflict)
       })
 
+      it('edits a task the same way as an item', async () => {
+        const item = await newItem('task edits')
+        const created = await fixture.storage.createTask(item.ref, task('before'))
+        const edited = await fixture.storage.updateItem(created.ref, created.version, {
+          title: 'after',
+          body: 'More detail.',
+        })
+        expect(edited).toMatchObject({ ref: created.ref, title: 'after', body: 'More detail.' })
+        expect(edited.version).not.toBe(created.version)
+      })
+
+      it('deletes a task with its dependencies, at once, and never reuses its ref', async () => {
+        const item = await newItem('task deletes')
+        const first = await fixture.storage.createTask(item.ref, task('first'))
+        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
+        await fixture.storage.addComment({
+          target: second.ref,
+          author: 'human',
+          kind: 'note',
+          body: 'gone with it',
+        })
+        await fixture.storage.deleteTask(second.ref)
+        expect((await fixture.storage.children(item.ref)).map((t) => t.ref)).toEqual([first.ref])
+        await expect(fixture.storage.get(second.ref)).rejects.toBeInstanceOf(NotFound)
+        // A task waiting for a deleted one no longer waits.
+        const third = await fixture.storage.createTask(item.ref, task('third', [first.ref]))
+        await fixture.storage.deleteTask(first.ref)
+        expect(await fixture.storage.dependencies(item.ref)).toEqual([])
+        expect([first.ref, second.ref]).not.toContain(third.ref)
+        const fourth = await fixture.storage.createTask(item.ref, task('fourth'))
+        expect([first.ref, second.ref, third.ref]).not.toContain(fourth.ref)
+      })
+
+      it('refuses to delete something that is not a task', async () => {
+        const item = await newItem('not a task')
+        await expect(fixture.storage.deleteTask(item.ref)).rejects.toBeInstanceOf(NotFound)
+        expect((await fixture.storage.get(item.ref)).ref).toBe(item.ref)
+      })
+
       it('lists tasks by status with their item, after the usual lag', async () => {
         const item = await newItem('listed tasks')
         const created = await fixture.storage.createTask(item.ref, task('listed'))
