@@ -98,3 +98,68 @@ test('moving an item someone else already moved says where it went', async ({ pa
     page.getByRole('region', { name: /^Done/ }).getByRole('article', { name: title }),
   ).toHaveCount(0)
 })
+
+test('open an item, edit it in markdown with an image, comment, and find it all after a reload', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(120_000)
+  const title = `e2e detail ${Date.now()}`
+  await createThroughApi(request, title)
+  await page.goto('/')
+  const refining = page.getByRole('region', { name: /^Refining/ })
+  await reloadUntilVisible(page, refining.getByRole('article', { name: title }))
+
+  // Anywhere on the card opens it, not only the title.
+  await refining.getByRole('article', { name: title }).click()
+  const dialog = page.getByRole('dialog')
+  await expect(dialog.getByRole('heading', { name: title })).toBeVisible()
+
+  await dialog.getByLabel('Attach a file').setInputFiles({
+    name: 'dot.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+      'base64',
+    ),
+  })
+  await expect(dialog.getByRole('link', { name: 'dot.png' })).toBeVisible()
+
+  await dialog.getByRole('button', { name: 'Edit' }).click()
+  const editor = dialog.getByLabel('Body')
+  // A toolbar button hands focus back to the editor a frame later; wait before typing on.
+  const bold = async (): Promise<void> => {
+    await dialog.getByRole('button', { name: 'Bold' }).click()
+    await expect(editor).toBeFocused()
+  }
+  await editor.click()
+  await page.keyboard.type('Needs ')
+  await bold()
+  await page.keyboard.type('care')
+  await bold()
+  await page.keyboard.press('Shift+Enter')
+  await page.keyboard.type('second line')
+  await page.keyboard.press('Enter')
+  await dialog.getByRole('button', { name: 'Insert dot.png' }).click()
+  await dialog.getByRole('button', { name: 'Save' }).click()
+
+  const image = dialog.locator('.markdown img')
+  // On Jira a save is several round trips (re-read, image media id, write, read back).
+  await expect(dialog.getByRole('button', { name: 'Edit' })).toBeVisible({ timeout: 20_000 })
+  await expect(dialog.locator('.markdown strong')).toHaveText('care')
+  await expect(dialog.locator('.markdown br')).toHaveCount(1)
+  await expect(image).toBeVisible()
+  await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBe(1)
+
+  await dialog.getByLabel('Add a comment').fill('Looks _fine_')
+  await dialog.getByRole('button', { name: 'Comment' }).click()
+  // The author is "You" on sqlite and the Jira account's name on Jira.
+  await expect(dialog.getByRole('article', { name: /^Comment by / })).toContainText('Looks fine')
+
+  await page.reload()
+  await reloadUntilVisible(page, refining.getByRole('article', { name: title }))
+  await refining.getByRole('button', { name: title, exact: true }).click()
+  await expect(dialog.locator('.markdown strong')).toHaveText('care')
+  await expect(dialog.locator('.markdown img')).toBeVisible()
+  await expect(dialog.locator('.markdown em')).toHaveText('fine')
+})
