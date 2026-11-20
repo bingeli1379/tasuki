@@ -431,3 +431,14 @@
   - 上傳附件要帶 `X-Atlassian-Token: no-check`。
 - 理由：作者要 Jira 與 sqlite 都能完整編輯，包含貼圖，而且編輯不能弄壞 Jira 上 tasuki 看不懂的內容。不能保留的只有樣式，字不會掉。
 - 重新檢視：Atlassian 公開取得 media id 的 API，或轉址格式改變時；有人需要底線、顏色這類樣式時；附件需要超過 10 MB 時。
+
+## D62 依賴定版，升版經過 Dependabot
+- 決定：
+  - 所有 `package.json` 的依賴寫確切版本，`pnpm-workspace.yaml` 開 `saveExact`，之後 `pnpm add` 也定版。`peerDependencies`（testkit 的 `vite-plus`）保留範圍，那是相容性的宣告。
+  - pnpm 的 `minimumReleaseAge` 從預設的 1 天拉到 7 天：版本要公開滿 7 天才裝得進來。
+  - GitHub Actions 釘 commit SHA，後面註解版本。
+  - `.github/dependabot.yml`：npm（含 pnpm workspace）與 github-actions，每月 1 號、15 號早上 9 點（台北）各開一個合併的升版 PR，cooldown 7 天，跟 pnpm 一致，CI 才裝得下它提的版本。資安修補不受 cooldown 影響，有公告就開，前提是 repo 設定開了「Dependabot security updates」。
+- 理由：作者要部署到公司，在意供應鏈。lockfile 加 CI 的 `--frozen-lockfile` 已經保證裝的是鎖定的版本，`^` 真正的風險在 `pnpm add`、`pnpm update` 時悄悄把範圍內的新版帶進來；定版讓每次升版都是一個要人看過的 diff。7 天是因為被劫持的版本多半幾天內就被發現下架。Action 的大版本標籤可以被作者移走（2025 年 tj-actions 事件），SHA 不行。每兩週是作者選的；Dependabot 沒有隔週的選項，用 1 號與 15 號近似。
+- 過渡：拉長冷卻期時，lockfile 裡有 44 個版本（TipTap 3.34.0 一批、Playwright 1.65.1 等）發布還不滿 7 天，pnpm 拒絕安裝。它們是已經在用、測過的版本，用 `minimumReleaseAgeExclude` 只放行那些確切版本，2026-11-21 之後全部滿 7 天，整段刪掉。
+- 待驗證：Dependabot 對 pnpm 12 的 lockfile 與 workspace 支不支援，文件沒寫，第一次跑才知道；不支援就改用 Renovate。
+- 重新檢視：Dependabot 的 PR 太吵或太少時調頻率；要發布 npm 套件（S11、S12）時，看被別人安裝的套件是否改回範圍。
