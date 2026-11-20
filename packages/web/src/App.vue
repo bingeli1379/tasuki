@@ -247,8 +247,8 @@ onMounted(load)
           >
             <h2 class="flex items-center justify-between px-1 text-sm font-medium">
               <span class="flex items-center gap-1.5">
-                <UTooltip v-if="column.turn" :text="TURN[column.turn].hint">
-                  <span role="img" :aria-label="TURN[column.turn].hint" class="flex">
+                <UTooltip v-if="column.turn" :text="TURN[column.turn].hint" :delay-duration="100">
+                  <span role="img" :aria-label="TURN[column.turn].hint" class="flex cursor-help">
                     <UIcon
                       :name="TURN[column.turn].icon"
                       class="size-4"
