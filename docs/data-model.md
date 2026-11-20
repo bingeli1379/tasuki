@@ -4,7 +4,7 @@
 
 | store | 內容 | 後端 |
 |---|---|---|
-| tracker store | WorkUnit、Dependency、Comment | sqlite 或 Jira，二選一，不同步 |
+| tracker store | WorkUnit、Dependency、Comment、Attachment | sqlite 或 Jira，二選一，不同步 |
 | runtime store | Run、engine_state | 永遠是本機 sqlite |
 
 兩邊只靠 `ref`（key）互相指，不做外鍵。Jira 模式下 ticket 全看 Jira，但 Run 沒地方放，所以本機一定有 runtime store。
@@ -26,16 +26,27 @@ interface WorkUnit {
   assignee?: string                     // nullable from day one
   labels: string[]                      // 'hold' lives here
   origin?: 'refine' | 'splitter' | 'human'   // tasks only
+  version: string                       // opaque; changes with title, body or status (D61)
 }
 
 interface Dependency { task: Ref; blockedBy: Ref }   // same item only
 
 interface Comment {
+  id: string
   target: Ref
   author: 'human' | 'agent' | 'engine'
   authorName?: string
   kind: 'note' | 'question' | 'system'
   body: string                          // markdown
+  createdAt: string
+}
+
+interface Attachment {                  // D61
+  id: string
+  target: Ref
+  filename: string
+  mimeType: string
+  size: number                          // bytes, at most 10 MB
   createdAt: string
 }
 
@@ -68,6 +79,9 @@ type Outcome =
 
 ## 刻意的設計
 
+- body 與 comment 都是 markdown，單一換行就是換行（跟 GitHub issue、Jira 一樣，不是 CommonMark 的併成一行）。markdown 表達不了的 tracker 內容（Jira 的 mention、表格、panel）寫成 embed token `[[embed:<標籤>|<內容>]]`，裡面帶著原本的節點，存回去時原樣放回；刪掉 token 就是刪掉那段內容。底線、文字顏色、上下標、對齊沒有對應的 markdown，存回 Jira 時會掉，字留著（D61）。
+- body 用 `![說明](attachment:<id>)` 引用同一張 item 的附件，各 tracker 自己換成它的嵌入方式。
+
 - 手動步驟就是預先建好的 manual task。refine 階段（人在互動 session 裡）直接把手動步驟建成 `manual` task，`origin=refine`。Jira 上看得到，人也能直接改，不需要額外欄位。
 - 沒有 `mode` 欄位。task 一建出來是 `manual`，它就是手動的。想把 auto task 搶去自己做，把它改成 `manual`。
 - task 只有一層，所以不需要遞迴結構。
@@ -88,8 +102,11 @@ type Outcome =
 | Comment | `comment` 表 | comment |
 | labels | JSON 欄位 | labels |
 | assignee | 欄位 | assignee |
-| comment 的 author / kind | 欄位 | 待 adapter spec 定（候選：comment property、內容裡的標記） |
-| body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉。S1 只做純文字，一行一個 paragraph |
+| comment 的 author / kind | 欄位 | agent 與 engine 的 comment 帶 comment property `tasuki`（`{ author, kind }`），內文第一行是看得見的「tasuki · agent」之類的標記；沒有 property 的是人寫的（D61） |
+| body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉（D61） |
+| Attachment | `attachment` 表，內容是 BLOB | issue 的附件 |
+| body 裡的圖 | `![x](attachment:<id>)` 原樣存 | ADF 的 media 節點，用附件的 media id（D61） |
+| version | 欄位，每次改 title、body、status 加一 | title、description、status 的 hash |
 | ref | `<refPrefix>-<n>`，前綴在 plugin 的 `options.refPrefix`，預設 `TSK`；n 是流水號（D52） | issue key |
 | status 存什麼 | config 對照的 tracker key（預設是顯示名） | status id（D50） |
 
@@ -123,6 +140,8 @@ CREATE TABLE dependency (
   PRIMARY KEY (task, blocked_by)
 );
 
+-- S3 added: version INTEGER NOT NULL DEFAULT 1 on work_unit
+
 CREATE TABLE comment (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   target      TEXT NOT NULL REFERENCES work_unit(ref),
@@ -132,6 +151,18 @@ CREATE TABLE comment (
   body        TEXT NOT NULL,
   created_at  TEXT NOT NULL
 );
+CREATE INDEX comment_by_target ON comment(target, id);
+
+CREATE TABLE attachment (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  target     TEXT NOT NULL REFERENCES work_unit(ref),
+  filename   TEXT NOT NULL,
+  mime_type  TEXT NOT NULL,
+  size       INTEGER NOT NULL,
+  data       BLOB NOT NULL,                       -- in the db: one file to back up
+  created_at TEXT NOT NULL
+);
+CREATE INDEX attachment_by_target ON attachment(target, id);
 ```
 
 runtime store：
@@ -172,4 +203,3 @@ CREATE TABLE engine_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- e.g.
 ## 待定
 
 - `attempt` 的歸零規則。候選是「人每次手動移動 item 的 status 就歸零」。engine 要能觀察到人的移動才做得到，細節待定。
-- Jira 上 comment 的 author / kind 標記方式。

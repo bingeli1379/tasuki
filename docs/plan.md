@@ -42,7 +42,7 @@
 | S0 | 骨架：web、server、sqlite、CI（已完成） | 瀏覽器開頁面，顯示 server 回報的 DB schema 版本 |
 | S1 | 建立 item，在看板上看到。含最小的 config 載入、`.env`、plugin 載入（tracker 角色），內建的 `sqlite` 與 `jira-cloud` 都走這條路（已完成） | 新增 item，重新整理後還在，出現在 `refining` 欄；sqlite 與 Jira 測試 project 各做一次 |
 | S2 | 人移動 item 的 status（已完成） | 拖拉或按鈕移動；兩邊同時改時顯示衝突 |
-| S3 | item 詳情與 comment | 點開 item 看內容，留言 |
+| S3 | item 詳情與 comment，含編輯 title 與 body、markdown、附件（已完成，D61） | 點開 item 看內容、改內容、貼圖、留言 |
 | S4 | 規則命中，假 runner 跑 split | `ready-to-split` 被認領、顯示 Run、結果轉移；lease 過期會復原 |
 | S5 | task 與 `split-review` 放行 | 看到拆出的 task，人放行或打回 |
 | S6 | execute：task 狀態與 verdict 驗證 | item 一路走到 `in-review`、`done` |
@@ -72,6 +72,7 @@
 | ticket 內容夾帶指令 | agent 被誤導 | 見 security-and-auth.md |
 | 訂閱帳號用在雲端服務的條款 | 帳號風險 | 雲端預設 API key，README 寫清楚 |
 | 改到一半的 workspace | 續跑時狀態髒 | agent 要能接受，見 stop-and-recovery.md |
+| Jira 附件的 media id 靠下載轉址網址取得，不是公開 API（D61） | Atlassian 改了格式，就不能在 body 插新圖 | 存檔時報錯、不寫入，資料不會壞；契約測試每次都走這條路，改了會先在本機發現 |
 
 ## 動工前要先定的
 
@@ -87,7 +88,7 @@
 ## 待釐清（設計）
 
 1. 規則 schema 的最終欄位（config-and-rules.md 是草稿）。
-2. Jira 上 comment 的 author、kind 標記方式。
+2. （已定，D61）Jira 上 comment 的 author、kind：agent 與 engine 的 comment 帶 comment property 加一行看得見的標記，沒有 property 的是人寫的。
 3. `attempt` 的歸零規則。D38 是當時的暫行做法，程式碼已隨 M1 丟掉，做到 S4 時重新確認。
 4. item 層的成本上限怎麼算、放哪裡。
 5. （已定，D57）sqlite 模式下，互動式 agent（refine 階段）怎麼寫回 tracker：engine 在 `/mcp` 提供綁使用者身分的 MCP，Claude Code 與 Codex 都能接。
@@ -113,7 +114,7 @@
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
 - agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。
 - 使用者 MCP 接 Codex（D57）：2026-11-16 用 codex-cli 0.169.0 驗過 `initialize` 與 `tools/list`（中間放 proxy 記錄請求），`tools/call` 沒驗，因為手上沒有 Codex 帳號，模型叫不起來。Claude Code 2.1.311 已實際呼叫 `create_item` 與 `list_board` 成功。
-- Jira Cloud：ADF 轉換的函式庫、comment property 是否可用、API token 的 rate limit。transitions API 已在 S2 的契約測試與 E2E 實際走過（D59）。
+- Jira Cloud：API token 的 rate limit。transitions API 已在 S2 實際走過（D59）；ADF 轉換（marklassian 加自寫的反向）與 comment property 已在 S3 實際走過（D61）。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
 - Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。
