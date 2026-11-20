@@ -3,15 +3,19 @@ import {
   addAttachment,
   addComment,
   createItem,
+  deleteTask,
   EditConflict,
   getItem,
+  getTask,
   InvalidInput,
   listBoard,
   MAX_ATTACHMENT_BYTES,
   moveItem,
+  moveTask,
   NotFound,
   StatusConflict,
   updateItem,
+  updateTask,
   type Rule,
   type RuntimeStorePort,
   type StatusMap,
@@ -101,6 +105,40 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
     )
   })
   app.post('/api/items/:ref/comments', async (c) => {
+    const body = await c.req.json<{ body?: unknown }>()
+    const comment = await addComment(storage, {
+      ref: c.req.param('ref'),
+      body: typeof body.body === 'string' ? body.body : '',
+    })
+    return c.json(comment, 201)
+  })
+  app.get('/api/tasks/:ref', async (c) => c.json(await getTask(storage, c.req.param('ref'))))
+  app.post('/api/tasks/:ref/transition', async (c) => {
+    const body = await c.req.json<{ from?: unknown; to?: unknown }>()
+    if (typeof body.from !== 'string' || typeof body.to !== 'string')
+      throw new InvalidInput('from and to are required')
+    return c.json(
+      await moveTask(storage, { ref: c.req.param('ref'), from: body.from, to: body.to }),
+    )
+  })
+  app.patch('/api/tasks/:ref', async (c) => {
+    const body = await c.req.json<{ expectedVersion?: unknown; title?: unknown; body?: unknown }>()
+    if (typeof body.expectedVersion !== 'string')
+      throw new InvalidInput('expectedVersion is required')
+    return c.json(
+      await updateTask(storage, {
+        ref: c.req.param('ref'),
+        expectedVersion: body.expectedVersion,
+        ...(typeof body.title === 'string' ? { title: body.title } : {}),
+        ...(typeof body.body === 'string' ? { body: body.body } : {}),
+      }),
+    )
+  })
+  app.delete('/api/tasks/:ref', async (c) => {
+    await deleteTask(storage, c.req.param('ref'))
+    return c.json({ ok: true })
+  })
+  app.post('/api/tasks/:ref/comments', async (c) => {
     const body = await c.req.json<{ body?: unknown }>()
     const comment = await addComment(storage, {
       ref: c.req.param('ref'),

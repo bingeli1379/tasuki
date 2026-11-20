@@ -2,10 +2,14 @@ import {
   addAttachment,
   addComment,
   createItem,
+  deleteTask,
   getItem,
+  getTask,
   listBoard,
   moveItem,
+  moveTask,
   updateItem,
+  updateTask,
   type Rule,
   type RuntimeStorePort,
   type StatusMap,
@@ -118,9 +122,74 @@ export function createMcpServer({ storage, runtime, statuses, rules }: McpDeps):
       ),
   )
   server.registerTool(
+    'get_task',
+    {
+      description:
+        'Read one task: its fields (body is markdown, `parent` is its item), blockedBy (the ' +
+        'tasks of the same item it waits for), and its comments oldest first. Comments by the ' +
+        'engine say why the engine or an agent moved it. `version` is what update_task needs.',
+      inputSchema: { ref: z.string().describe('The task ref, e.g. TSK-13') },
+    },
+    async ({ ref }) => json(await getTask(storage, ref)),
+  )
+  server.registerTool(
+    'move_task',
+    {
+      description:
+        'Move a task as a person: take it over (to-do or in-progress to manual), hand it back ' +
+        '(manual to to-do), or finish it by hand (manual to done). Nothing else; a done task is ' +
+        'never reopened. Taking over a task an agent is on stops it from being dispatched again, ' +
+        'but the agent may still finish it. `from` is the status you last saw it in; if it moved ' +
+        'since, the call fails and says where it is now. Returns the moved task.',
+      inputSchema: {
+        ref: z.string().describe('The task ref'),
+        from: z.string().describe('Logical task status it is in now, e.g. manual'),
+        to: z.string().describe('manual, to-do or done'),
+      },
+    },
+    async (input) => json(await moveTask(storage, input)),
+  )
+  server.registerTool(
+    'update_task',
+    {
+      description:
+        "Change a task's title and/or body, only while its item is in split-review. Pass the " +
+        'version from get_task; if someone changed the task since, the call fails and returns ' +
+        'it as it is now. Returns the updated task.',
+      inputSchema: {
+        ref: z.string(),
+        version: z.string().describe('The version get_task returned'),
+        title: z.string().optional(),
+        body: z.string().optional().describe('Markdown'),
+      },
+    },
+    async ({ ref, version, title, body }) =>
+      json(
+        await updateTask(storage, {
+          ref,
+          expectedVersion: version,
+          ...(title === undefined ? {} : { title }),
+          ...(body === undefined ? {} : { body }),
+        }),
+      ),
+  )
+  server.registerTool(
+    'delete_task',
+    {
+      description:
+        'Delete a task, only while its item is in split-review. Its comments go with it, and ' +
+        'tasks that waited for it no longer do. Cannot be undone.',
+      inputSchema: { ref: z.string() },
+    },
+    async ({ ref }) => {
+      await deleteTask(storage, ref)
+      return json({ deleted: ref })
+    },
+  )
+  server.registerTool(
     'add_comment',
     {
-      description: 'Comment on an item as the user. Markdown. Returns the comment.',
+      description: 'Comment on an item or a task as the user. Markdown. Returns the comment.',
       inputSchema: { ref: z.string(), body: z.string() },
     },
     async ({ ref, body }) => json(await addComment(storage, { ref, body })),
