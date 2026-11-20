@@ -3,7 +3,15 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite-plus'
 
 export default defineConfig({
-  plugins: [vue(), ui({ router: false })],
+  plugins: [
+    vue(),
+    // Icons are bundled rather than fetched from the Iconify API, which an offline company
+    // network cannot reach. One missing from the collection fails the build.
+    ui({
+      router: false,
+      icon: { clientBundle: { icons: ['i-lucide-radar', 'i-lucide-eye'] } },
+    }),
+  ],
   // Nuxt UI's editor loads TipTap unbundled. Pre-bundling the TipTap packages the board
   // imports itself would give the page a second copy of ProseMirror, and the editor then
   // fails with "Adding different instances of a keyed plugin".

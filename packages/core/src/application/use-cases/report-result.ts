@@ -16,5 +16,8 @@ export async function reportResult(
 ): Promise<void> {
   if (!VERDICTS.includes(input.verdict as Verdict))
     throw new InvalidInput(`verdict must be one of ${VERDICTS.join(', ')}`)
-  await runtime.report(runId, input.verdict as Verdict, input.summary)
+  // The summary is the reason the item moves; every move the engine makes for an agent
+  // carries one (D67).
+  if (input.summary.trim() === '') throw new InvalidInput('summary is empty')
+  await runtime.report(runId, input.verdict as Verdict, input.summary.trim())
 }

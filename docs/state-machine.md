@@ -43,6 +43,16 @@ stateDiagram-v2
 
 人可以把 item 從任何狀態移到任何狀態。特別注意 `blocked` 的出口不限於 `in-progress`，補完資料後可以直接拉去 `ready-to-rework`。
 
+### 輪到誰
+
+看板每欄標出接下來誰動（D68）：
+
+- engine：有規則 `watch` 這個 status，從 config 算，沒掛規則就不標。
+- 人：`needs-answers`、`split-review`、`in-review`、`blocked`。沒有規則會把 item 移出這幾欄。`blocked` 雖然有自動接回，前提是人先把 manual task 做完。
+- 不標：`refining`（人自己在寫，不是在等確認）、claim status（卡片上已經有 Running）、`done`。
+
+使用者在 config 讓規則 watch 一個「人」的 status 時，標 engine，因為 engine 會去撿。
+
 ### Auto-resume (`blocked` -> `in-progress`)
 
 三個條件同時成立，engine 才自動接回：

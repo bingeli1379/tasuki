@@ -41,18 +41,18 @@
 
 - manual task 只有人能移出 `manual`。
 - `done` 的 task 不能再改。
-- orchestrator 要把 task 改成 `manual`（發現需要人決定）時，必須同時留一則 comment 說明。
+- 每次呼叫都要帶 `reason`，不能空白。engine 把它寫成那張 task 上的 `system` comment，人看得到每次 AI 為什麼移動它（D67）。改成 `manual`（發現需要人決定）時，reason 寫要人決定什麼。
 
 ## `report_result`
 
 ```ts
 interface ReportResult {
   verdict: 'succeeded' | 'needs_input' | 'blocked_manual' | 'failed'
-  summary: string        // one paragraph, written to a system comment
+  summary: string        // one or two sentences, written to a system comment; must not be blank
 }
 ```
 
-`report_result` 只收第一次，之後回錯誤。
+`report_result` 只收第一次，之後回錯誤。summary 是空白時回錯誤、不記錄，agent 可以補上再呼叫一次。engine 照 verdict 移動 item，summary 就是給人看的原因（D67），一兩句講重點，不重述做了什麼。`set_task_status` 的 reason 也一樣短。
 
 engine 不直接相信 verdict，先驗證再換算成 outcome。目前檢查的是 `succeeded`（split）與 `needs_input` 兩列（D65），其他列 S6 以後跟著對應的規則補上，在那之前直接採信。verdict 在規則裡沒有出口時（例如 split 回 `blocked_manual`）也是 `failed`。檢查失敗時，system comment 的 `Why:` 寫出沒做到的那一項。
 

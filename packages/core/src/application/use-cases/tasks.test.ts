@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
+import type { Rule } from '../../domain/rule'
 import type { Run } from '../../domain/run'
 import type { WorkUnit } from '../../domain/work-unit'
 import { runtimeStub } from '../../testing/runtime-stub'
@@ -138,8 +139,33 @@ describe('listBoard', () => {
       }),
       runtimeStub({ liveRuns: () => Promise.resolve([]) }),
       { item: ['split-review'], task: ['to-do', 'done'] },
+      [],
     )
     expect(board.columns[0]?.items).toEqual([item])
     expect(board.tasks).toEqual({ 'X-1': { done: 1, total: 2 }, 'Y-1': { done: 0, total: 1 } })
+  })
+
+  it('marks the columns a rule watches for the engine and the ones that wait for a person', async () => {
+    const watch = (status: string): Rule => ({
+      id: status,
+      watch: status,
+      agent: 'a',
+      mode: 'split',
+      maxAttempts: 3,
+      on: {},
+    })
+    const board = await listBoard(
+      storageStub({ list: () => Promise.resolve([]) }),
+      runtimeStub({ liveRuns: () => Promise.resolve([]) }),
+      { item: ['refining', 'ready-to-split', 'split-review', 'blocked'], task: [] },
+      // A rule on a status that would wait for a person: the engine picks it up, so it wins.
+      [watch('ready-to-split'), watch('blocked')],
+    )
+    expect(board.columns.map((c) => [c.status, c.turn])).toEqual([
+      ['refining', undefined],
+      ['ready-to-split', 'engine'],
+      ['split-review', 'person'],
+      ['blocked', 'engine'],
+    ])
   })
 })

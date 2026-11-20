@@ -39,7 +39,7 @@ try {
 
   // Loopback only until auth lands (S9, security-and-auth.md).
   serve({
-    fetch: createApp({ db, storage, runtime, statuses, tokens }).fetch,
+    fetch: createApp({ db, storage, runtime, statuses, rules: config.rules, tokens }).fetch,
     port: config.port,
     hostname: '127.0.0.1',
   })

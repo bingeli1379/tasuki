@@ -104,7 +104,11 @@ export function createAgentMcpServer({ storage, runtime, run }: AgentMcpDeps): M
         'it and moves the item; you cannot move it yourself.',
       inputSchema: {
         verdict: z.enum(VERDICTS as [string, ...string[]]),
-        summary: z.string().describe('One paragraph for the people reading the item'),
+        summary: z
+          .string()
+          .describe(
+            'One or two sentences for the people reading the item: why it ends this way, no recap of the work; must not be blank',
+          ),
       },
     },
     async (input) => {
