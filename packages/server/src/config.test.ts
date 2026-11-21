@@ -105,6 +105,35 @@ describe('loadConfig', () => {
     expect(() => loadConfig(withRules([rule]))).toThrow(message)
   })
 
+  it('refuses a rework rule the same way: it makes tasks too', () => {
+    const path = write(
+      JSON.stringify({
+        statuses: {
+          item: Object.fromEntries(
+            ['refining', 'ready-to-rework', 'splitting', 'split-review', 'blocked'].map((s) => [
+              s,
+              s,
+            ]),
+          ),
+          task: { 'to-do': 'T' },
+        },
+        agents: { fake: { plugin: 'x' } },
+        rules: [
+          {
+            ...split,
+            id: 'rework',
+            watch: 'ready-to-rework',
+            mode: 'rework',
+            on: { succeeded: 'split-review', needs_input: 'blocked' },
+          },
+        ],
+      }),
+    )
+    expect(() => loadConfig(path)).toThrow(
+      'config statuses.task must map manual: rule rework makes tasks',
+    )
+  })
+
   it('refuses a split rule when the task statuses its tasks start in are not mapped', () => {
     const path = write(
       JSON.stringify({
@@ -126,7 +155,7 @@ describe('loadConfig', () => {
       }),
     )
     expect(() => loadConfig(path)).toThrow(
-      'config statuses.task must map manual: rule split splits items into tasks',
+      'config statuses.task must map manual: rule split makes tasks',
     )
   })
 

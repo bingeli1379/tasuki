@@ -13,6 +13,7 @@ import {
   moveItem,
   moveTask,
   NotFound,
+  requestRework,
   StatusConflict,
   updateItem,
   updateTask,
@@ -85,6 +86,17 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
         ref: c.req.param('ref'),
         from: body.from,
         to: body.to,
+      }),
+    )
+  })
+  app.post('/api/items/:ref/rework', async (c) => {
+    const body = await c.req.json<{ from?: unknown; feedback?: unknown }>()
+    if (typeof body.from !== 'string') throw new InvalidInput('from is required')
+    return c.json(
+      await requestRework(storage, statuses.mapped('item'), {
+        ref: c.req.param('ref'),
+        from: body.from,
+        feedback: typeof body.feedback === 'string' ? body.feedback : '',
       }),
     )
   })

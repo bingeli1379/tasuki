@@ -200,12 +200,12 @@ export function loadConfig(path: string): Config {
     agents,
     limits.defaultMaxAttempts,
   )
-  // The tasks a splitting agent can make start in one of these.
-  const splitter = rules.find((r) => r.mode === 'split')
+  // The tasks a splitting or reworking agent can make start in one of these.
+  const splitter = rules.find((r) => r.mode === 'split' || r.mode === 'rework')
   const missing = ['to-do', 'manual'].filter((s) => statuses.task?.[s] === undefined)
   if (splitter !== undefined && missing.length > 0)
     throw new Error(
-      `config statuses.task must map ${missing.join(', ')}: rule ${splitter.id} splits items into tasks`,
+      `config statuses.task must map ${missing.join(', ')}: rule ${splitter.id} makes tasks`,
     )
   // An executing agent walks every task status.
   const executor = rules.find((r) => r.mode === 'execute')

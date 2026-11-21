@@ -126,5 +126,14 @@ export function createRuntimeStore(
     async runsFor(target) {
       return db.prepare(`SELECT * FROM run WHERE target = ? ${NEWEST_FIRST}`).all(target).map(toRun)
     },
+    async latestRunsEndedIn(outcome) {
+      return db
+        .prepare(
+          `SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY target ${NEWEST_FIRST}) AS n FROM run)
+           WHERE n = 1 AND outcome = ?`,
+        )
+        .all(outcome)
+        .map(toRun)
+    },
   }
 }

@@ -347,6 +347,7 @@ describe("MCP for the user's AI client", () => {
       'list_board',
       'create_item',
       'move_item',
+      'request_rework',
       'get_item',
       'update_item',
       'get_task',

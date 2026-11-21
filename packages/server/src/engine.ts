@@ -2,6 +2,7 @@ import {
   claimItems,
   finishRun,
   recoverRuns,
+  resumeBlocked,
   type Claimed,
   type Clock,
   type Rule,
@@ -13,6 +14,9 @@ import {
 import { mkdir } from 'node:fs/promises'
 import type { Limits } from './config'
 import type { RunTokens } from './run-tokens'
+
+// The label that tells the engine to keep off an item. config labels.hold names it in S7c.
+const HOLD_LABEL = 'hold'
 
 export interface EngineDeps {
   storage: StoragePort
@@ -82,6 +86,8 @@ export function createEngine(deps: EngineDeps): Engine {
       ticking = true
       try {
         await recoverRuns({ storage, runtime, clock }, rules)
+        // Before claiming, so an item resumed this round is picked up in the same round.
+        await resumeBlocked({ storage, runtime }, rules, HOLD_LABEL)
         const claimed = await claimItems({ storage, runtime }, rules, {
           maxConcurrentRuns: limits.maxConcurrentRuns,
           leaseSeconds: limits.leaseSeconds,

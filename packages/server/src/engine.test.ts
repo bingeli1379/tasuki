@@ -47,6 +47,17 @@ const execute: Rule = {
   on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
 }
 
+// Rule C: same claim status as split, and its new tasks go through split-review too.
+const rework: Rule = {
+  id: 'rework',
+  watch: 'ready-to-rework',
+  claim: 'splitting',
+  agent: 'fake',
+  mode: 'rework',
+  maxAttempts: 2,
+  on: { succeeded: 'split-review', needs_input: 'blocked' },
+}
+
 // What a scripted agent does once started: it gets an MCP client already connected to the
 // facade with its Run's token, and returns how its process exits.
 type Script = (mcp: Client, spec: RunSpec) => Promise<RunExit>
@@ -123,7 +134,7 @@ function setup(
     storage,
     runtime,
     statuses,
-    rules: [split, execute],
+    rules: [split, execute, rework],
     tokens,
   })
   const scripts: Script[] = []
@@ -540,6 +551,7 @@ describe('rule execute on a fake agent', () => {
     expect(names).toEqual([
       'get_item',
       'list_tasks',
+      'list_comments',
       'add_comment',
       'set_task_status',
       'report_result',
@@ -598,6 +610,124 @@ describe('rule execute on a fake agent', () => {
     expect(second.logs).toEqual([])
     expect((await second.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('abandoned')
     expect((await second.storage.get(other.ref)).status).toBe('splitting')
+  })
+})
+
+describe('auto-resume (state-machine.md)', () => {
+  // Executes what it can, then stops at the manual task.
+  const stopAtManual: Script = async (mcp, spec) => {
+    const tasks = JSON.parse(
+      text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+    ) as TaskNode[]
+    for (const status of ['in-progress', 'in-review', 'done'])
+      await move(mcp, tasks[0]?.ref ?? '', status)
+    return report('blocked_manual')(mcp, spec)
+  }
+
+  it('picks a blocked item up again once a person has done its manual task', async () => {
+    const t = setup()
+    t.scripts.push(stopAtManual, walk)
+    const [item, , manual] = await t.approvedItem(
+      ['Schema', 'to-do'],
+      ['Sign the contract', 'manual'],
+      ['Endpoint', 'to-do'],
+    )
+    const ref = item?.ref ?? ''
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(ref)).status).toBe('blocked')
+
+    // Still manual: the next round leaves it.
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(1)
+
+    await t.storage.transition(manual?.ref ?? '', 'manual', 'done')
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(2)
+    expect((await t.storage.get(ref)).status).toBe('in-review')
+    expect((await t.runtime.runsFor(ref)).map((r) => [r.attempt, r.outcome])).toEqual([
+      [1, 'succeeded'],
+      [1, 'blocked_manual'],
+    ])
+    expect((await t.storage.comments(ref)).map((c) => c.body)).toContain(
+      'No task is manual any more. Moved back to in-progress for rule execute to carry on.',
+    )
+  })
+
+  it('leaves an item blocked for another reason where it is', async () => {
+    const t = setup()
+    t.scripts.push(ask)
+    const [item] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
+    expect(t.started).toHaveLength(1)
+  })
+})
+
+describe('rule rework on a fake agent', () => {
+  // Finished work a person did not accept: every task done, the item in in-review.
+  const reviewedItem = async (t: ReturnType<typeof setup>): Promise<WorkUnit> => {
+    const [item, ...tasks] = await t.approvedItem(['Schema', 'done'])
+    for (const task of tasks) expect(task.status).toBe('done')
+    return t.storage.transition(item?.ref ?? '', 'in-progress', 'in-review')
+  }
+  const send = (t: ReturnType<typeof setup>, ref: string, feedback: string) =>
+    t.app.request(`/api/items/${ref}/rework`, {
+      method: 'POST',
+      body: JSON.stringify({ from: 'in-review', feedback }),
+    })
+
+  it("makes new tasks from the person's feedback and sends them to split-review", async () => {
+    const t = setup()
+    let feedback = ''
+    t.scripts.push(async (mcp, spec) => {
+      const comments = JSON.parse(
+        text(await mcp.callTool({ name: 'list_comments', arguments: {} })),
+      ) as { author: string; body: string }[]
+      feedback = comments.findLast((c) => c.author === 'human')?.body ?? ''
+      await mcp.callTool({ name: 'create_task', arguments: { title: 'Fix it', body: feedback } })
+      return report('succeeded')(mcp, spec)
+    })
+    const item = await reviewedItem(t)
+    expect((await send(t, item.ref, 'The button is the wrong colour.')).status).toBe(200)
+    expect((await t.storage.get(item.ref)).status).toBe('ready-to-rework')
+
+    const engine = t.engine([rework])
+    await engine.tick()
+    await engine.settled()
+    expect(feedback).toBe('The button is the wrong colour.')
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    // The done task stays done; the fix is a new task (invariant 4).
+    expect((await t.storage.children(item.ref)).map((c) => [c.title, c.status])).toEqual([
+      ['Schema', 'done'],
+      ['Fix it', 'to-do'],
+    ])
+  })
+
+  it('is failed when it made no task in this run, even with tasks on the item', async () => {
+    const t = setup()
+    t.scripts.push(report('succeeded'))
+    const item = await reviewedItem(t)
+    await send(t, item.ref, 'Wrong.')
+    const engine = t.engine([rework])
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+  })
+
+  it('a send-back without feedback is a 400 and the item stays', async () => {
+    const t = setup()
+    const item = await reviewedItem(t)
+    const res = await send(t, item.ref, ' ')
+    expect(res.status).toBe(400)
+    expect((await t.storage.get(item.ref)).status).toBe('in-review')
   })
 })
 
@@ -747,6 +877,7 @@ describe('the MCP facade for agents', () => {
       for (const call of [
         { name: 'create_task', arguments: { title: 'x', blockedBy: [theirs.ref] } },
         { name: 'add_comment', arguments: { target: other.ref, kind: 'note', body: 'hi' } },
+        { name: 'list_comments', arguments: { target: theirs.ref } },
         { name: 'create_task', arguments: { title: 'x', initialStatus: 'done' } },
       ])
         errors.push((await mcp.callTool(call)).isError === true)
@@ -757,7 +888,7 @@ describe('the MCP facade for agents', () => {
     await engine.tick()
     await engine.settled()
 
-    expect(errors).toEqual([true, true, true])
+    expect(errors).toEqual([true, true, true, true])
     expect(await t.storage.children(item.ref)).toEqual([])
     expect(await t.storage.comments(other.ref)).toEqual([])
   })
@@ -773,7 +904,14 @@ describe('the MCP facade for agents', () => {
     const engine = t.engine()
     await engine.tick()
     await engine.settled()
-    expect(names).toEqual(['get_item', 'list_tasks', 'create_task', 'add_comment', 'report_result'])
+    expect(names).toEqual([
+      'get_item',
+      'list_tasks',
+      'create_task',
+      'list_comments',
+      'add_comment',
+      'report_result',
+    ])
   })
 
   it('turns away a request without a live Run token', async () => {

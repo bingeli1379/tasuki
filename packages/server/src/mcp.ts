@@ -8,6 +8,7 @@ import {
   listBoard,
   moveItem,
   moveTask,
+  requestRework,
   updateItem,
   updateTask,
   type Rule,
@@ -80,6 +81,22 @@ export function createMcpServer({ storage, runtime, statuses, rules }: McpDeps):
       },
     },
     async (input) => json(await moveItem(storage, statuses.mapped('item'), input)),
+  )
+  server.registerTool(
+    'request_rework',
+    {
+      description:
+        'Send finished work back to be reworked: leaves your feedback as a comment, then moves ' +
+        'the item to ready-to-rework, where an agent reads it and makes new tasks for it (done ' +
+        'tasks are never reopened). The feedback is all that agent has to go on, so say what ' +
+        'is wrong and what you expect instead. `from` is as in move_item. Returns the moved item.',
+      inputSchema: {
+        ref: z.string().describe('The item ref'),
+        from: z.string().describe('Logical status the item is in now, usually in-review'),
+        feedback: z.string().describe('Markdown; must not be blank'),
+      },
+    },
+    async (input) => json(await requestRework(storage, statuses.mapped('item'), input)),
   )
   server.registerTool(
     'get_item',
