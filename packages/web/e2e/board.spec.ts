@@ -310,3 +310,63 @@ test('tasks are fixed by hand in split review, and a task done by hand counts', 
     timeout: 60_000,
   })
 })
+
+test('a blocked item carries on once its manual task is done, and finished work goes back for rework', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(300_000)
+  const title = `e2e rework ${Date.now()} [fake:manual]`
+  const ref = await createThroughApi(request, title)
+  const move = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'refining', to: 'ready-to-split' },
+  })
+  expect(move.ok()).toBe(true)
+  await page.goto('/')
+  const card = (column: RegExp) =>
+    page.getByRole('region', { name: column }).getByRole('article', { name: title })
+  const open = async (column: RegExp) => {
+    await expect(card(column)).toBeVisible({ timeout: 90_000 })
+    await expect(card(column).getByText('Running')).toHaveCount(0, { timeout: 30_000 })
+    await page
+      .getByRole('region', { name: column })
+      .getByRole('button', { name: title, exact: true })
+      .click()
+  }
+  const dialog = page.getByRole('dialog').first()
+  const task = page.getByRole('dialog').last()
+
+  await open(/^Split Review/)
+  await dialog.getByRole('button', { name: 'Approve' }).click()
+  await expect(dialog).toBeHidden()
+
+  // Execute does Prepare and stops at the manual Build.
+  await open(/^Blocked/)
+  await dialog.getByRole('listitem', { name: 'Task Build' }).getByRole('button').click()
+  await task.getByRole('button', { name: 'Mark done' }).click()
+  await expect(task.getByRole('button', { name: 'Mark done' })).toHaveCount(0)
+  await task.getByRole('button', { name: 'Close' }).click()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+
+  // Nothing manual is left, so the engine picks it up again and finishes.
+  await open(/^In Review/)
+  await expect(dialog.getByRole('article', { name: 'Comment by Engine' })).toContainText([
+    'No task is manual any more. Moved back to in-progress for rule execute to carry on.',
+  ])
+  await dialog.getByRole('button', { name: 'Rework' }).click()
+  await expect(dialog.getByRole('button', { name: 'Send back for rework' })).toBeDisabled()
+  await dialog.getByLabel('What to rework').fill('Build is missing the error page.')
+  await dialog.getByRole('button', { name: 'Send back for rework' }).click()
+  // A comment and a move: on Jira that is several calls.
+  await expect(dialog).toBeHidden({ timeout: 30_000 })
+
+  // The rework agent makes a new task from the feedback; the done ones stay done.
+  await open(/^Split Review/)
+  await expect(dialog.getByRole('listitem', { name: /^Task / })).toHaveCount(3)
+  await dialog.getByRole('listitem', { name: 'Task Rework' }).getByRole('button').click()
+  await expect(task).toContainText('Build is missing the error page.')
+  await task.getByRole('button', { name: 'Close' }).click()
+  await dialog.getByRole('button', { name: 'Approve' }).click()
+  await expect(dialog).toBeHidden()
+  await expect(card(/^In Review/)).toContainText('3/3 tasks', { timeout: 90_000 })
+})

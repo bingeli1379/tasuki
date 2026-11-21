@@ -38,6 +38,8 @@ const commentDraft = ref('')
 const commenting = ref(false)
 const uploading = ref(false)
 const moving = ref(false)
+const reworking = ref(false)
+const reworkDraft = ref('')
 const openTask = ref<string>()
 const taskOpen = computed({
   get: () => openTask.value !== undefined,
@@ -187,15 +189,16 @@ function insert(attachment: Attachment): void {
 }
 
 // split-review is where a person checks the tasks before any of them runs, in-review where
-// they accept the finished work.
+// they accept the finished work or send it back with what to fix.
 async function decide(to: string): Promise<void> {
   const current = detail.value
   if (!current) return
   moving.value = true
   try {
+    const ref = encodeURIComponent(current.item.ref)
     const item = await call<Item>(
-      `/api/items/${encodeURIComponent(current.item.ref)}/transition`,
-      sendJson('POST', { from: current.item.status, to }),
+      to === 'ready-to-rework' ? `/api/items/${ref}/rework` : `/api/items/${ref}/transition`,
+      sendJson('POST', { from: current.item.status, to, feedback: reworkDraft.value }),
     )
     current.item = item
     error.value = ''
@@ -366,14 +369,44 @@ const authorOf = (c: Comment): string =>
                   @click="decide('in-progress')"
                 />
               </span>
-              <UButton
-                v-else-if="detail.item.status === 'in-review'"
-                label="Accept"
-                size="sm"
-                :loading="moving"
-                @click="decide('done')"
-              />
+              <span v-else-if="detail.item.status === 'in-review'" class="flex gap-2">
+                <UButton
+                  label="Rework"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  :disabled="moving"
+                  @click="reworking = true"
+                />
+                <UButton label="Accept" size="sm" :loading="moving" @click="decide('done')" />
+              </span>
             </div>
+            <form
+              v-if="reworking && detail.item.status === 'in-review'"
+              class="flex flex-col gap-2"
+              @submit.prevent="decide('ready-to-rework')"
+            >
+              <UFormField
+                label="What to rework"
+                help="The agent makes new tasks from this alone, so say what is wrong and what you expect."
+              >
+                <UTextarea v-model="reworkDraft" :rows="3" autoresize class="w-full" />
+              </UFormField>
+              <span class="flex justify-end gap-2">
+                <UButton
+                  label="Cancel"
+                  color="neutral"
+                  variant="ghost"
+                  @click="reworking = false"
+                />
+                <UButton
+                  type="submit"
+                  label="Send back for rework"
+                  :loading="moving"
+                  :disabled="reworkDraft.trim() === ''"
+                />
+              </span>
+            </form>
             <p v-if="detail.tasks.length === 0" class="text-sm text-muted">No tasks yet.</p>
             <ol class="flex flex-col gap-1">
               <li
