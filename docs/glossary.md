@@ -12,7 +12,7 @@
 | workflow | config 的 `workflow`：item 的 status 清單（順序就是看板的欄）、角色、task status 的對照。省略時是 state-machine.md 的預設流程（D81）。 |
 | role | 程式需要點名某一站時認的用途，由 `workflow.roles` 指定：`entry`（新 item 從這裡開始）、`done`、`failure`（規則失敗的預設去處）、`taskReview`（只有這站能改 task）、`rework`（送進來要先寫改什麼）。 |
 | handledBy | 一站誰處理：`engine`（有規則 watch，從規則算）或 `person`（config 寫的）。看板分別標雷達與眼睛。 |
-| outcomes（站上的） | 人在這站能下的結論：按鈕字到下一站。跟規則上給 agent 的 `outcomes`（W2）同形。 |
+| outcomes（站上的） | 人在這站能下的結論：按鈕字到下一站。跟規則上給 agent 的 `outcomes` 同形（D84）。 |
 | logical name / display name | 邏輯名是 config 與程式用的 key（`ready-to-split`），顯示名是 UI 用的 Title Case（`Ready to Split`）。 |
 | manual task | status 為 `manual` 的 task，等人做。 |
 | attachment | item 上的附件。body 用 `![說明](attachment:<id>)` 引用。 |
@@ -35,8 +35,8 @@
 | rule | config 裡的一條規則：監看某個 status，命中就跑某個 agent，依 outcome 轉 status。 |
 | claim status | rule 認領 item 之後 item 暫停的 status，純粹顯示用。可以沒有。 |
 | Run | 一次 agent 執行，記錄在 runtime store。 |
-| outcome | Run 的結果，七種：`succeeded`、`needs_input`、`blocked_manual`、`failed`、`max_attempts`、`cancelled`、`abandoned`。 |
-| verdict | agent 用 `report_result` 回報的結論，四種：`succeeded`、`needs_input`、`blocked_manual`、`failed`。engine 驗證過才換算成 outcome。 |
+| outcome | Run 的結果：規則 `outcomes` 裡的一個結果名（`succeeded`、`needs_input`、`blocked_manual`、`failed`，或規則自己宣告的，例如 `approve`），或只有 engine 會給的 `max_attempts`、`cancelled`、`abandoned`。 |
+| verdict | agent 用 `report_result` 回報的結論，只能是這條規則 `outcomes` 裡的結果名（`max_attempts` 除外）。mode 自己的結果與 `needs_input` engine 驗證過才換算成 outcome，規則自己宣告的照表搬（D84）。 |
 | lease | Run 的存活租約，定期續約。同一張 item 同時最多一個存活的 Run，防重複派發和當機復原都靠它。 |
 | attempt | 同一張 item 在同一條 rule 上的第幾次 Run。只有前一次 Run 是 `abandoned` 才往上加，其他結果之後都從 1 重新算（見 D38）。 |
 | workspace | engine 給每張 item 的工作目錄，Run 的 cwd。 |
@@ -47,9 +47,10 @@
 |---|---|
 | splitter | 規則 A 與 C 跑的 agent。檢查 refine 結果、拆 task、把 rework 意見轉成新 task。唯一能建立 task 的角色。 |
 | orchestrator | 規則 B 跑的 agent。執行 task：派 subagent、更新 task 狀態、處理 merge。 |
+| reviewer | `review` mode 的規則跑的 agent。只能讀 item、task、comment 與留言，結論全部由規則的 `outcomes` 宣告，例如 AI code review（D84）。 |
 | subagent | orchestrator 自己派的子 agent，engine 看不到。 |
 | runner | RunnerPort 的實作，spawn 某個 agent CLI。 |
-| fake runner | `@tasuki/fake-runner`，不叫 LLM 的假 agent，照 item 標題裡的 `[fake:<verdict>]` 回報結果，沒有標記時先建兩張 task 再回報 `succeeded`，拿來試 engine 與跑 E2E（D63、D65）。 |
+| fake runner | `@tasuki/fake-runner`，不叫 LLM 的假 agent，照 item 標題裡的 `[fake:<verdict>]` 回報結果（規則有這個結果時），沒有標記時先建兩張 task 再回報 `succeeded`，review 時留一則 note 再回報規則的第一個結果，拿來試 engine 與跑 E2E（D63、D65）。 |
 | MCP facade | engine 提供給 agent 的 MCP 入口，背後呼叫 use case。 |
 | 使用者 MCP | engine 在 `/mcp` 提供給使用者自己的 AI client（Claude Code、Codex）的 MCP 入口，身分是使用者，能做的事跟看板一樣（D57）。 |
 | run token | 每個 Run 發一個的 token，綁定該 item 與底下的 task，Run 結束就失效。 |

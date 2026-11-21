@@ -139,7 +139,7 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 實際讀的欄位（S8）：`dataDir`、`server.port`、`tracker`、`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`labels.hold`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`、`prompt`、`promptFile`、`session`。`session` 省略時是 `fresh`。`promptFile` 相對於 config 所在的資料夾。`@tasuki/claude-cli` 的 options 讀 `auth`（目前只收 `inherit-login`）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires` 等 S10 的 `doctor`。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `workflow` 時是 state-machine.md 的預設流程，key 是顯示名，只適合 sqlite；`splitting` 只在有規則 claim 它時才列進去。寫了 `workflow` 就照它，舊的頂層 `statuses` 會被拒絕（D81 不顧兼容）。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 的 `entry`、`done`、`failure` 必填；有 split 或 rework 規則時要有 `taskReview`，有 rework 規則時要有 `rework`。規則沒寫 `on.failed`、`on.max_attempts` 時，讀檔就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，按鈕字到目標站，最後一個是實心的主按鈕；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+目前 server 實際讀的欄位（S8）：`dataDir`、`server.port`、`tracker`、`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`labels.hold`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`promptFile`、`session`。`session` 省略時是 `fresh`。`promptFile` 相對於 config 所在的資料夾。`@tasuki/claude-cli` 的 options 讀 `auth`（目前只收 `inherit-login`）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires` 等 S10 的 `doctor`。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `workflow` 時是 state-machine.md 的預設流程，key 是顯示名，只適合 sqlite；`splitting` 只在有規則 claim 它時才列進去。寫了 `workflow` 就照它，舊的頂層 `statuses` 會被拒絕（D81 不顧兼容）。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 的 `entry`、`done`、`failure` 必填；有 split 或 rework 規則時要有 `taskReview`，有 rework 規則時要有 `rework`。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀檔就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，按鈕字到目標站，最後一個是實心的主按鈕；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
 ## Rule 欄位
 
@@ -149,16 +149,24 @@ my-instance/
 | `watch` | 監看的 item status 邏輯名。規則只作用在 item，所以沒有 `kind` 欄位 |
 | `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複，item 留在 watch status，卡片掛 Running。預設規則都不設（D74）。沒寫 `workflow` 時，`splitting` 只在有規則 claim 它時才列進預設流程，不然看板會多一欄永遠是空的 |
 | `agent` | 用哪個 agent（agents 裡的 key） |
-| `mode` | `split` / `execute` / `rework`，以 `TASUKI_MODE` 傳給 agent |
+| `mode` | `split` / `execute` / `rework` / `review`，以 `TASUKI_MODE` 傳給 agent |
 | `prompt` / `promptFile` | 這一階段要 agent 做什麼（行動層），省略時用引擎內建、對應 `mode` 的預設。兩個不能同時設。不管設不設，engine 的契約都會排在它前面 |
 | `session` | `fresh` 或 `per-item`（續用這個 item 在同一個 agent 上最近的 session） |
 | `timeoutMinutes` | 覆寫 `limits.runTimeoutMinutes` |
 | `maxAttempts` | 覆寫 `limits.defaultMaxAttempts` |
-| `on` | outcome 對應到的 status 邏輯名 |
+| `outcomes` | 這條規則的結果名對到 item 要去的 status 邏輯名。agent 只能從這裡挑一個回報 |
 
-MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator（見 agent-contract.md）。
+MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator，`review` 是 reviewer，只能讀與留言（見 agent-contract.md）。
 
-`on` 可以設的 key 是 `succeeded`、`needs_input`、`blocked_manual`、`failed`、`max_attempts`。`failed` 與 `max_attempts` 省略時都是 `blocked`。`cancelled` 不會移動 status，`abandoned` 由復原機制處理，兩者都不用設。
+`outcomes` 的 key 是結果名，小寫加底線（例如 `needs_design`），值是 status 的邏輯名（D84）。結果分三種：
+
+| 結果 | 哪些 | 要不要寫 | engine 驗不驗 |
+|---|---|---|---|
+| mode 自己的 | `split`、`rework` 是 `succeeded`；`execute` 是 `succeeded` 與 `blocked_manual`；`review` 沒有 | 必填 | 驗（agent-contract.md 的 verdict 表） |
+| 每條規則都有的 | `needs_input`、`failed`、`max_attempts` | 可省略，省略時是 `failure` 角色那站 | `needs_input` 驗，另外兩個不用 |
+| 自己宣告的 | 其他任何名字，例如 review 的 `approve`、`changes`，execute 多一個 `needs_design` | 選填，但每條規則至少要有一個不是上一列的結果 | 不驗，照表搬 |
+
+`cancelled` 不會移動 status，`abandoned` 由復原機制處理，兩者都不能寫。舊的 `on` 會被拒絕，叫人改成 `outcomes`（上線前不顧兼容）。
 
 agent 拿到的指令分三層，由下往上疊（D77）：
 
@@ -182,7 +190,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
     "agent": "claude-main",
     "mode": "split",
     "session": "per-item",
-    "on": {
+    "outcomes": {
       "succeeded": "split-review",
       "needs_input": "needs-answers",
       "failed": "blocked",
@@ -196,7 +204,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
     "mode": "execute",
     "timeoutMinutes": 480,
     "session": "per-item",
-    "on": {
+    "outcomes": {
       "succeeded": "in-review",
       "needs_input": "blocked",
       "blocked_manual": "blocked",
@@ -210,7 +218,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
     "agent": "claude-main",
     "mode": "rework",
     "session": "per-item",
-    "on": {
+    "outcomes": {
       "succeeded": "split-review",
       "needs_input": "blocked",
       "failed": "blocked",
@@ -223,7 +231,20 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 `rework` 的 `needs_input` 去 `blocked` 而不是 `needs-answers`，原因見 D31。
 
 不要 split-review 這個關卡的人，把 `split` 與 `rework` 的 `succeeded` 改成 `in-progress`。
-想讓 AI 先審一輪再給人，另外加一條 `watch: "in-review"` 的規則即可，不用改程式。
+想讓 AI 先審一輪再給人，不用改程式：加一站 `ai-review`，讓 `split-review` 或 execute 的出口指過去，再加一條 `review` 規則。
+
+```jsonc
+{
+  "id": "ai-review",
+  "watch": "ai-review",
+  "agent": "claude-reviewer",
+  "mode": "review",
+  "prompt": "Review the branch named on the item. Report approve when it is ready for a person, changes when it needs another round.",
+  "outcomes": { "approve": "in-review", "changes": "ready-to-rework" }
+}
+```
+
+自己宣告的結果名只是名字，agent 要知道每個結果是什麼意思，得寫在行動層的 prompt 裡。
 
 ## 驗證（`doctor`）
 
@@ -232,7 +253,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 1. `workflow.statuses` 的 id 是 kebab-case、不重複，key 不重複。規則、角色、站的 `outcomes` 用到的每個 status 都在 `workflow.statuses` 裡，`outcomes` 不指回自己。`roles` 只有那五個，必填的有填，需要 `taskReview`、`rework` 的規則在時有填。`taskStatuses` 裡沒有不認識的 task status。有 split 或 rework 規則時，`taskStatuses` 對照了 `to-do` 與 `manual`；有 execute 規則時，五個都對照了。
 2. 不同規則的 `watch` 不重複。兩條規則監看同一個 status 會產生歧義。
 3. `claim` 不等於 `watch`（可省略）。
-4. `on` 的每個目標都存在，而且規則可能產生的每個 outcome 都有目標。`failed` 與 `max_attempts` 預設是 `failure` 角色那站，`blocked_manual` 對 split / rework 不會發生，這三個可省略。
+4. `outcomes` 的每個目標都存在，結果名是小寫加底線、不是 `cancelled` 或 `abandoned`。mode 自己的結果都有寫，而且至少有一個不是 `needs_input`、`failed`、`max_attempts` 的結果。這三個省略時是 `failure` 角色那站。
 5. 規則引用的 agent 存在。
 6. `${VAR}` 都能展開。`labels.hold` 是一個不含空白的字（Jira 的 label 不能有空白）。
 7. `server.host` 非 loopback 又沒有 auth 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`；`static` 的密碼不是 hash 就拒絕啟動（見 security-and-auth.md）。

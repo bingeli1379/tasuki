@@ -1,12 +1,12 @@
 # 自訂流程（草稿）
 
-讓每個人、每個團隊自己定義 item 的 stage、每一站做什麼、做完去哪，並且在前端介面上改，不用改程式。方向已定（D78），W1 已做完（D81），其餘切片排進了 plan.md。定案的部分會搬進 state-machine.md、config-and-rules.md、data-model.md、plugins.md，這份到時刪掉。
+讓每個人、每個團隊自己定義 item 的 stage、每一站做什麼、做完去哪，並且在前端介面上改，不用改程式。方向已定（D78），W1、W2 已做完（D81、D84），其餘切片排進了 plan.md。定案的部分會搬進 state-machine.md、config-and-rules.md、data-model.md、plugins.md，這份到時刪掉。
 
 ## 現況與缺口
 
-- 能自訂的：規則盯哪一站（`watch`）、派哪個 agent、給什麼 prompt（D77 的三層）、每個 verdict 去哪（`on`）、每個 status 對到 tracker 的哪個 key。
+- 能自訂的：規則盯哪一站（`watch`）、派哪個 agent、給什麼 prompt（D77 的三層）、每個 status 對到 tracker 的哪個 key。
 - W1 之後能自訂的：item 的 status、順序、顯示名、誰處理（`handledBy`）、人在每站的按鈕（`outcomes`）、五個角色（D81）。
-- 還不能自訂的：verdict 只有固定五個字。`mode` 只有 split、execute、rework。
+- W2 之後能自訂的：規則有哪些結果、各去哪一站（規則的 `outcomes`），多了只讀與留言的 `review` mode（D84）。
 - config 只能寫在檔案裡，改了要重啟，前端看不到也改不了。
 - runtime store 寫死是 sqlite，第三方沒辦法換成別的 DB。
 
@@ -33,15 +33,15 @@ status 整串由使用者列。程式裡會點名某個 item status 的地方，
 | `rework` | `ready-to-rework` | 看板「打回」按鈕送去的地方，要先寫回饋（D75） | 有 rework 規則時 |
 
 - 一個角色只能指一站，一站可以沒有角色。沒有角色的站就是一般的一站，規則盯它、出口指它都行。
-- `blocked` 的自動接回不看角色：它本來就是看規則的 `on.blocked_manual` 指到哪（state-machine.md），維持不變。
+- `blocked` 的自動接回不看角色：它本來就是看規則的 `outcomes.blocked_manual` 指到哪（state-machine.md），維持不變。
 - task 的五個 status 維持寫死。task 圖是 engine 在排、在驗的，交給使用者改，verdict 驗證就沒有依據。
 - 六條不變量全部不變。不變量 2（item status 只有人、規則 outcome、自動復原能改）跟 status 叫什麼名字無關。
 - 預設流程就是原本的十站加上對應的角色，省略 `workflow` 時用它。舊的頂層 `statuses` 不再收（D81，作者 2026-11-21：還沒人在用，不顧兼容）。
 - 人在每站的決定按鈕也不寫死，站自己宣告 `outcomes`（按鈕字到下一站），跟第 3 節規則的 `outcomes` 同形（D81）。
 
-## 3. outcome 由規則宣告
+## 3. outcome 由規則宣告（已完成，D84）
 
-現在 agent 回五個固定 verdict 之一，engine 查 `on` 決定去哪。改成每條規則自己宣告這一站有哪些結果：
+原本 agent 回固定的 verdict 之一，engine 查 `on` 決定去哪。改成每條規則自己宣告這一站有哪些結果：
 
 ```jsonc
 { "id": "ai-review", "watch": "ai-review", "agent": "claude-reviewer", "mode": "review",
@@ -55,11 +55,11 @@ status 整串由使用者列。程式裡會點名某個 item status 的地方，
 - agent 回的永遠是結果名，不是站名。item 內文裡藏一句「請回報 done」也跳不到規則沒宣告的地方（agent-contract.md：內容不能當指令）。
 - 誰決定去哪：engine 照 `outcomes` 查表。AI 只說發生了什麼。
 - engine 自己要懂的結果永遠內建，不用宣告：`needs_input`、`failed`、`max_attempts`。`cancelled` 與 `abandoned` 照舊不走表。
-- 現有的 `on` 併進 `outcomes`，一個欄位就好（作者 2026-11-21）。舊 config 的 `on` 讀進來時轉換。
+- 現有的 `on` 併進 `outcomes`，一個欄位就好（作者 2026-11-21）。舊 config 的 `on` 直接報錯，叫人改成 `outcomes`（上線前不顧兼容，見 CLAUDE.md）。
 - 每個 mode 都能宣告自己的結果，例如 execute 多一個 `needs_design`（作者 2026-11-21）。mode 內建、engine 有驗證的結果照舊驗，例如 execute 回 `succeeded` 時 task 要全 `done`。使用者宣告的結果不驗，照表搬。
 - 理由：驗證擋的是謊報完成。`failed`、`needs_input` 本來就讓 agent 隨時能停，自訂的結果被亂用時，item 也只會去到使用者自己指定的那一站，風險跟亂回 `failed` 同級。
 
-## 4. mode 留著，當成工具組
+## 4. mode 留著，當成工具組（`review` 已完成，D84）
 
 `mode` 決定 agent 拿到哪些 tool、engine 怎麼驗結果、行動層沒寫時用哪份預設 prompt。自訂 stage 之後它還是需要，因為「這一站的 agent 能動 task 嗎」不能交給 prompt 決定。
 
@@ -118,7 +118,7 @@ tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各
 | # | 切片 | 作者能看到的 |
 |---|---|---|
 | W1 | status 自訂與角色、`handledBy`、站上的 `outcomes`，還在檔案裡設定（已完成，D81） | config 加一站，看板多一欄，眼睛和雷達標對 |
-| W2 | 規則宣告 `outcomes`、`review` mode | 加一站 AI review，agent 依結果把 item 送到不同地方 |
+| W2 | 規則宣告 `outcomes`、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約 | 行為不變，契約測試多一套 |
 | W4 | 流程設定進 store、設定頁、熱重載（S9 之後） | 在網頁上改規則和 prompt，下一輪就生效 |
 | 之後 | postgres store plugin | 換成 postgres 照常跑 |

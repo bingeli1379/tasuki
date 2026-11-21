@@ -64,7 +64,7 @@ stateDiagram-v2
 2. 擋住的 manual task 都已經 `done`：讀成 item 底下已經沒有任何 `manual` 的 task。人把 manual 交回 `to-do` 也算，下一個 Run 會去做它（D71）
 3. item 沒有 `hold`
 
-engine 每輪 poll 在復原之後、認領之前檢查，接回到那條規則的 watch status，並留一則 system comment（D67）。目標不寫死：item 要在那條規則 `on.blocked_manual` 指的 status 上才接。
+engine 每輪 poll 在復原之後、認領之前檢查，接回到那條規則的 watch status，並留一則 system comment（D67）。目標不寫死：item 要在那條規則 `outcomes.blocked_manual` 指的 status 上才接。
 
 ### Rules and outcomes
 
@@ -74,6 +74,7 @@ engine 每輪 poll 在復原之後、認領之前檢查，接回到那條規則�
 | B execute | in-progress | none (lease dedupes) | in-review | blocked | blocked | blocked |
 | C rework | ready-to-rework | none (lease dedupes) | split-review | blocked | n/a | blocked |
 
+- 表上是預設規則。每條規則的出口由它的 `outcomes` 決定，也可以宣告自己的結果，例如一條 `review` 規則的 `approve` 與 `changes`，item 照表去對應的站（config-and-rules.md，D84）。
 - `cancelled` 的 Run 不動 status。item 停在原地，由人決定下一步。按 Stop 會順手貼上 `hold`，不然下一輪又會被認領（D72）。`hold` 拿掉後，停在 claim status 的 item 由 engine 送回 watch status，停在 watch status 的直接被 Poller 撿起。
 - 規則 A 要能容忍 item 底下已經有 task（refine 階段建立的 manual task）。
 - rework 要有人說改什麼才開跑：上一個 Run 結束之後，item 上要有一則人寫的 note。看板拖進 `ready-to-rework` 或從詳情移過去都會先問，使用者 MCP 的 `request_rework` 強制要寫；在 Jira 直接拖過去又沒留言的，engine 不派 agent，走規則的 `needs_input` 出口（預設 `blocked`）並留言請人補上（D75）。

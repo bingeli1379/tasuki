@@ -718,3 +718,20 @@
 - 代價：手動放在 KAN 上的卡，跑一次 Jira E2E 就沒了。契約測試沒有清空，它只讀自己建的 item。
 - 重新檢視：KAN 開始放要留著的資料時（改成獨立的 E2E project）。
 
+
+## D84 W2：規則宣告 `outcomes`、`review` mode
+
+- 背景：照 D78 與 custom-workflow.md 第 3、4 節做 W2。原本 agent 只能回四個固定的 verdict，engine 查規則的 `on` 決定去哪，使用者沒辦法加一站「AI 看一看、給結論」。
+- 決定：
+  - 規則的 `on` 改名 `outcomes`，key 是結果名（小寫加底線），值是目標站。舊的 `on` 讀檔就報錯叫人改，不轉換。custom-workflow.md 原本寫「讀進來時轉換」，作者改成上線前一律不顧兼容（2026-11-21，寫進 CLAUDE.md）。
+  - 結果分三種。mode 自己的必填、engine 會驗：split、rework 是 `succeeded`，execute 是 `succeeded` 與 `blocked_manual`，review 沒有。每條規則都有的 `needs_input`、`failed`、`max_attempts` 可省略，省略時跟 D81 的 `failed` 一樣填成 `failure` 那站；以前 `needs_input` 是必填，作者決定照同一招處理（2026-11-21）。其他名字是規則自己宣告的，不驗，照表搬。每條規則至少要有一個不屬於第二種的結果，不然 agent 只能失敗。
+  - `report_result` 的欄位還是叫 `verdict`，但 enum 每個 Run 照規則產生（`max_attempts` 以外的結果名）。facade 與 `reportResult` use case 都擋選項以外的值，item 內文叫 agent 回 `done` 這類站名也只會被拒絕。facade 從 run token 找到 Run 的規則，整條規則交進去，不再只給 mode。
+  - 新的 `review` mode：只有 `get_item`、`list_tasks`、`list_comments`、`add_comment`、`report_result`。`create_task` 原本是「不是 execute 就掛」，改成只有 split 與 rework 掛，不然 review 會拿到建 task 的權限。預設 prompt 叫 agent 留一則 note 再選結論。
+  - core 的 `Verdict`、`Outcome` 變成 `string`，`VERDICTS` 拿掉，改成 `MODE_OUTCOMES`、`ENGINE_OUTCOMES` 與 `verdictsOf(rule)`。`refuse` 只驗 mode 自己的結果與 `needs_input`。
+  - runtime store 的 `run.outcome`、`run.verdict` 拿掉 CHECK，跟 S7d 一樣重建表（建新表、複製、刪舊、改名），驗證交給 config。
+  - fake runner 從 `tools/list` 讀 `report_result` 的 enum，跟真的 agent 一樣。`[fake:<名字>]` 只在規則有這個結果時才用；review 時留一則 note，沒有標記就回規則的第一個結果。
+  - E2E：兩組都多一站 `ai-review`（顯示名 `AI Review`）與一條 review 規則，`approve` 去 `in-review`，`changes` 去 `ready-to-rework`。新的一條驗沒有標記的 item 走到 In Review，Run 列出 `AI Review → In Review`，有 agent 的 note。`[fake:changes]` 那張之後會被 rework 規則接手（沒有人寫回饋，D74），所以改看它 Run 的 `to`。
+  - KAN 的設定（2026-11-22）：照 D59 的方法用 `POST /rest/api/3/workflows/update` 加了 `AI Review`（`10014`，category IN_PROGRESS）與一條 GLOBAL 轉移，workflow 從版本 7 變 8。`.env` 的 `JIRA_TEST_ITEM_STATUSES` 多一個 `ai-review`。
+- 實測：`pnpm test` 343 條、`pnpm check` 沒有錯誤與警告；`pnpm e2e` 的 sqlite 與 jira 各 12 條全過（分開跑）。
+- 沒選的：自訂結果也讓使用者寫驗證條件（例如 `approve` 要有一則 note）。驗證擋的是謊報完成，自訂結果被亂用時 item 也只會去使用者自己指定的站，風險跟亂回 `failed` 同級（custom-workflow.md 第 3 節）。
+- 重新檢視：有人需要自訂結果的驗證時；`report_result` 要回傳多個結論或帶參數時；W4 熱重載後，進行中的 Run 規則被改掉、結果名對不上時。
