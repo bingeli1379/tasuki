@@ -149,6 +149,31 @@ describe('listBoard', () => {
     expect(board.tasks).toEqual({ 'X-1': { done: 1, total: 2 }, 'Y-1': { done: 0, total: 1 } })
   })
 
+  it('reads the live Runs after the tracker, so a Run that ended meanwhile is not shown', async () => {
+    const item = unit('X-1', { kind: 'item', status: 'split-review' })
+    delete item.parent
+    let running = true
+    const board = await listBoard(
+      storageStub({
+        // The Run ends while the tracker is still searching.
+        list: (kind) =>
+          new Promise((resolve) =>
+            setTimeout(() => {
+              running = false
+              resolve(kind === 'item' ? [item] : [])
+            }, 0),
+          ),
+      }),
+      runtimeStub({
+        liveRuns: () =>
+          Promise.resolve(running ? [{ ...run, target: 'X-1', state: 'running' as const }] : []),
+      }),
+      { item: ['split-review'], task: ['to-do'] },
+      [],
+    )
+    expect(board.running).toEqual([])
+  })
+
   it('marks the columns a rule watches for the engine and the ones that wait for a person', async () => {
     const watch = (status: string): Rule => ({
       id: status,
@@ -176,8 +201,10 @@ describe('listBoard', () => {
 
 describe('a person on a task', () => {
   const item = (status: string): WorkUnit => {
-    const { parent: _, origin: __, ...rest } = unit('X-1', { kind: 'item', status })
-    return rest
+    const made = unit('X-1', { kind: 'item', status })
+    delete made.parent
+    delete made.origin
+    return made
   }
   const units = (itemStatus: string): Record<string, WorkUnit> => ({
     'X-1': item(itemStatus),

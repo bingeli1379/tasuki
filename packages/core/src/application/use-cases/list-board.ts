@@ -29,11 +29,13 @@ export async function listBoard(
   rules: readonly Rule[],
 ): Promise<Board> {
   const statuses = ITEM_STATUSES.filter((s) => mapped.item.includes(s))
-  const [items, tasks, live] = await Promise.all([
+  const [items, tasks] = await Promise.all([
     storage.list('item', statuses),
     storage.list('task', mapped.task),
-    runtime.liveRuns(),
   ])
+  // After the tracker, which takes seconds on Jira: read alongside it, a Run that ended
+  // meanwhile shows as Running on a card already in its outcome's column.
+  const live = await runtime.liveRuns()
   const watched = new Set(rules.map((r) => r.watch))
   const columns = statuses.map((status) => ({
     status,
