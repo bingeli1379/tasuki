@@ -2,7 +2,7 @@ import { createStatusMap, type StoragePort } from '@tasuki/core'
 import { describeStorageContract } from '@tasuki/testkit'
 import { existsSync } from 'node:fs'
 import { describe, it } from 'vite-plus/test'
-import { createClient, createFetch } from './client'
+import { createClient, createFetch, JiraHttpError } from './client'
 import { parseOptions } from './options'
 import { createJiraTracker } from './tracker'
 
@@ -54,7 +54,14 @@ if (configured) {
       },
     }
     const teardown = async (): Promise<void> => {
-      await Promise.all(created.map((ref) => jira('DELETE', `/issue/${ref}?deleteSubtasks=true`)))
+      // A test may have deleted its item already.
+      await Promise.all(
+        created.map((ref) =>
+          jira('DELETE', `/issue/${ref}?deleteSubtasks=true`).catch((e: unknown) => {
+            if (!(e instanceof JiraHttpError && e.status === 404)) throw e
+          }),
+        ),
+      )
     }
     return Promise.resolve({ storage, teardown })
   })

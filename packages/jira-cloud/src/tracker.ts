@@ -384,6 +384,12 @@ export function createJiraTracker(
       await jira('DELETE', `/issue/${ref}`)
     },
 
+    // Its sub-tasks go with it, and Jira takes their links, comments and attachments along.
+    async deleteItem(ref) {
+      if (kindOf(await getUnit(ref)) !== 'item') throw new NotFound(`${ref} is not an item`)
+      await jira('DELETE', `/issue/${ref}?deleteSubtasks=true`)
+    },
+
     // update.labels adds or removes the one label, unlike fields.labels, which replaces all.
     async addLabel(ref, label) {
       await getUnit(ref)
@@ -429,6 +435,9 @@ export function createJiraTracker(
       const issue = await getUnit(comment.target)
       const body = await markdownToAdf(comment.body, mediaResolver(issue))
       const human = comment.author === 'human'
+      // A person's own note is the only comment without the property: one written straight in
+      // Jira has none either. A person's system line (D74) carries it, with no visible prefix.
+      const tagged = !human || comment.kind !== 'note'
       if (!human)
         body.content.unshift({
           type: 'paragraph',
@@ -438,7 +447,7 @@ export function createJiraTracker(
         })
       const created = await jira<JiraComment>('POST', `/issue/${comment.target}/comment`, {
         body,
-        ...(human
+        ...(!tagged
           ? {}
           : {
               properties: [
