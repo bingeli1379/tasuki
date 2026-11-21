@@ -711,8 +711,8 @@ describe('rule rework on a fake agent', () => {
     t.scripts.push(async (mcp, spec) => {
       const comments = JSON.parse(
         text(await mcp.callTool({ name: 'list_comments', arguments: {} })),
-      ) as { author: string; body: string }[]
-      feedback = comments.findLast((c) => c.author === 'human')?.body ?? ''
+      ) as { author: string; kind: string; body: string }[]
+      feedback = comments.findLast((c) => c.author === 'human' && c.kind === 'note')?.body ?? ''
       await mcp.callTool({ name: 'create_task', arguments: { title: 'Fix it', body: feedback } })
       return report('succeeded')(mcp, spec)
     })
@@ -741,6 +741,33 @@ describe('rule rework on a fake agent', () => {
     await engine.tick()
     await engine.settled()
     expect((await t.storage.get(item.ref)).status).toBe('blocked')
+  })
+
+  it('moved there in the tracker with no word on what to fix, it waits in blocked for one', async () => {
+    const t = setup()
+    const item = await reviewedItem(t)
+    await t.storage.transition(item.ref, 'in-review', 'ready-to-rework')
+    const engine = t.engine([rework])
+    await engine.tick()
+    expect(t.started).toHaveLength(0)
+    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+      'Rule rework needs a comment saying what to rework, and none was left since the last run. Moved to blocked: write one, then move it back to ready-to-rework.',
+    )
+
+    // A note written straight in the tracker is feedback too.
+    t.scripts.push(splitInto('Fix it'))
+    await t.storage.addComment({
+      target: item.ref,
+      author: 'human',
+      kind: 'note',
+      body: 'Fix the colour.',
+    })
+    await t.storage.transition(item.ref, 'blocked', 'ready-to-rework')
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(1)
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
   })
 
   it('a send-back without feedback is a 400 and the item stays', async () => {
@@ -893,6 +920,25 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     )
   })
 
+  it('Stop after the round already saw its hold label still says Stop', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    // On Jira the label lands seconds before the hard cancel; a round can come in between.
+    await t.storage.addLabel(item.ref, 'hold')
+    await engine.tick()
+    await stop(t, item.ref)
+    await engine.enforce()
+    await engine.settled()
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      cancelMode: 'hard',
+      cancelRequestedBy: 'stop',
+    })
+    expect((await t.storage.comments(item.ref)).at(-1)?.body).toContain('a person pressed Stop')
+  })
+
   it('Stop with no agent on the item is a 400 and puts nothing on hold', async () => {
     const t = setup()
     const item = await t.readyItem()
@@ -993,10 +1039,107 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     expect((await t.storage.get(item.ref)).status).toBe('split-review')
   })
 
+  it('an item is deleted with its tasks, but not while an agent works on it', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const [item, task] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    const del = () => t.app.request(`/api/items/${item?.ref}`, { method: 'DELETE' })
+    expect((await del()).status).toBe(400)
+    await stop(t, item?.ref ?? '')
+    await engine.enforce()
+    await engine.settled()
+    expect((await del()).status).toBe(200)
+    for (const ref of [item?.ref, task?.ref])
+      expect((await t.app.request(`/api/items/${ref}`)).status).toBe(404)
+  })
+
   it('only an item goes on hold', async () => {
     const t = setup()
     const [, task] = await t.approvedItem()
     expect((await hold(t, task?.ref ?? '', 'PUT')).status).toBe(400)
+  })
+})
+
+describe('global pause (stop-and-recovery.md)', () => {
+  const pause = (t: ReturnType<typeof setup>, kill = false) =>
+    t.app.request('/api/engine/pause', { method: 'POST', body: JSON.stringify({ kill }) })
+  const resume = (t: ReturnType<typeof setup>) =>
+    t.app.request('/api/engine/resume', { method: 'POST' })
+
+  it('starts no Run while paused, across a restart, and carries on once resumed', async () => {
+    const t = setup()
+    const item = await t.readyItem()
+    expect((await pause(t)).status).toBe(200)
+    await t.engine().tick()
+    expect(t.started).toHaveLength(0)
+    expect(await (await t.app.request('/api/board')).json()).toMatchObject({ paused: true })
+
+    const again = setup(t.runtimeDb, t.trackerDb, t.now)
+    const engine = again.engine()
+    await engine.tick()
+    expect(again.started).toHaveLength(0)
+    expect((await resume(again)).status).toBe(200)
+    await engine.tick()
+    await engine.settled()
+    expect((await again.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('lets a Run already working finish', async () => {
+    const t = setup()
+    let go: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    t.scripts.push(async (mcp, spec) => {
+      await gate
+      return splitInto()(mcp, spec)
+    })
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await pause(t)
+    await engine.enforce()
+    go()
+    await engine.settled()
+    expect(t.signals).toEqual([])
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('with kill stops every Run; resumed, each item starts over where its rule starts', async () => {
+    const t = setup()
+    // Split is claimed before execute in each round.
+    t.scripts.push(hang, hang, splitInto(), walk)
+    const split1 = await t.readyItem()
+    const [exec] = await t.approvedItem()
+    const engine = t.engine([split, execute])
+    await engine.tick()
+    expect(t.started).toHaveLength(2)
+
+    expect(await (await pause(t, true)).json()).toMatchObject({ stopped: expect.any(Array) })
+    await engine.enforce()
+    await engine.settled()
+    expect(t.signals).toEqual(['SIGTERM', 'SIGTERM'])
+    for (const ref of [split1.ref, exec?.ref ?? ''])
+      expect((await t.runtime.runsFor(ref))[0]).toMatchObject({
+        outcome: 'cancelled',
+        cancelRequestedBy: 'pause',
+      })
+
+    // Still paused: the split item goes back to wait in ready-to-split, nothing starts.
+    await engine.tick()
+    expect(t.started).toHaveLength(2)
+    expect((await t.storage.get(split1.ref)).status).toBe('ready-to-split')
+    expect((await t.storage.get(exec?.ref ?? '')).status).toBe('in-progress')
+    expect((await t.storage.comments(split1.ref)).at(-1)?.body).toBe(
+      'Stopped by pausing the engine. Moved back to ready-to-split for rule split to start again.',
+    )
+
+    await resume(t)
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(4)
+    expect((await t.storage.get(split1.ref)).status).toBe('split-review')
+    expect((await t.storage.get(exec?.ref ?? '')).status).toBe('in-review')
   })
 })
 

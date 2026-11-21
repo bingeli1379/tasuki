@@ -101,6 +101,8 @@ export function createEngine(deps: EngineDeps): Engine {
         // Before claiming, so an item resumed this round is picked up in the same round.
         await resumeBlocked({ storage, runtime }, rules, deps.holdLabel)
         await resumeReleased({ storage, runtime }, rules, deps.holdLabel)
+        // Paused, the round still recovers and resumes: none of that starts a Run.
+        if (await runtime.isPaused()) return
         const claimed = await claimItems({ storage, runtime }, rules, {
           maxConcurrentRuns: limits.maxConcurrentRuns,
           leaseSeconds: limits.leaseSeconds,

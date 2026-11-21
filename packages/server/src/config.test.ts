@@ -21,6 +21,26 @@ describe('loadConfig', () => {
     expect(config.statuses.task?.['to-do']).toBe('To Do')
   })
 
+  it('leaves splitting off the default mapping unless a rule claims it', () => {
+    expect(loadConfig(write('{}')).statuses.item?.['splitting']).toBeUndefined()
+    const claiming = write(
+      JSON.stringify({
+        agents: { fake: { plugin: '@tasuki/fake-runner' } },
+        rules: [
+          {
+            id: 'split',
+            watch: 'ready-to-split',
+            claim: 'splitting',
+            agent: 'fake',
+            mode: 'split',
+            on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+          },
+        ],
+      }),
+    )
+    expect(loadConfig(claiming).statuses.item?.['splitting']).toBe('Splitting')
+  })
+
   it('expands ${VAR} from a .env next to the config', () => {
     const path = write(
       '{ "tracker": { "plugin": "x", "options": { "token": "${TASUKI_TEST_TOKEN}" } } }',

@@ -2,6 +2,7 @@ import {
   addAttachment,
   addComment,
   createItem,
+  deleteItem,
   deleteTask,
   getItem,
   getTask,
@@ -9,8 +10,10 @@ import {
   listBoard,
   moveItem,
   moveTask,
+  pauseEngine,
   releaseItem,
   requestRework,
+  resumeEngine,
   stopRun,
   updateItem,
   updateTask,
@@ -51,9 +54,11 @@ export function createMcpServer({
         'List the board: one column per item status in board order, each with its items ' +
         'and `turn`: engine when a rule picks items up from it, person when items wait for a ' +
         'person there, absent otherwise; ' +
-        'and `running`, the refs an agent is working on right now, and `tasks`, per item ref ' +
+        'and `running`, the refs an agent is working on right now (`stopping`: of those, the ' +
+        'ones told to stop and winding down), and `tasks`, per item ref ' +
         'that has tasks, how many are done out of how many, and `holdLabel`: an item with it ' +
-        'among its labels is on hold, and no agent starts on it. ' +
+        'among its labels is on hold, and no agent starts on it; and `paused`: while true the ' +
+        'engine starts no agent on any item. ' +
         'Items created a few seconds ago may not be listed yet when the tracker is Jira.',
     },
     async () =>
@@ -143,6 +148,31 @@ export function createMcpServer({
     async ({ ref }) => json(await stopRun({ storage, runtime }, holdLabel, ref)),
   )
   server.registerTool(
+    'pause_engine',
+    {
+      description:
+        'Pause the engine: no agent starts on any item until resume_engine. Agents working ' +
+        'now finish on their own, unless kill is true: then each is stopped at once, its item ' +
+        'stays where it is and carries on after resuming. Returns the runs it stopped.',
+      inputSchema: {
+        kill: z.boolean().optional().describe('Also stop every agent working now (default false)'),
+      },
+    },
+    async ({ kill }) => json({ stopped: await pauseEngine(runtime, kill === true) }),
+  )
+  server.registerTool(
+    'resume_engine',
+    {
+      description:
+        'Resume a paused engine: from the next round agents start on items again, including ' +
+        'those whose agent was stopped by pausing.',
+    },
+    async () => {
+      await resumeEngine(runtime)
+      return json({ ok: true })
+    },
+  )
+  server.registerTool(
     'get_item',
     {
       description:
@@ -183,6 +213,19 @@ export function createMcpServer({
       ),
   )
   server.registerTool(
+    'delete_item',
+    {
+      description:
+        'Delete an item with all its tasks, comments and attachments. Cannot be undone. Fails ' +
+        'while an agent works on it: stop_run first.',
+      inputSchema: { ref: z.string().describe('The item ref') },
+    },
+    async ({ ref }) => {
+      await deleteItem({ storage, runtime }, ref)
+      return json({ deleted: ref })
+    },
+  )
+  server.registerTool(
     'get_task',
     {
       description:
@@ -198,8 +241,9 @@ export function createMcpServer({
     {
       description:
         'Move a task as a person: take it over (to-do or in-progress to manual), hand it back ' +
-        '(manual to to-do), or finish it by hand (manual to done). Nothing else; a done task is ' +
-        'never reopened. Taking over a task an agent is on stops it from being dispatched again, ' +
+        '(manual to to-do), finish it by hand (manual to done), or undo a done (done to to-do ' +
+        'or manual, only while no agent works on its item). Nothing else. Each move leaves a ' +
+        'line in its comments. Taking over a task an agent is on stops it from being dispatched again, ' +
         'but the agent may still finish it. `from` is the status you last saw it in; if it moved ' +
         'since, the call fails and says where it is now. Returns the moved task.',
       inputSchema: {
@@ -208,7 +252,7 @@ export function createMcpServer({
         to: z.string().describe('manual, to-do or done'),
       },
     },
-    async (input) => json(await moveTask(storage, input)),
+    async (input) => json(await moveTask({ storage, runtime }, input)),
   )
   server.registerTool(
     'update_task',

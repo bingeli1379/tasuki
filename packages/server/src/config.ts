@@ -1,4 +1,5 @@
 import {
+  CLAIM_ONLY,
   ITEM_STATUS_DISPLAY,
   ITEM_STATUSES,
   TASK_STATUS_DISPLAY,
@@ -167,9 +168,17 @@ export function loadConfig(path: string): Config {
   const server = (raw['server'] ?? {}) as Raw
   const tracker = pluginRef(raw['tracker'] ?? { plugin: '@tasuki/sqlite' }, 'tracker')
 
-  // Without a mapping, sqlite stores the display names (config-and-rules.md example).
+  // Without a mapping, sqlite stores the display names (config-and-rules.md example), and a
+  // claim-only status is left off unless a rule claims it.
+  const claimed = (Array.isArray(raw['rules']) ? raw['rules'] : []).map((r: unknown) =>
+    isObject(r) ? r['claim'] : undefined,
+  )
   const statuses = (raw['statuses'] ?? {
-    item: ITEM_STATUS_DISPLAY,
+    item: Object.fromEntries(
+      Object.entries(ITEM_STATUS_DISPLAY).filter(
+        ([s]) => !CLAIM_ONLY.includes(s) || claimed.includes(s),
+      ),
+    ),
     task: TASK_STATUS_DISPLAY,
   }) as StatusMapping
   for (const [kind, known] of [

@@ -291,7 +291,10 @@ describe('tasks', () => {
     expect(await moved.json()).toMatchObject({ status: 'manual' })
     expect(await (await app.request(`/api/tasks/${second.ref}`)).json()).toMatchObject({
       task: { ref: second.ref, status: 'manual', blockedBy: [expect.any(String)] },
-      comments: [{ author: 'human', body: 'mine now' }],
+      comments: [
+        { author: 'human', kind: 'note', body: 'mine now' },
+        { author: 'human', kind: 'system', body: 'Moved from to-do to manual.' },
+      ],
     })
   })
 
@@ -353,8 +356,11 @@ describe("MCP for the user's AI client", () => {
       'hold_item',
       'release_item',
       'stop_run',
+      'pause_engine',
+      'resume_engine',
       'get_item',
       'update_item',
+      'delete_item',
       'get_task',
       'move_task',
       'update_task',

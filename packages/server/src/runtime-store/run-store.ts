@@ -126,11 +126,21 @@ export function createRuntimeStore(
     },
     async requestCancel(id, mode, by) {
       db.prepare(
-        `UPDATE run SET cancel_requested_at = COALESCE(cancel_requested_at, ?),
-           cancel_requested_by = COALESCE(cancel_requested_by, ?),
-           cancel_mode = CASE WHEN cancel_mode = 'hard' THEN 'hard' ELSE ? END
-         WHERE id = ? AND state = 'running'`,
-      ).run(clock.now().toISOString(), by, mode, id)
+        `UPDATE run SET cancel_requested_at = COALESCE(cancel_requested_at, ?1),
+           cancel_requested_by = CASE
+             WHEN cancel_mode = 'hard' THEN cancel_requested_by
+             WHEN ?2 = 'hard' THEN ?3
+             ELSE COALESCE(cancel_requested_by, ?3) END,
+           cancel_mode = CASE WHEN cancel_mode = 'hard' THEN 'hard' ELSE ?2 END
+         WHERE id = ?4 AND state = 'running'`,
+      ).run(clock.now().toISOString(), mode, by, id)
+    },
+    async isPaused() {
+      return db.prepare("SELECT 1 FROM engine_state WHERE key = 'paused'").get() !== undefined
+    },
+    async setPaused(paused) {
+      if (paused) db.prepare("INSERT OR IGNORE INTO engine_state VALUES ('paused', 'true')").run()
+      else db.prepare("DELETE FROM engine_state WHERE key = 'paused'").run()
     },
     async liveRuns() {
       return db

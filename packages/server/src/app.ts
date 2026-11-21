@@ -3,6 +3,7 @@ import {
   addAttachment,
   addComment,
   createItem,
+  deleteItem,
   deleteTask,
   EditConflict,
   getItem,
@@ -14,8 +15,10 @@ import {
   moveItem,
   moveTask,
   NotFound,
+  pauseEngine,
   releaseItem,
   requestRework,
+  resumeEngine,
   StatusConflict,
   stopRun,
   updateItem,
@@ -113,6 +116,14 @@ export function createApp({
       }),
     )
   })
+  app.post('/api/engine/pause', async (c) => {
+    const body = await c.req.json<{ kill?: unknown }>().catch(() => ({}) as { kill?: unknown })
+    return c.json({ stopped: await pauseEngine(runtime, body.kill === true) })
+  })
+  app.post('/api/engine/resume', async (c) => {
+    await resumeEngine(runtime)
+    return c.json({ ok: true })
+  })
   app.post('/api/items/:ref/stop', async (c) =>
     c.json(await stopRun({ storage, runtime }, holdLabel, c.req.param('ref'))),
   )
@@ -122,6 +133,10 @@ export function createApp({
   app.delete('/api/items/:ref/hold', async (c) =>
     c.json(await releaseItem(storage, holdLabel, c.req.param('ref'))),
   )
+  app.delete('/api/items/:ref', async (c) => {
+    await deleteItem({ storage, runtime }, c.req.param('ref'))
+    return c.json({ ok: true })
+  })
   app.get('/api/items/:ref', async (c) =>
     c.json(await getItem(storage, runtime, c.req.param('ref'))),
   )
@@ -152,7 +167,10 @@ export function createApp({
     if (typeof body.from !== 'string' || typeof body.to !== 'string')
       throw new InvalidInput('from and to are required')
     return c.json(
-      await moveTask(storage, { ref: c.req.param('ref'), from: body.from, to: body.to }),
+      await moveTask(
+        { storage, runtime },
+        { ref: c.req.param('ref'), from: body.from, to: body.to },
+      ),
     )
   })
   app.patch('/api/tasks/:ref', async (c) => {
