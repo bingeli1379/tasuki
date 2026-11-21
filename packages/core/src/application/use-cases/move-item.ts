@@ -1,6 +1,7 @@
 import type { Ref, WorkUnit } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
 import type { StoragePort } from '../ports/storage'
+import { logAction } from './log-action'
 
 export interface MoveItemInput {
   ref: Ref
@@ -19,5 +20,7 @@ export async function moveItem(
   for (const status of [input.from, input.to])
     if (!mapped.includes(status)) throw new InvalidInput(`status "${status}" is not on the board`)
   if (input.from === input.to) throw new InvalidInput(`${input.ref} is already in ${input.to}`)
-  return storage.transition(input.ref, input.from, input.to)
+  const moved = await storage.transition(input.ref, input.from, input.to)
+  await logAction(storage, input.ref, `Moved from ${input.from} to ${input.to}.`)
+  return moved
 }

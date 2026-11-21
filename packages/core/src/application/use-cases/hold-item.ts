@@ -2,6 +2,7 @@ import type { Ref, WorkUnit } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
+import { logAction } from './log-action'
 
 export interface HoldDeps {
   storage: StoragePort
@@ -24,6 +25,7 @@ export async function holdItem(
   const item = await storage.addLabel(ref, holdLabel)
   const live = (await runtime.liveRuns()).find((r) => r.target === ref)
   if (live !== undefined) await runtime.requestCancel(live.id, 'soft', 'hold')
+  await logAction(storage, ref, 'Put on hold.')
   return item
 }
 
@@ -34,7 +36,9 @@ export async function releaseItem(
   ref: Ref,
 ): Promise<WorkUnit> {
   await assertItem(storage, ref)
-  return storage.removeLabel(ref, holdLabel)
+  const item = await storage.removeLabel(ref, holdLabel)
+  await logAction(storage, ref, 'Released from hold.')
+  return item
 }
 
 // The Stop button: the Run on the item ends now. The item goes on hold first, or the round
@@ -48,5 +52,6 @@ export async function stopRun(
   if (live === undefined) throw new InvalidInput(`nothing is running on ${ref}`)
   const item = await storage.addLabel(ref, holdLabel)
   await runtime.requestCancel(live.id, 'hard', 'stop')
+  await logAction(storage, ref, 'Stopped the agent and put on hold.')
   return item
 }

@@ -15,6 +15,7 @@ const WHY: Record<CancelReason, string> = {
   stop: 'a person pressed Stop',
   hold: 'the item was put on hold',
   moved: 'the item was moved while it ran',
+  pause: 'the engine was paused with every run stopped',
 }
 
 // The agent process is gone: turn what it reported into an outcome and move the item.

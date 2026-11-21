@@ -59,6 +59,9 @@ describe('personMoveRefusal', () => {
     ['in-progress', 'manual'],
     ['manual', 'done'],
     ['manual', 'to-do'],
+    // Undoing a done by mistake (D74); the engine never does (invariant 4).
+    ['done', 'to-do'],
+    ['done', 'manual'],
   ])('lets a person move %s to %s', (from, to) => {
     expect(personMoveRefusal('A', from, to)).toBeUndefined()
   })
@@ -68,8 +71,7 @@ describe('personMoveRefusal', () => {
     ['to-do', 'in-progress', 'A cannot go from to-do to in-progress'],
     ['in-review', 'manual', 'A cannot go from in-review to manual'],
     ['manual', 'in-progress', 'A cannot go from manual to in-progress'],
-    // invariant 4
-    ['done', 'manual', 'A is done; done tasks are never reopened'],
+    ['done', 'in-progress', 'A cannot go from done to in-progress'],
   ])('refuses %s to %s', (from, to, why) => {
     expect(personMoveRefusal('A', from, to)).toBe(why)
   })

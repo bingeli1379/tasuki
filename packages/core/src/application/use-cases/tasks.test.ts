@@ -141,7 +141,7 @@ describe('listBoard', () => {
               : [unit('X-2', { status: 'done' }), unit('X-3'), unit('Y-2', { parent: 'Y-1' })],
           ),
       }),
-      runtimeStub({ liveRuns: () => Promise.resolve([]) }),
+      runtimeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
       { item: ['split-review'], task: ['to-do', 'done'] },
       [],
       'hold',
@@ -166,6 +166,7 @@ describe('listBoard', () => {
           ),
       }),
       runtimeStub({
+        isPaused: () => Promise.resolve(false),
         liveRuns: () =>
           Promise.resolve(running ? [{ ...run, target: 'X-1', state: 'running' as const }] : []),
       }),
@@ -187,7 +188,7 @@ describe('listBoard', () => {
     })
     const board = await listBoard(
       storageStub({ list: () => Promise.resolve([]) }),
-      runtimeStub({ liveRuns: () => Promise.resolve([]) }),
+      runtimeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
       { item: ['refining', 'ready-to-split', 'split-review', 'blocked'], task: [] },
       // A rule on a status that would wait for a person: the engine picks it up, so it wins.
       [watch('ready-to-split'), watch('blocked')],
@@ -231,23 +232,41 @@ describe('a person on a task', () => {
     await expect(getTask(storage, 'X-1')).rejects.toBeInstanceOf(NotFound)
   })
 
-  it('finishes a manual task, and may not reopen a done one', async () => {
+  it('finishes a manual task and undoes a done one, logging each, but not under a live Run', async () => {
     const moves: string[] = []
-    const storage = storageStub({
-      get: get(units('blocked')),
-      transition: (ref, from, to) => (
-        moves.push(`${ref} ${from}>${to}`),
-        Promise.resolve(unit(ref))
-      ),
-    })
-    await moveTask(storage, { ref: 'X-2', from: 'manual', to: 'done' })
-    await expect(moveTask(storage, { ref: 'X-3', from: 'done', to: 'manual' })).rejects.toThrow(
-      'X-3 is done; done tasks are never reopened',
+    const logged: string[] = []
+    let live: Run[] = []
+    const deps = {
+      storage: storageStub({
+        get: get(units('blocked')),
+        transition: (ref, from, to) => (
+          moves.push(`${ref} ${from}>${to}`),
+          Promise.resolve(unit(ref))
+        ),
+        addComment: (c) => (
+          logged.push(`${c.target} ${c.author} ${c.kind}: ${c.body}`),
+          Promise.resolve({ id: '1', createdAt: '', ...c })
+        ),
+      }),
+      runtime: runtimeStub({ liveRuns: () => Promise.resolve(live) }),
+    }
+    await moveTask(deps, { ref: 'X-2', from: 'manual', to: 'done' })
+    await moveTask(deps, { ref: 'X-3', from: 'done', to: 'to-do' })
+    live = [{ ...run, target: 'X-1', state: 'running' }]
+    await expect(moveTask(deps, { ref: 'X-3', from: 'done', to: 'manual' })).rejects.toThrow(
+      'an agent is working on X-1; reopen X-3 once it is done',
+    )
+    await expect(moveTask(deps, { ref: 'X-3', from: 'to-do', to: 'done' })).rejects.toBeInstanceOf(
+      InvalidInput,
     )
     await expect(
-      moveTask(storage, { ref: 'X-1', from: 'blocked', to: 'done' }),
+      moveTask(deps, { ref: 'X-1', from: 'blocked', to: 'done' }),
     ).rejects.toBeInstanceOf(NotFound)
-    expect(moves).toEqual(['X-2 manual>done'])
+    expect(moves).toEqual(['X-2 manual>done', 'X-3 done>to-do'])
+    expect(logged).toEqual([
+      'X-2 human system: Moved from manual to done.',
+      'X-3 human system: Moved from done to to-do.',
+    ])
   })
 
   it('edits and deletes tasks only while the item is in split-review', async () => {

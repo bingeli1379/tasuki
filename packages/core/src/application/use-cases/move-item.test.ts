@@ -8,6 +8,10 @@ import { requestRework } from './request-rework'
 const recording = (): { storage: StoragePort; moves: string[][] } => {
   const moves: string[][] = []
   const storage = storageStub({
+    addComment: (c) => (
+      moves.push([c.target, c.kind, c.body]),
+      Promise.resolve({ ...c, id: '1', createdAt: '' })
+    ),
     transition: (ref, from, to) => {
       moves.push([ref, from, to])
       return Promise.resolve({
@@ -30,7 +34,11 @@ describe('moveItem', () => {
   it('transitions from the status the person saw to the one they picked', async () => {
     const { storage, moves } = recording()
     const item = await moveItem(storage, board, { ref: 'X-1', from: 'refining', to: 'done' })
-    expect(moves).toEqual([['X-1', 'refining', 'done']])
+    // A person's move leaves a line saying so (D74).
+    expect(moves).toEqual([
+      ['X-1', 'refining', 'done'],
+      ['X-1', 'system', 'Moved from refining to done.'],
+    ])
     expect(item.status).toBe('done')
   })
 
@@ -94,7 +102,11 @@ describe('requestRework', () => {
       feedback: 'Wrong colour.',
     })
     expect(moved.status).toBe('ready-to-rework')
-    expect(log).toEqual(['comment human Wrong colour.', 'move in-review>ready-to-rework'])
+    expect(log).toEqual([
+      'comment human Wrong colour.',
+      'move in-review>ready-to-rework',
+      'comment human Moved from in-review to ready-to-rework.',
+    ])
   })
 
   it('refuses without feedback, and leaves no comment when the item already moved', async () => {

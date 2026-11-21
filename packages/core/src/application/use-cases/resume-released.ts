@@ -10,9 +10,10 @@ export interface ReleasedDeps {
   runtime: RuntimeStorePort
 }
 
-// A Run cancelled by Stop or hold leaves the item where it was (invariant 6). Once the hold
-// is off, an item left in a claim status goes back to that rule's watch status for the next
-// round to pick up (stop-and-recovery.md); one left in a watch status needs nothing here.
+// A Run cancelled by Stop, hold or pausing with every Run stopped leaves the item where it was
+// (invariant 6). Once the hold is off, an item left in a claim status goes back to that rule's
+// watch status for the next round to pick up (stop-and-recovery.md); one left in a watch
+// status needs nothing here. A paused engine claims nothing, so these wait in watch.
 // Returns the refs it moved.
 export async function resumeReleased(
   { storage, runtime }: ReleasedDeps,
@@ -23,7 +24,7 @@ export async function resumeReleased(
   if (claims.length === 0) return []
   // The local store first, as in resumeBlocked: no candidate, no tracker call.
   const candidates = (await runtime.latestRunsEndedIn('cancelled')).filter(
-    (r) => r.cancelRequestedBy === 'stop' || r.cancelRequestedBy === 'hold',
+    (r) => r.cancelRequestedBy !== undefined && r.cancelRequestedBy !== 'moved',
   )
   if (candidates.length === 0) return []
   const moved: Ref[] = []
@@ -42,7 +43,10 @@ export async function resumeReleased(
       target: item.ref,
       author: 'engine',
       kind: 'system',
-      body: `The hold is off. Moved back to ${rule.watch} for rule ${rule.id} to start again.`,
+      body:
+        latest?.cancelRequestedBy === 'pause'
+          ? `Stopped by pausing the engine. Moved back to ${rule.watch} for rule ${rule.id} to start again.`
+          : `The hold is off. Moved back to ${rule.watch} for rule ${rule.id} to start again.`,
     })
     moved.push(item.ref)
   }

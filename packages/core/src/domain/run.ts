@@ -10,8 +10,8 @@ export type Outcome = Verdict | 'max_attempts' | 'cancelled' | 'abandoned'
 export type CancelMode = 'soft' | 'hard'
 
 // stop: the Stop button. hold: the item got the hold label. moved: a person moved the item
-// out of the status the Run works in.
-export type CancelReason = 'stop' | 'hold' | 'moved'
+// out of the status the Run works in. pause: the engine was paused with every Run stopped.
+export type CancelReason = 'stop' | 'hold' | 'moved' | 'pause'
 
 export interface Run {
   id: string

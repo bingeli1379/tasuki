@@ -1,6 +1,7 @@
 import type { Ref, WorkUnit } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
 import { NotFound } from '../not-found'
+import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
 import { updateItem, type UpdateItemInput } from './update-item'
 
@@ -19,6 +20,17 @@ async function assertInSplitReview(storage: StoragePort, ref: Ref): Promise<void
 export async function updateTask(storage: StoragePort, input: UpdateItemInput): Promise<WorkUnit> {
   await assertInSplitReview(storage, input.ref)
   return updateItem(storage, input)
+}
+
+// An item with an agent on it is not deleted: stop it first. Its Runs stay in the runtime
+// store as history.
+export async function deleteItem(
+  { storage, runtime }: { storage: StoragePort; runtime: RuntimeStorePort },
+  ref: Ref,
+): Promise<void> {
+  if ((await runtime.liveRuns()).some((r) => r.target === ref))
+    throw new InvalidInput(`an agent is working on ${ref}; stop it before deleting`)
+  await storage.deleteItem(ref)
 }
 
 export async function deleteTask(storage: StoragePort, ref: Ref): Promise<void> {
