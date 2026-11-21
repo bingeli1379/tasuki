@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
+import type { Workflow } from '../../domain/workflow'
 import { storageStub } from '../../testing/storage-stub'
 import type { StoragePort } from '../ports/storage'
 import { StatusConflict } from '../status-conflict'
@@ -28,7 +29,11 @@ const recording = (): { storage: StoragePort; moves: string[][] } => {
   return { storage, moves }
 }
 
-const board = ['refining', 'ready-to-split', 'done']
+const workflowOf = (ids: string[], rework?: string): Workflow => ({
+  statuses: ids.map((id) => ({ id, name: id.toUpperCase(), outcomes: {} })),
+  roles: { entry: 'refining', done: 'done', failure: 'done', ...(rework ? { rework } : {}) },
+})
+const board = workflowOf(['refining', 'ready-to-split', 'done'])
 
 describe('moveItem', () => {
   it('transitions from the status the person saw to the one they picked', async () => {
@@ -37,7 +42,7 @@ describe('moveItem', () => {
     // A person's move leaves a line saying so (D74).
     expect(moves).toEqual([
       ['X-1', 'refining', 'done'],
-      ['X-1', 'system', 'Moved from refining to done.'],
+      ['X-1', 'system', 'Moved **REFINING** → **DONE**.'],
     ])
     expect(item.status).toBe('done')
   })
@@ -92,7 +97,7 @@ describe('requestRework', () => {
     })
     return { storage, log }
   }
-  const mapped = ['in-review', 'ready-to-rework', 'done']
+  const mapped = workflowOf(['in-review', 'ready-to-rework', 'done'], 'ready-to-rework')
 
   it('leaves the feedback first, then sends the item back', async () => {
     const { storage, log } = setup()
@@ -105,18 +110,38 @@ describe('requestRework', () => {
     expect(log).toEqual([
       'comment human Wrong colour.',
       'move in-review>ready-to-rework',
-      'comment human Moved from in-review to ready-to-rework.',
+      'comment human Moved **IN-REVIEW** → **READY-TO-REWORK**.',
     ])
   })
 
   it('refuses without feedback, and leaves no comment when the item already moved', async () => {
     const { storage, log } = setup('done')
     await expect(
-      requestRework(storage, mapped, { ref: 'X-1', from: 'in-review', feedback: ' ' }),
+      requestRework(storage, mapped, {
+        ref: 'X-1',
+        from: 'in-review',
+        feedback: ' ',
+      }),
     ).rejects.toThrow('feedback is empty')
     await expect(
-      requestRework(storage, mapped, { ref: 'X-1', from: 'in-review', feedback: 'Wrong.' }),
+      requestRework(storage, mapped, {
+        ref: 'X-1',
+        from: 'in-review',
+        feedback: 'Wrong.',
+      }),
     ).rejects.toBeInstanceOf(StatusConflict)
+    expect(log).toEqual([])
+  })
+
+  it('refuses when no status has the rework role', async () => {
+    const { storage, log } = setup()
+    await expect(
+      requestRework(storage, workflowOf(['in-review', 'done']), {
+        ref: 'X-1',
+        from: 'in-review',
+        feedback: 'x',
+      }),
+    ).rejects.toThrow('no status has the rework role')
     expect(log).toEqual([])
   })
 })

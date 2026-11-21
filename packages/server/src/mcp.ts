@@ -21,6 +21,7 @@ import {
   type Rule,
   type RuntimeStorePort,
   type StatusMap,
+  type Workflow,
   type StoragePort,
 } from '@tasuki/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
@@ -30,6 +31,7 @@ export interface McpDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
   statuses: StatusMap
+  workflow: Workflow
   rules: readonly Rule[]
   holdLabel: string
 }
@@ -44,17 +46,28 @@ export function createMcpServer({
   storage,
   runtime,
   statuses,
+  workflow,
   rules,
   holdLabel,
 }: McpDeps): McpServer {
   const server = new McpServer({ name: 'tasuki', version: '0.0.0' })
+  const { entry, taskReview, rework } = workflow.roles
+  const onlyInTaskReview =
+    taskReview === undefined
+      ? 'never: no status lets a person change tasks'
+      : `only while its item is in ${taskReview}`
   server.registerTool(
     'list_board',
     {
       description:
         'List the board: one column per item status in board order, each with its items ' +
-        'and `turn`: engine when a rule picks items up from it, person when items wait for a ' +
-        'person there, absent otherwise; ' +
+        'and `handledBy`: engine when a rule picks items up from it, person when items wait ' +
+        'for a person there, absent otherwise, and `outcomes`: what a person can conclude ' +
+        'there, a label for each and the status that sends the item to (move_item, or ' +
+        'request_rework when it is the rework status); ' +
+        'and `roles`: which status new items start in (entry), where the board ends (done), ' +
+        'where failed runs go (failure), where tasks can be changed (taskReview) and where ' +
+        'work is sent back (rework); ' +
         'and `running`, the refs an agent is working on right now (`stopping`: of those, the ' +
         'ones told to stop and winding down), and `tasks`, per item ref ' +
         'that has tasks, how many are done out of how many, and `holdLabel`: an item with it ' +
@@ -63,26 +76,18 @@ export function createMcpServer({
         'Items created a few seconds ago may not be listed yet when the tracker is Jira.',
     },
     async () =>
-      json(
-        await listBoard(
-          storage,
-          runtime,
-          { item: statuses.mapped('item'), task: statuses.mapped('task') },
-          rules,
-          holdLabel,
-        ),
-      ),
+      json(await listBoard(storage, runtime, workflow, statuses.mapped('task'), rules, holdLabel)),
   )
   server.registerTool(
     'create_item',
     {
-      description: 'Create an item. It starts in the refining status. Returns the created item.',
+      description: `Create an item. It starts in the ${entry} status. Returns the created item.`,
       inputSchema: {
         title: z.string().describe('One line; must not be blank'),
         body: z.string().optional().describe('Plain text, may span lines'),
       },
     },
-    async ({ title, body }) => json(await createItem(storage, { title, body: body ?? '' })),
+    async ({ title, body }) => json(await createItem(storage, entry, { title, body: body ?? '' })),
   )
   server.registerTool(
     'move_item',
@@ -94,27 +99,27 @@ export function createMcpServer({
         'watches starts an agent on it. Returns the moved item.',
       inputSchema: {
         ref: z.string().describe('The item ref, e.g. TSK-12'),
-        from: z.string().describe('Logical status the item is in now, e.g. refining'),
+        from: z.string().describe(`Logical status the item is in now, e.g. ${entry}`),
         to: z.string().describe('Logical status to move it to; must be a board column'),
       },
     },
-    async (input) => json(await moveItem(storage, statuses.mapped('item'), input)),
+    async (input) => json(await moveItem(storage, workflow, input)),
   )
   server.registerTool(
     'request_rework',
     {
       description:
         'Send finished work back to be reworked: leaves your feedback as a comment, then moves ' +
-        'the item to ready-to-rework, where an agent reads it and makes new tasks for it (done ' +
+        `the item to ${rework ?? 'the rework status (none is set, so this fails)'}, where an agent reads it and makes new tasks for it (done ` +
         'tasks are never reopened). The feedback is all that agent has to go on, so say what ' +
         'is wrong and what you expect instead. `from` is as in move_item. Returns the moved item.',
       inputSchema: {
         ref: z.string().describe('The item ref'),
-        from: z.string().describe('Logical status the item is in now, usually in-review'),
+        from: z.string().describe('Logical status the item is in now'),
         feedback: z.string().describe('Markdown; must not be blank'),
       },
     },
-    async (input) => json(await requestRework(storage, statuses.mapped('item'), input)),
+    async (input) => json(await requestRework(storage, workflow, input)),
   )
   server.registerTool(
     'hold_item',
@@ -180,8 +185,8 @@ export function createMcpServer({
         'Read one item: its fields (body is markdown), its comments oldest first, its ' +
         'attachments, its tasks oldest first (status, origin, and blockedBy: the tasks each ' +
         'waits for), and its runs newest first (each agent run on it: rule, attempt, outcome). ' +
-        'An item in split-review is waiting for a person to approve its tasks (move it to ' +
-        'in-progress) or send it back (to refining). ' +
+        "What a person can conclude in the item's status is that column's `outcomes` in " +
+        'list_board. ' +
         '`version` is what update_item needs. In the body, ![x](attachment:<id>) ' +
         'is an attachment of this item; [[embed:<label>|...]] is tracker content markdown ' +
         'cannot express (a Jira mention, table...): keep the token as is to keep that content.',
@@ -259,7 +264,7 @@ export function createMcpServer({
     'update_task',
     {
       description:
-        "Change a task's title and/or body, only while its item is in split-review. Pass the " +
+        `Change a task's title and/or body, ${onlyInTaskReview}. Pass the ` +
         'version from get_task; if someone changed the task since, the call fails and returns ' +
         'it as it is now. Returns the updated task.',
       inputSchema: {
@@ -271,7 +276,7 @@ export function createMcpServer({
     },
     async ({ ref, version, title, body }) =>
       json(
-        await updateTask(storage, {
+        await updateTask(storage, taskReview, {
           ref,
           expectedVersion: version,
           ...(title === undefined ? {} : { title }),
@@ -283,12 +288,12 @@ export function createMcpServer({
     'delete_task',
     {
       description:
-        'Delete a task, only while its item is in split-review. Its comments go with it, and ' +
+        `Delete a task, ${onlyInTaskReview}. Its comments go with it, and ` +
         'tasks that waited for it no longer do. Cannot be undone.',
       inputSchema: { ref: z.string() },
     },
     async ({ ref }) => {
-      await deleteTask(storage, ref)
+      await deleteTask(storage, taskReview, ref)
       return json({ deleted: ref })
     },
   )

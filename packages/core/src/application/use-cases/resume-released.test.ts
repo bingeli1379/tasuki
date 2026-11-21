@@ -48,6 +48,7 @@ const cancelled = (by?: CancelReason): Run => ({
 const setup = (runs: Run[], labels: string[] = []) => {
   const moves: string[] = []
   const deps = {
+    named: (s: string) => s,
     storage: storageStub({
       list: () => Promise.resolve([item(labels)]),
       transition: (ref, from, to) => {

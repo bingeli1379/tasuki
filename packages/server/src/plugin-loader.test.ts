@@ -1,4 +1,4 @@
-import { createStatusMap, ITEM_STATUS_DISPLAY, type PluginContext } from '@tasuki/core'
+import { createStatusMap, DEFAULT_WORKFLOW, type PluginContext } from '@tasuki/core'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -9,7 +9,9 @@ const ctx = (dataDir: string): PluginContext => ({
   clock: { now: () => new Date('2026-11-16T12:00:00Z') },
   configDir: '',
   dataDir,
-  statuses: createStatusMap({ item: ITEM_STATUS_DISPLAY }),
+  statuses: createStatusMap({
+    item: Object.fromEntries(DEFAULT_WORKFLOW.statuses.map((s) => [s.id, s.name])),
+  }),
 })
 
 // A config folder with one fake plugin package per entry, each a default export source.

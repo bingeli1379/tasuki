@@ -129,6 +129,38 @@ test('moving an item someone else already moved says where it went', async ({ pa
   ).toHaveCount(0)
 })
 
+test('a status added in the config is a column, marked by who handles it, with its own buttons', async ({
+  page,
+  request,
+}) => {
+  const title = `e2e triage ${Date.now()}`
+  const ref = await createThroughApi(request, title)
+  const moved = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'refining', to: 'triage' },
+  })
+  expect(moved.ok()).toBe(true)
+  await page.goto('/')
+  const triage = page.getByRole('region', { name: /^Triage/ })
+  await reloadUntilVisible(page, triage.getByRole('article', { name: title }))
+  await expect(triage.getByRole('img', { name: 'Waiting for a person' })).toBeVisible()
+  await expect(
+    page
+      .getByRole('region', { name: /^Ready to Split/ })
+      .getByRole('img', { name: 'An agent picks items up from here on its own' }),
+  ).toBeVisible()
+  await expect(page.getByRole('region', { name: /^Refining/ }).getByRole('img')).toHaveCount(0)
+
+  await triage.getByRole('button', { name: title, exact: true }).click()
+  const detail = page.getByRole('dialog')
+  await detail.getByRole('button', { name: '→ Ready to Split' }).click()
+  await expect(detail).toBeHidden()
+  // The split rule picks it up from there.
+  const stored = (await (await request.get(`/api/items/${ref}`)).json()) as {
+    item: { status: string }
+  }
+  expect(['ready-to-split', 'splitting', 'split-review']).toContain(stored.item.status)
+})
+
 // The board is too wide to drag from Refining to Ready to Rework in one viewport, so this
 // takes the item's More menu; a drop asks with the same words from the board.
 test('moving to Ready to Rework asks what to rework, and cancelling leaves the card', async ({
@@ -232,7 +264,7 @@ test('open an item, edit it in markdown with an image, comment, and find it all 
   await dialog.getByRole('button', { name: 'Delete notes.txt', exact: true }).click()
   await dialog.getByRole('button', { name: 'Delete notes.txt for good' }).click()
   await expect(dialog.getByRole('link', { name: 'notes.txt' })).toHaveCount(0, { timeout: 20_000 })
-  await expect(dialog.getByRole('article', { name: /^Comment by / }).last()).toContainText(
+  await expect(dialog.getByRole('article', { name: /^Comment by / }).first()).toContainText(
     'Deleted attachment notes.txt.',
   )
 })
@@ -266,8 +298,10 @@ test('an item dragged to Ready to Split is split, approved, executed, and accept
   const dialog = page.getByRole('dialog')
   const run = dialog.getByRole('listitem', { name: 'Run split attempt 1' })
   await expect(run).toContainText('succeeded')
+  // Where it was claimed from and where the engine moved it.
+  await expect(run).toContainText(/Ready to Split\s*→\s*to\s*Split Review/)
   await expect(dialog.getByRole('article', { name: 'Comment by Engine' })).toContainText(
-    'Rule split, attempt 1: succeeded, moved to split-review.',
+    'Rule split, attempt 1: succeeded. Splitting → Split Review.',
   )
 
   // The fake runner made two tasks, the second waiting for the first.
@@ -276,7 +310,7 @@ test('an item dragged to Ready to Split is split, approved, executed, and accept
   await expect(dialog.getByRole('listitem', { name: 'Task Build' })).toContainText(
     /Waits for [A-Z]+-\d+ Prepare/,
   )
-  await dialog.getByRole('button', { name: 'Approve' }).click()
+  await dialog.getByRole('button', { name: '→ In Progress' }).click()
   await expect(dialog).toBeHidden()
 
   // Rule execute picks it up where it is and walks both tasks to done.
@@ -298,12 +332,12 @@ test('an item dragged to Ready to Split is split, approved, executed, and accept
   await dialog.getByRole('listitem', { name: 'Task Build' }).getByRole('button').click()
   const task = page.getByRole('dialog').last()
   await expect(task.getByRole('article', { name: 'Comment by Engine' })).toHaveCount(3)
-  await expect(task.getByRole('article', { name: 'Comment by Engine' }).last()).toContainText(
-    'The agent moved it from in-review to done.',
+  await expect(task.getByRole('article', { name: 'Comment by Engine' }).first()).toContainText(
+    'The agent moved it In Review → Done.',
   )
   await task.getByRole('button', { name: 'Close' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(1)
-  await dialog.getByRole('button', { name: 'Accept' }).click()
+  await dialog.getByRole('button', { name: '→ Done' }).click()
   await expect(dialog).toBeHidden()
   await reloadUntilVisible(
     page,
@@ -359,7 +393,7 @@ test('tasks are fixed by hand in split review, and a task done by hand counts', 
   await expect(
     task
       .getByRole('article', { name: /^Comment by / })
-      .filter({ hasText: 'Moved from to-do to manual.' }),
+      .filter({ hasText: 'Moved To Do → Manual.' }),
   ).toBeVisible()
   await task.getByRole('button', { name: 'Mark done' }).click()
   await expect(task.getByRole('button', { name: 'Hand back' })).toHaveCount(0)
@@ -367,7 +401,7 @@ test('tasks are fixed by hand in split review, and a task done by hand counts', 
   await expect(dialog.getByRole('listitem', { name: 'Task Build by hand' })).toContainText('Done')
 
   // Nothing is left for the agent, so execute succeeds at once.
-  await dialog.getByRole('button', { name: 'Approve' }).click()
+  await dialog.getByRole('button', { name: '→ In Progress' }).click()
   await expect(dialog).toBeHidden()
   const inReview = page.getByRole('region', { name: /^In Review/ })
   await expect(inReview.getByRole('article', { name: title })).toContainText('1/1 tasks', {
@@ -401,7 +435,7 @@ test('a blocked item carries on once its manual task is done, and finished work 
   const task = page.getByRole('dialog').last()
 
   await open(/^Split Review/)
-  await dialog.getByRole('button', { name: 'Approve' }).click()
+  await dialog.getByRole('button', { name: '→ In Progress' }).click()
   await expect(dialog).toBeHidden()
 
   // Execute does Prepare and stops at the manual Build.
@@ -415,9 +449,9 @@ test('a blocked item carries on once its manual task is done, and finished work 
   // Nothing manual is left, so the engine picks it up again and finishes.
   await open(/^In Review/)
   await expect(dialog.getByRole('article', { name: 'Comment by Engine' })).toContainText([
-    'No task is manual any more. Moved back to in-progress for rule execute to carry on.',
+    'No task is manual any more. Moved Blocked → In Progress for rule execute to carry on.',
   ])
-  await dialog.getByRole('button', { name: 'Rework' }).click()
+  await dialog.getByRole('button', { name: '→ Ready to Rework' }).click()
   await expect(dialog.getByRole('button', { name: 'Send back for rework' })).toBeDisabled()
   await dialog.getByLabel('What to rework').fill('Build is missing the error page.')
   await dialog.getByRole('button', { name: 'Send back for rework' }).click()
@@ -430,7 +464,7 @@ test('a blocked item carries on once its manual task is done, and finished work 
   await dialog.getByRole('listitem', { name: 'Task Rework' }).getByRole('button').click()
   await expect(task).toContainText('Build is missing the error page.')
   await task.getByRole('button', { name: 'Close' }).click()
-  await dialog.getByRole('button', { name: 'Approve' }).click()
+  await dialog.getByRole('button', { name: '→ In Progress' }).click()
   await expect(dialog).toBeHidden()
   await expect(card(/^In Review/)).toContainText('3/3 tasks', { timeout: 90_000 })
 })
@@ -472,7 +506,7 @@ test('Stop ends a running agent and holds the item; released, it starts over', a
   await expect(dialog.getByRole('listitem', { name: 'Run split attempt 1' })).toContainText(
     'cancelled',
   )
-  await expect(dialog.getByRole('article', { name: 'Comment by Engine' }).last()).toContainText(
+  await expect(dialog.getByRole('article', { name: 'Comment by Engine' }).first()).toContainText(
     'Rule split, attempt 1: cancelled, a person pressed Stop. The engine moved nothing.',
   )
 

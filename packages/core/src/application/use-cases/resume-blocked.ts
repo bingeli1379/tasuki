@@ -1,4 +1,5 @@
 import type { Rule } from '../../domain/rule'
+import type { StatusNames } from '../../domain/workflow'
 import type { Ref } from '../../domain/work-unit'
 import { NotFound } from '../not-found'
 import type { RuntimeStorePort } from '../ports/runtime-store'
@@ -8,6 +9,7 @@ import { StatusConflict } from '../status-conflict'
 export interface ResumeDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
+  named: StatusNames
 }
 
 // Auto-resume (state-machine.md): an item whose last Run stopped at manual tasks goes back to
@@ -16,7 +18,7 @@ export interface ResumeDeps {
 // not record which ones did, and one a person added meanwhile is one more to wait for (D71).
 // Returns the refs it moved.
 export async function resumeBlocked(
-  { storage, runtime }: ResumeDeps,
+  { storage, runtime, named }: ResumeDeps,
   rules: readonly Rule[],
   holdLabel: string,
 ): Promise<Ref[]> {
@@ -50,7 +52,7 @@ export async function resumeBlocked(
       target: item.ref,
       author: 'engine',
       kind: 'system',
-      body: `No task is manual any more. Moved back to ${rule.watch} for rule ${rule.id} to carry on.`,
+      body: `No task is manual any more. Moved ${named(item.status)} → ${named(rule.watch)} for rule \`${rule.id}\` to carry on.`,
     })
     resumed.push(item.ref)
   }

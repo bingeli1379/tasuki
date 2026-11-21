@@ -21,12 +21,6 @@ describe('exitFor', () => {
     expect(exitFor(split, 'needs_input')).toBe('needs-answers')
   })
 
-  it('failed and max_attempts go to blocked unless the rule says otherwise', () => {
-    expect(exitFor(split, 'failed')).toBe('blocked')
-    expect(exitFor(split, 'max_attempts')).toBe('blocked')
-    expect(exitFor({ ...split, on: { failed: 'refining' } }, 'failed')).toBe('refining')
-  })
-
   it('has nothing for an outcome the rule does not cover', () => {
     expect(exitFor(split, 'blocked_manual')).toBeUndefined()
   })

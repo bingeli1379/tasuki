@@ -6,6 +6,8 @@ export interface NewRun {
   rule: string
   agent: string
   attempt: number
+  // The status the item was claimed from.
+  from: string
   workspace: string
   leaseSeconds: number
 }
@@ -25,7 +27,8 @@ export interface RuntimeStorePort {
   report(id: string, verdict: Verdict, summary: string): Promise<void>
   // Counts what the agent made, for checking its verdict later.
   bumpProduced(id: string, key: 'questions' | 'tasks'): Promise<void>
-  finishRun(id: string, outcome: Outcome): Promise<void>
+  // to: where the engine moved the item, when it moved it.
+  finishRun(id: string, outcome: Outcome, to?: string): Promise<void>
   // Only on a live Run. The first request's time stays. A later hard one turns a soft cancel
   // hard, and its reason replaces the soft one's: it is what ended the Run, e.g. Stop pressed
   // while the hold label it sets was already seen. Nothing turns a hard cancel back.

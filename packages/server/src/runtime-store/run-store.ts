@@ -26,6 +26,8 @@ function toRun(row: Row): Run {
     rule: String(row['rule']),
     agent: String(row['agent']),
     attempt: Number(row['attempt']),
+    ...optional('from', row['from_status']),
+    ...optional('to', row['to_status']),
     ...optional('sessionId', row['session_id']),
     workspace: String(row['workspace']),
     state: row['state'] as Run['state'],
@@ -72,15 +74,16 @@ export function createRuntimeStore(
       const now = clock.now().toISOString()
       try {
         db.prepare(
-          `INSERT INTO run (id, target, rule, agent, attempt, workspace, state, lease_until,
-             started_at, last_activity_at, log_path)
-           VALUES (?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
+          `INSERT INTO run (id, target, rule, agent, attempt, from_status, workspace, state,
+             lease_until, started_at, last_activity_at, log_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
         ).run(
           id,
           run.target,
           run.rule,
           run.agent,
           run.attempt,
+          run.from,
           run.workspace,
           later(run.leaseSeconds),
           now,
@@ -129,10 +132,10 @@ export function createRuntimeStore(
       const column = key === 'questions' ? 'produced_questions' : 'produced_tasks'
       db.prepare(`UPDATE run SET ${column} = ${column} + 1 WHERE id = ?`).run(id)
     },
-    async finishRun(id, outcome) {
+    async finishRun(id, outcome, to) {
       db.prepare(
-        "UPDATE run SET state = 'finished', outcome = ?, finished_at = ? WHERE id = ? AND state = 'running'",
-      ).run(outcome, clock.now().toISOString(), id)
+        "UPDATE run SET state = 'finished', outcome = ?, finished_at = ?, to_status = ? WHERE id = ? AND state = 'running'",
+      ).run(outcome, clock.now().toISOString(), to ?? null, id)
     },
     async requestCancel(id, mode, by) {
       db.prepare(

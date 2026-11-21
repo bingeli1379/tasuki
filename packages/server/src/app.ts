@@ -27,6 +27,7 @@ import {
   type Rule,
   type RuntimeStorePort,
   type StatusMap,
+  type Workflow,
   type StoragePort,
 } from '@tasuki/core'
 import { Hono } from 'hono'
@@ -51,6 +52,7 @@ export interface AppDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
   statuses: StatusMap
+  workflow: Workflow
   rules: readonly Rule[]
   holdLabel: string
   tokens: RunTokens
@@ -61,6 +63,7 @@ export function createApp({
   storage,
   runtime,
   statuses,
+  workflow,
   rules,
   holdLabel,
   tokens,
@@ -76,19 +79,11 @@ export function createApp({
   })
   app.get('/api/health', (c) => c.json({ ok: true, schemaVersion: schemaVersion(db) }))
   app.get('/api/board', async (c) =>
-    c.json(
-      await listBoard(
-        storage,
-        runtime,
-        { item: statuses.mapped('item'), task: statuses.mapped('task') },
-        rules,
-        holdLabel,
-      ),
-    ),
+    c.json(await listBoard(storage, runtime, workflow, statuses.mapped('task'), rules, holdLabel)),
   )
   app.post('/api/items', async (c) => {
     const body = await c.req.json<{ title?: unknown; body?: unknown }>()
-    const item = await createItem(storage, {
+    const item = await createItem(storage, workflow.roles.entry, {
       title: typeof body.title === 'string' ? body.title : '',
       body: typeof body.body === 'string' ? body.body : '',
     })
@@ -99,7 +94,7 @@ export function createApp({
     if (typeof body.from !== 'string' || typeof body.to !== 'string')
       throw new InvalidInput('from and to are required')
     return c.json(
-      await moveItem(storage, statuses.mapped('item'), {
+      await moveItem(storage, workflow, {
         ref: c.req.param('ref'),
         from: body.from,
         to: body.to,
@@ -110,7 +105,7 @@ export function createApp({
     const body = await c.req.json<{ from?: unknown; feedback?: unknown }>()
     if (typeof body.from !== 'string') throw new InvalidInput('from is required')
     return c.json(
-      await requestRework(storage, statuses.mapped('item'), {
+      await requestRework(storage, workflow, {
         ref: c.req.param('ref'),
         from: body.from,
         feedback: typeof body.feedback === 'string' ? body.feedback : '',
@@ -179,7 +174,7 @@ export function createApp({
     if (typeof body.expectedVersion !== 'string')
       throw new InvalidInput('expectedVersion is required')
     return c.json(
-      await updateTask(storage, {
+      await updateTask(storage, workflow.roles.taskReview, {
         ref: c.req.param('ref'),
         expectedVersion: body.expectedVersion,
         ...(typeof body.title === 'string' ? { title: body.title } : {}),
@@ -188,7 +183,7 @@ export function createApp({
     )
   })
   app.delete('/api/tasks/:ref', async (c) => {
-    await deleteTask(storage, c.req.param('ref'))
+    await deleteTask(storage, workflow.roles.taskReview, c.req.param('ref'))
     return c.json({ ok: true })
   })
   app.post('/api/tasks/:ref/comments', async (c) => {
@@ -237,7 +232,9 @@ export function createApp({
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ storage, runtime, statuses, rules, holdLabel }).connect(transport)
+    await createMcpServer({ storage, runtime, statuses, workflow, rules, holdLabel }).connect(
+      transport,
+    )
     return transport.handleRequest(c.req.raw)
   })
   // The facade for agents the engine started: only a live Run's token gets in.

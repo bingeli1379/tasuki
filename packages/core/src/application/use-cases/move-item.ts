@@ -1,4 +1,5 @@
 import type { Ref, WorkUnit } from '../../domain/work-unit'
+import { itemStatusNames, type Workflow } from '../../domain/workflow'
 import { InvalidInput } from '../invalid-input'
 import type { StoragePort } from '../ports/storage'
 import { logAction } from './log-action'
@@ -10,17 +11,19 @@ export interface MoveItemInput {
 }
 
 // A person moves an item: any status to any status (state-machine.md), as long as the
-// config maps the target. `from` is what the person saw, so a move made on stale data
+// workflow lists the target. `from` is what the person saw, so a move made on stale data
 // fails with StatusConflict instead of overwriting someone else's.
 export async function moveItem(
   storage: StoragePort,
-  mapped: readonly string[],
+  workflow: Workflow,
   input: MoveItemInput,
 ): Promise<WorkUnit> {
   for (const status of [input.from, input.to])
-    if (!mapped.includes(status)) throw new InvalidInput(`status "${status}" is not on the board`)
+    if (!workflow.statuses.some((s) => s.id === status))
+      throw new InvalidInput(`status "${status}" is not on the board`)
   if (input.from === input.to) throw new InvalidInput(`${input.ref} is already in ${input.to}`)
   const moved = await storage.transition(input.ref, input.from, input.to)
-  await logAction(storage, input.ref, `Moved from ${input.from} to ${input.to}.`)
+  const named = itemStatusNames(workflow)
+  await logAction(storage, input.ref, `Moved ${named(input.from)} → ${named(input.to)}.`)
   return moved
 }

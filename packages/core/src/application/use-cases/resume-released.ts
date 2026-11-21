@@ -1,4 +1,5 @@
 import type { Rule } from '../../domain/rule'
+import type { StatusNames } from '../../domain/workflow'
 import type { Ref } from '../../domain/work-unit'
 import { NotFound } from '../not-found'
 import type { RuntimeStorePort } from '../ports/runtime-store'
@@ -8,6 +9,7 @@ import { StatusConflict } from '../status-conflict'
 export interface ReleasedDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
+  named: StatusNames
 }
 
 // A Run cancelled by Stop, hold or pausing with every Run stopped leaves the item where it was
@@ -16,7 +18,7 @@ export interface ReleasedDeps {
 // status needs nothing here. A paused engine claims nothing, so these wait in watch.
 // Returns the refs it moved.
 export async function resumeReleased(
-  { storage, runtime }: ReleasedDeps,
+  { storage, runtime, named }: ReleasedDeps,
   rules: readonly Rule[],
   holdLabel: string,
 ): Promise<Ref[]> {
@@ -45,8 +47,8 @@ export async function resumeReleased(
       kind: 'system',
       body:
         latest?.cancelRequestedBy === 'pause'
-          ? `Stopped by pausing the engine. Moved back to ${rule.watch} for rule ${rule.id} to start again.`
-          : `The hold is off. Moved back to ${rule.watch} for rule ${rule.id} to start again.`,
+          ? `Stopped by pausing the engine. Moved ${named(rule.claim)} → ${named(rule.watch)} for rule \`${rule.id}\` to start again.`
+          : `The hold is off. Moved ${named(rule.claim)} → ${named(rule.watch)} for rule \`${rule.id}\` to start again.`,
     })
     moved.push(item.ref)
   }

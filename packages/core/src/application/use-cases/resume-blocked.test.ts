@@ -56,6 +56,7 @@ const setup = (opts: {
   const moves: string[] = []
   const comments: NewComment[] = []
   const deps = {
+    named: (s: string) => s,
     storage: storageStub({
       list: () => Promise.resolve([unit('X-1', opts.item)]),
       children: () =>
@@ -114,9 +115,13 @@ describe('resumeBlocked', () => {
 
   it('asks the tracker nothing while no Run stopped at manual tasks', async () => {
     const runtime = runtimeStub({ latestRunsEndedIn: () => Promise.resolve([]) })
-    expect(await resumeBlocked({ storage: storageStub({}), runtime }, [execute], 'hold')).toEqual(
-      [],
-    )
+    expect(
+      await resumeBlocked(
+        { storage: storageStub({}), runtime, named: (s) => s },
+        [execute],
+        'hold',
+      ),
+    ).toEqual([])
   })
 
   it('reads nothing when no rule parks items on manual tasks', async () => {
@@ -127,7 +132,11 @@ describe('resumeBlocked', () => {
       on: { succeeded: 'split-review' },
     }
     expect(
-      await resumeBlocked({ storage: storageStub({}), runtime: runtimeStub({}) }, [split], 'hold'),
+      await resumeBlocked(
+        { storage: storageStub({}), runtime: runtimeStub({}), named: (s) => s },
+        [split],
+        'hold',
+      ),
     ).toEqual([])
   })
 })

@@ -15,8 +15,9 @@ import { TASK_COLOR } from '../task-status'
 
 const props = defineProps<{
   taskRef: string
-  // The item's status: tasks are edited and deleted only in split-review.
+  // Tasks are edited and deleted only while the item is in the taskReview status.
   itemStatus: string
+  taskReview: string | undefined
   taskTitle: (ref: string) => string
 }>()
 // The item detail reads its task list again after any change made here.
@@ -38,15 +39,20 @@ const editorUi = {
   content: 'markdown [&_.ProseMirror]:min-h-[30vh] [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2',
 }
 
-const editable = computed(() => props.itemStatus === 'split-review')
+const editable = computed(
+  () => props.taskReview !== undefined && props.itemStatus === props.taskReview,
+)
 const body = computed(() =>
   detail.value ? renderMarkdown(detail.value.task.body, detail.value.task.ref) : '',
 )
+// Newest first on screen. The API keeps them oldest first, the order agents read them in.
 const comments = computed(() =>
-  (detail.value?.comments ?? []).map((c) => ({
-    ...c,
-    html: renderMarkdown(c.body, props.taskRef),
-  })),
+  (detail.value?.comments ?? [])
+    .map((c) => ({
+      ...c,
+      html: renderMarkdown(c.body, props.taskRef),
+    }))
+    .reverse(),
 )
 // The person's edges of the task diagram (state-machine.md, D74).
 const moves = computed((): { label: string; to: string }[] => {
@@ -317,6 +323,18 @@ const authorOf = (c: Comment): string =>
 
           <section aria-labelledby="task-comments-heading" class="flex flex-col gap-3">
             <h3 id="task-comments-heading" class="text-sm font-medium">Comments</h3>
+            <form class="flex flex-col gap-2" @submit.prevent="addComment">
+              <UFormField label="Add a comment">
+                <UTextarea v-model="commentDraft" :rows="2" autoresize class="w-full" />
+              </UFormField>
+              <UButton
+                type="submit"
+                label="Comment"
+                :loading="busy"
+                :disabled="commentDraft.trim() === ''"
+                class="self-end"
+              />
+            </form>
             <p v-if="comments.length === 0" class="text-sm text-muted">No comments yet.</p>
             <article
               v-for="c in comments"
@@ -332,18 +350,6 @@ const authorOf = (c: Comment): string =>
               <!-- eslint-disable-next-line vue/no-v-html -- markdown-it with html disabled -->
               <div class="markdown" v-html="c.html" />
             </article>
-            <form class="flex flex-col gap-2" @submit.prevent="addComment">
-              <UFormField label="Add a comment">
-                <UTextarea v-model="commentDraft" :rows="2" autoresize class="w-full" />
-              </UFormField>
-              <UButton
-                type="submit"
-                label="Comment"
-                :loading="busy"
-                :disabled="commentDraft.trim() === ''"
-                class="self-end"
-              />
-            </form>
           </section>
         </template>
       </div>

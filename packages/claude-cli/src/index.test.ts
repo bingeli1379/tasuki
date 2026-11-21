@@ -1,6 +1,6 @@
 import {
   createStatusMap,
-  ITEM_STATUS_DISPLAY,
+  DEFAULT_WORKFLOW,
   TASK_STATUS_DISPLAY,
   type RunExit,
   type RunnerPort,
@@ -55,7 +55,10 @@ function setup(fake = '', extra: Record<string, unknown> = {}) {
       clock: { now: () => new Date() },
       configDir: dir,
       dataDir: dir,
-      statuses: createStatusMap({ item: ITEM_STATUS_DISPLAY, task: TASK_STATUS_DISPLAY }),
+      statuses: createStatusMap({
+        item: Object.fromEntries(DEFAULT_WORKFLOW.statuses.map((s) => [s.id, s.name])),
+        task: TASK_STATUS_DISPLAY,
+      }),
     },
     { command, env: { FAKE: fake, FAKE_OUT: out }, ...extra },
   ) as RunnerPort

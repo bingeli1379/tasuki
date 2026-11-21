@@ -1,5 +1,5 @@
 import { serve } from '@hono/node-server'
-import { createStatusMap, type Clock, type RunnerPort } from '@tasuki/core'
+import { createStatusMap, itemStatusNames, type Clock, type RunnerPort } from '@tasuki/core'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createApp } from './app'
@@ -44,6 +44,7 @@ try {
       storage,
       runtime,
       statuses,
+      workflow: config.workflow,
       rules: config.rules,
       holdLabel: config.holdLabel,
       tokens,
@@ -56,6 +57,7 @@ try {
     runtime,
     clock: systemClock,
     rules: config.rules,
+    named: itemStatusNames(config.workflow),
     limits: config.limits,
     holdLabel: config.holdLabel,
     workspaceRoot: join(config.dataDir, 'workspaces'),

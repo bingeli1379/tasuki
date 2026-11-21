@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { Roles } from '@tasuki/core'
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { ApiError, call, messageOf, sendJson, type Item } from './api'
 import ItemDetail from './components/ItemDetail.vue'
@@ -8,11 +9,13 @@ import { previewText } from './markdown'
 interface Column {
   status: string
   displayName: string
-  turn?: 'engine' | 'person'
+  handledBy?: 'engine' | 'person'
+  // What a person can conclude in this status: button label -> where the item goes.
+  outcomes: Record<string, string>
   items: Item[]
 }
 
-const TURN = {
+const HANDLED_BY = {
   engine: {
     icon: 'i-lucide-radar',
     color: 'text-info',
@@ -28,6 +31,7 @@ const stopping = ref<string[]>([])
 const loaded = ref(false)
 const holdLabel = ref('hold')
 const paused = ref(false)
+const roles = ref<Roles>()
 const tasks = ref<Record<string, { done: number; total: number }>>({})
 const error = ref('')
 const open = ref(false)
@@ -104,6 +108,7 @@ async function load(): Promise<void> {
       stopping: string[]
       tasks: Record<string, { done: number; total: number }>
       holdLabel: string
+      roles: Roles
       paused: boolean
     }>('/api/board')
     columns.value = board.columns
@@ -122,6 +127,7 @@ async function load(): Promise<void> {
     stopping.value = board.stopping
     holdLabel.value = board.holdLabel
     paused.value = board.paused
+    roles.value = board.roles
     tasks.value = board.tasks
     error.value = ''
   } catch (e) {
@@ -194,8 +200,8 @@ async function create(): Promise<void> {
   }
 }
 
-// Ready to Rework takes a word on what to fix, as the Rework button does: the agent has
-// nothing else to go on (D75).
+// The rework status takes a word on what to fix, wherever the move comes from: the agent
+// has nothing else to go on (D75).
 const reworkOf = ref<Item>()
 const reworkNote = ref('')
 const reworkOpen = computed({
@@ -207,14 +213,15 @@ const reworkOpen = computed({
 
 async function sendRework(): Promise<void> {
   const item = reworkOf.value
-  if (!item) return
+  const to = roles.value?.rework
+  if (!item || to === undefined) return
   reworkOf.value = undefined
-  await move(item, 'ready-to-rework', reworkNote.value)
+  await move(item, to, reworkNote.value)
 }
 
 async function move(item: Item, to: string, feedback?: string): Promise<void> {
   if (item.status === to || pending.value.includes(item.ref)) return
-  if (to === 'ready-to-rework' && feedback === undefined) {
+  if (to === roles.value?.rework && feedback === undefined) {
     reworkNote.value = ''
     reworkOf.value = item
     return
@@ -458,12 +465,20 @@ onMounted(load)
               class="flex items-center justify-between px-1.5 pt-1 pb-1 text-[15px] font-semibold"
             >
               <span class="flex items-center gap-1.5">
-                <UTooltip v-if="column.turn" :text="TURN[column.turn].hint" :delay-duration="100">
-                  <span role="img" :aria-label="TURN[column.turn].hint" class="flex cursor-help">
+                <UTooltip
+                  v-if="column.handledBy"
+                  :text="HANDLED_BY[column.handledBy].hint"
+                  :delay-duration="100"
+                >
+                  <span
+                    role="img"
+                    :aria-label="HANDLED_BY[column.handledBy].hint"
+                    class="flex cursor-help"
+                  >
                     <UIcon
-                      :name="TURN[column.turn].icon"
+                      :name="HANDLED_BY[column.handledBy].icon"
                       class="size-4"
-                      :class="TURN[column.turn].color"
+                      :class="HANDLED_BY[column.handledBy].color"
                     />
                   </span>
                 </UTooltip>
@@ -543,7 +558,7 @@ onMounted(load)
     </div>
     <!-- Keyed: each item gets a fresh editor, whose image extension is bound to its ref. -->
     <ItemDetail
-      v-if="detailRef"
+      v-if="detailRef && roles"
       :key="detailRef"
       v-model:open="detailOpen"
       :item-ref="detailRef"
@@ -552,6 +567,7 @@ onMounted(load)
       :initial="detailItem"
       :seen="detailSeen"
       :columns="columns"
+      :roles="roles"
       @updated="updated"
       @move="(to) => detailItem && move(detailItem, to)"
       @deleted="deleted"

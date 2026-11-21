@@ -19,6 +19,11 @@ export interface Run {
   rule: string
   agent: string
   attempt: number
+  // The status the item was claimed from, and where the engine moved it when the Run ended.
+  // Kept as they were then: the workflow may change later. Runs from before D82 have neither,
+  // and to stays unset when the engine moved nothing (cancelled, abandoned).
+  from?: string
+  to?: string
   // The agent session this Run ran in, once the runner knows it.
   sessionId?: string
   workspace: string

@@ -64,4 +64,7 @@ export const RUNTIME_MIGRATIONS: readonly string[] = [
   CREATE INDEX run_by_target ON run(target, started_at DESC);`,
   // S8: the agent session a Run ran in, for the next Run on the item to resume.
   `ALTER TABLE run ADD COLUMN session_id TEXT;`,
+  // D82: where the item was claimed from and where the engine moved it, as they were then.
+  `ALTER TABLE run ADD COLUMN from_status TEXT;
+  ALTER TABLE run ADD COLUMN to_status TEXT;`,
 ]

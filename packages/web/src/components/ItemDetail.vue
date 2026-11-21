@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { TASK_STATUS_DISPLAY } from '@tasuki/core'
+import { TASK_STATUS_DISPLAY, type Roles } from '@tasuki/core'
 import { computed, ref, useTemplateRef, watch } from 'vue'
 import {
   ApiError,
@@ -33,7 +33,8 @@ const props = defineProps<{
   initial?: Item | undefined
   // Changes whenever the board sees this item change (status, version, Run): read again.
   seen: string
-  columns: { status: string; displayName: string }[]
+  columns: { status: string; displayName: string; outcomes: Record<string, string> }[]
+  roles: Roles
 }>()
 const emit = defineEmits<{ updated: [item: Item]; move: [to: string]; deleted: [ref: string] }>()
 const open = defineModel<boolean>('open', { required: true })
@@ -87,12 +88,12 @@ const more = computed(() => [
     icon: 'i-lucide-columns-3',
     children: props.columns
       .filter((c) => c.status !== item.value?.status)
-      // Ready to Rework asks what to fix right here: a dialog of the board's own would sit
+      // The rework status asks what to fix right here: a dialog of the board's own would sit
       // under this one, which takes every click outside itself.
       .map((c) => ({
         label: c.displayName,
         onSelect: () =>
-          c.status === 'ready-to-rework' ? (reworking.value = true) : emit('move', c.status),
+          c.status === props.roles.rework ? (reworking.value = true) : emit('move', c.status),
       })),
   },
   {
@@ -104,11 +105,14 @@ const more = computed(() => [
 ])
 
 const body = computed(() => (item.value ? renderMarkdown(item.value.body, item.value.ref) : ''))
+// Newest first on screen. The API keeps them oldest first, the order agents read them in.
 const comments = computed(() =>
-  (detail.value?.comments ?? []).map((c) => ({
-    ...c,
-    html: renderMarkdown(c.body, props.itemRef),
-  })),
+  (detail.value?.comments ?? [])
+    .map((c) => ({
+      ...c,
+      html: renderMarkdown(c.body, props.itemRef),
+    }))
+    .reverse(),
 )
 
 // Bumped by every change made here. A read that started before one does not have it, and
@@ -320,8 +324,12 @@ async function remove(): Promise<void> {
   }
 }
 
-// split-review is where a person checks the tasks before any of them runs, in-review where
-// they accept the finished work or send it back with what to fix.
+// What a person can conclude in the item's status, as the workflow lists it. Going to the
+// rework status asks what to fix first.
+const outcomes = computed(() =>
+  Object.entries(props.columns.find((c) => c.status === item.value?.status)?.outcomes ?? {}),
+)
+
 async function decide(to: string): Promise<void> {
   const current = detail.value
   if (!current) return
@@ -329,7 +337,7 @@ async function decide(to: string): Promise<void> {
   try {
     const ref = encodeURIComponent(current.item.ref)
     const item = await call<Item>(
-      to === 'ready-to-rework' ? `/api/items/${ref}/rework` : `/api/items/${ref}/transition`,
+      to === props.roles.rework ? `/api/items/${ref}/rework` : `/api/items/${ref}/transition`,
       sendJson('POST', { from: current.item.status, to, feedback: reworkDraft.value }),
     )
     if (detail.value) detail.value.item = item
@@ -389,7 +397,12 @@ const authorOf = (c: Comment): string =>
     v-model:open="open"
     :title="item?.ref ?? itemRef"
     :description="item ? statusName(item.status) : 'Loading…'"
-    :ui="{ content: 'sm:max-w-5xl', header: 'py-3 sm:py-3 min-h-0', close: 'top-2 end-4' }"
+    :ui="{
+      content: 'sm:max-w-5xl',
+      header: 'py-3 sm:py-3 min-h-0',
+      description: 'sr-only',
+      close: 'top-1.5 end-4',
+    }"
   >
     <!-- Ref and status on one quiet line; the item's own title below is the heading. -->
     <template #title>
@@ -403,9 +416,6 @@ const authorOf = (c: Comment): string =>
           size="sm"
         />
       </span>
-    </template>
-    <template #description>
-      <span class="sr-only">{{ item ? statusName(item.status) : 'Loading…' }}</span>
     </template>
     <template #body>
       <div class="flex flex-col gap-8">
@@ -518,7 +528,7 @@ const authorOf = (c: Comment): string =>
           <form
             v-if="reworking"
             class="flex flex-col gap-2"
-            @submit.prevent="decide('ready-to-rework')"
+            @submit.prevent="roles.rework && decide(roles.rework)"
           >
             <UFormField
               label="What to rework"
@@ -556,37 +566,17 @@ const authorOf = (c: Comment): string =>
               <section aria-labelledby="tasks-heading" class="flex flex-col gap-2">
                 <div class="flex items-center justify-between gap-2">
                   <h3 id="tasks-heading" class="text-sm font-semibold text-highlighted">Tasks</h3>
-                  <span v-if="detail.item.status === 'split-review'" class="flex gap-2">
+                  <!-- The last outcome is the way forward, so it is the solid one. -->
+                  <span v-if="outcomes.length > 0" class="flex gap-2">
                     <UButton
-                      label="Send back to Refining"
-                      color="neutral"
-                      variant="outline"
+                      v-for="([label, to], i) in outcomes"
+                      :key="label"
+                      :label="label"
                       size="sm"
+                      :color="i === outcomes.length - 1 ? 'primary' : 'neutral'"
+                      :variant="i === outcomes.length - 1 ? 'solid' : 'outline'"
                       :disabled="moving"
-                      @click="decide('refining')"
-                    />
-                    <UButton
-                      label="Approve and start"
-                      size="sm"
-                      :loading="moving"
-                      :disabled="detail.tasks.length === 0"
-                      @click="decide('in-progress')"
-                    />
-                  </span>
-                  <span v-else-if="detail.item.status === 'in-review'" class="flex gap-2">
-                    <UButton
-                      label="Rework"
-                      color="neutral"
-                      variant="outline"
-                      size="sm"
-                      :disabled="moving"
-                      @click="reworking = true"
-                    />
-                    <UButton
-                      label="Accept as done"
-                      size="sm"
-                      :loading="moving"
-                      @click="decide('done')"
+                      @click="to === roles.rework ? (reworking = true) : decide(to)"
                     />
                   </span>
                 </div>
@@ -628,6 +618,18 @@ const authorOf = (c: Comment): string =>
                 <h3 id="comments-heading" class="text-sm font-semibold text-highlighted">
                   Comments
                 </h3>
+                <form class="flex flex-col gap-2" @submit.prevent="addComment">
+                  <UFormField label="Add a comment">
+                    <UTextarea v-model="commentDraft" :rows="3" autoresize class="w-full" />
+                  </UFormField>
+                  <UButton
+                    type="submit"
+                    label="Comment"
+                    :loading="commenting"
+                    :disabled="commentDraft.trim() === ''"
+                    class="self-end"
+                  />
+                </form>
                 <p v-if="comments.length === 0" class="text-sm text-muted">No comments yet.</p>
                 <article
                   v-for="c in comments"
@@ -645,18 +647,6 @@ const authorOf = (c: Comment): string =>
                   <!-- eslint-disable-next-line vue/no-v-html -- markdown-it with html disabled -->
                   <div class="markdown" v-html="c.html" />
                 </article>
-                <form class="flex flex-col gap-2" @submit.prevent="addComment">
-                  <UFormField label="Add a comment">
-                    <UTextarea v-model="commentDraft" :rows="3" autoresize class="w-full" />
-                  </UFormField>
-                  <UButton
-                    type="submit"
-                    label="Comment"
-                    :loading="commenting"
-                    :disabled="commentDraft.trim() === ''"
-                    class="self-end"
-                  />
-                </form>
               </section>
             </div>
             <aside
@@ -784,13 +774,33 @@ const authorOf = (c: Comment): string =>
                     class="flex flex-col gap-0.5 text-sm"
                   >
                     <span class="flex items-center gap-2">
-                      <span>{{ r.rule }}, attempt {{ r.attempt }}</span>
+                      <span
+                        ><code class="font-mono">{{ r.rule }}</code>, attempt {{ r.attempt }}</span
+                      >
                       <UBadge
                         :label="r.outcome ?? (r.cancelMode === undefined ? 'running' : 'stopping')"
                         :color="outcomeColor(r)"
                         variant="subtle"
                         size="sm"
                       />
+                    </span>
+                    <span v-if="r.from" class="flex flex-wrap items-center gap-1">
+                      <UBadge
+                        :label="statusName(r.from)"
+                        color="neutral"
+                        variant="outline"
+                        size="sm"
+                      />
+                      <template v-if="r.to">
+                        <span aria-hidden="true" class="text-muted">→</span>
+                        <span class="sr-only">to</span>
+                        <UBadge
+                          :label="statusName(r.to)"
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                        />
+                      </template>
                     </span>
                     <time :datetime="r.startedAt" class="text-xs text-muted">
                       {{ new Date(r.startedAt).toLocaleString() }}
@@ -806,6 +816,7 @@ const authorOf = (c: Comment): string =>
             v-model:open="taskOpen"
             :task-ref="openTask"
             :item-status="detail.item.status"
+            :task-review="roles.taskReview"
             :task-title="taskTitle"
             @changed="load"
           />
