@@ -84,6 +84,7 @@ interface StoragePort {
   attachments(target: Ref): Promise<Attachment[]>
   addAttachment(target: Ref, a: NewAttachment): Promise<Attachment>
   readAttachment(target: Ref, id: string): Promise<{ attachment: Attachment; data: Uint8Array }>
+  deleteAttachment(target: Ref, id: string): Promise<void>
   // children and dependencies see a task the moment it exists, unlike list: verdicts are checked against them
   createTask(item: Ref, t: NewTask): Promise<WorkUnit>   // throws InvalidInput when blockedBy is not a task of item
   deleteTask(ref: Ref): Promise<void>         // with its dependencies either way and comments; the ref is never reused (D70)
