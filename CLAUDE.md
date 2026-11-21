@@ -32,7 +32,7 @@
 - 切片開始前先講清楚這個功能的場景（誰做什麼、畫面看到什麼、資料怎麼變），再往下實作。
 - core 只長出該切片需要的型別與規則。DB 的表在用到的切片才寫成 migration。
 - 本機跑：根目錄 `pnpm dev`，先整包 build，再同時起 server（`vp pack --watch`，改了自動重 build 重啟）與 web。要分開起：`pnpm build`，然後 `node packages/server/dist/index.mjs`（讀根目錄的 `tasuki.config.jsonc`，另一份用 `--config <路徑>` 指定；8787，資料在 config 的 `dataDir`）與在 `packages/web` 跑 `pnpm exec vp dev`（5173，要用 `localhost`）。
-- Jira：根目錄 `.env` 放 `JIRA_*`，`jira-cloud` 的契約測試與 E2E 的 `jira` project 讀到就打 KAN 測試 project，讀不到就 skip（CI 不跑）。跑 Jira 的測試前先關掉接著 KAN 的 `pnpm dev`，兩個 engine 會搶同一張 item（D66）。`pnpm test` 與 `pnpm e2e` 也分開跑，同時打 KAN 時契約測試曾經等超過 10 秒還搜不到剛建的 item。
+- Jira：根目錄 `.env` 放 `JIRA_*`，`jira-cloud` 的契約測試與 E2E 的 `jira` project 讀到就打 KAN 測試 project，讀不到就 skip（CI 不跑）。跑 Jira 的測試前先關掉接著 KAN 的 `pnpm dev`，兩個 engine 會搶同一張 item（D66）。`pnpm test` 與 `pnpm e2e` 也分開跑，同時打 KAN 時契約測試曾經等超過 10 秒還搜不到剛建的 item。E2E 的 `jira` project 開跑前會刪光 KAN 上所有的 item（D83），手動放在 KAN 上的卡跑一次就沒了。
 - 測試分三層（D55），寫能擋住功能壞掉的，不為了覆蓋率寫：單元測 domain 與 use case，整合測 plugin 契約（`testkit`）與 server（`app.request`、plugin 載入），E2E 每個切片一條主路徑。`pnpm test` 跑前兩層，`pnpm e2e` 要先 `pnpm build`，會自己起 server 與 web（8788/5180，Jira 是 8789/5181）。
 - `pnpm check` 包含 `.vue` template 的型別檢查（D53）。`pnpm install` 會裝 pre-commit hook，對 staged 檔案跑 `vp check --fix`。
 

@@ -5,6 +5,8 @@ Jira / sqlite 的實際名稱靠 config 的 status mapping 對應，這份文件
 
 名詞以 glossary.md 為準，欄位細節以 data-model.md 為準。
 
+下面的十站是預設流程。站可以在 config 的 `workflow` 自己列，程式只認角色不認名字（D78、D81）：`entry` 是 `refining`、`failure` 是 `blocked`、`taskReview` 是 `split-review`、`rework` 是 `ready-to-rework`、`done` 是 `done`。這份文件寫到站名的地方，換了流程就讀成扮演那個角色的站。
+
 ## Item
 
 ```mermaid
@@ -42,15 +44,17 @@ stateDiagram-v2
 
 人可以把 item 從任何狀態移到任何狀態。特別注意 `blocked` 的出口不限於 `in-progress`，補完資料後可以直接拉去 `ready-to-rework`。
 
-### 輪到誰
+### 誰處理
 
-看板每欄標出接下來誰動（D68）：
+看板每欄標出這站誰處理（D68，D81 改名 `handledBy`）：
 
 - engine：有規則 `watch` 這個 status，從 config 算，沒掛規則就不標。
-- 人：`needs-answers`、`split-review`、`in-review`、`blocked`。沒有規則會把 item 移出這幾欄。`blocked` 雖然有自動接回，前提是人先把 manual task 做完。
-- 不標：`refining`（人自己在寫，不是在等確認）、claim status（卡片上已經有 Running）、`done`。
+- 人：站設了 `handledBy: "person"`。預設流程是 `needs-answers`、`split-review`、`in-review`、`blocked`，沒有規則會把 item 移出這幾欄。`blocked` 雖然有自動接回，前提是人先把 manual task 做完。
+- 不標：兩者都沒有。預設流程是 `refining`（人自己在寫，不是在等確認）、claim status（卡片上已經有 Running）、`done`。
 
-使用者在 config 讓規則 watch 一個「人」的 status 時，標 engine，因為 engine 會去撿。
+一站設了 `handledBy: "person"` 又被規則 watch 時，標 engine，因為 engine 會去撿。
+
+人在詳情看到的決定按鈕是站上的 `outcomes`，按下去就是移到那一站。預設流程只有兩站有：`split-review` 是 `→ Refining` 與 `→ In Progress`，`in-review` 是 `→ Ready to Rework` 與 `→ Done`。按鈕字用中性的「箭頭加目標站」，不寫死批准、打回這類動作（D82）。
 
 ### Auto-resume (`blocked` -> `in-progress`)
 
@@ -104,7 +108,7 @@ stateDiagram-v2
 
 - engine 不重開 `done`，agent 也不行。rework 一律開新 task。
 - 人走的邊：`to-do`、`in-progress` 接手成 `manual`，`manual` 交回 `to-do` 或做完成 `done`，按錯時把 `done` 改回 `to-do` 或 `manual`。改回去只在 item 沒有存活的 Run 時可以，agent 可能正依賴它是 done（D74）。不在這些邊上的移動拒絕（domain 的 `personMoveRefusal`）。
-- 人在看板或使用者 MCP 的每個操作（移動 item 或 task、hold、release、Stop）都留一則 author 是人、kind 是 `system` 的 comment，例如「Moved from manual to done.」。誰、什麼時候由 comment 本身記著。用 `system` 不用 `note`，因為 rework 的 agent 把人最新的 note 當成回饋（D74）。
+- 人在看板或使用者 MCP 的每個操作（移動 item 或 task、hold、release、Stop）都留一則 author 是人、kind 是 `system` 的 comment，例如「Moved **Manual** → **Done**.」（D82）。誰、什麼時候由 comment 本身記著。用 `system` 不用 `note`，因為 rework 的 agent 把人最新的 note 當成回饋（D74）。
 - 人只能在 item 是 `split-review` 時改 task 的 title、body，或刪掉 task（D70）。
 - 目前 orchestrator 一個 item 起一個 process（M1），engine 看不到裡面的 subagent。把執行中的 task 改成 `manual` 只是 soft stop，之後不再派它。要立刻停掉那張 task，只能 hard stop 整個 orchestrator。
 - task 層的「review 沒過重做幾次」engine 管不到，由 orchestrator 的 prompt 約束。item 層用 Run 的重試次數與用量設上限。

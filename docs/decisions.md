@@ -679,3 +679,42 @@
 - 已知限制：只檢查附件所屬那張 unit 的 body。comment 的 markdown 也會把 `attachment:<id>` 畫成圖，但畫面上沒有插入附件到 comment 的方法，所以不檢查。
 - 重新檢視：comment 能插入附件時，檢查要擴大到 comment。
 
+## D81 W1：status 自訂，角色、`handledBy`、站上的 `outcomes`
+
+- 背景：照 D78 做 W1。custom-workflow.md 只定了概念，沒寫 config 長什麼樣子，也沒處理詳情裡寫死站名的決定按鈕（`split-review` 的 Send back / Approve、`in-review` 的 Rework / Accept）。作者說還沒人在用，結構可以大改、不顧兼容。
+- 決定：
+  - config 的頂層 `statuses` 拿掉，換成 `workflow`：`statuses` 是一個陣列，順序就是看板的順序，每站是 `id`（邏輯名，kebab-case）、`name`（省略時是 id 的 Title Case）、`key`（tracker 的 status，省略時是 name）、`handledBy`、`outcomes`；`roles` 是一個 map，指出五個角色各是哪一站；`taskStatuses` 是 task 五個 status 的對照。舊寫法啟動就報錯，叫人搬進 `workflow`。省略 `workflow` 時是預設十站。
+  - 角色放 map 不寫在站上：map 天生一個角色只有一個值，不用另外驗重複。
+  - D78 的 `waitsFor: "human"` 改名 `handledBy: "person"`，看板 API 的 `turn` 也改名 `handledBy`，從 config 到畫面同一個詞。作者覺得 turn 像回合制遊戲，要的語意是「這站誰處理」。`engine` 不給手寫，有規則 watch 才是，手寫的雷達會在沒規則時說謊（D68）。`assignee` 會撞 Jira 的欄位，`owner` 像在講誰有權限改設定，都沒選。
+  - 人的決定按鈕改成站上的 `outcomes`：按鈕字到下一站，按下去就是移過去，不帶別的行為。跟 W2 規則上給 agent 的 `outcomes` 同名同形，一邊是 agent 的結論、一邊是人的結論。最後一個是實心的主按鈕。目標是 `rework` 角色那站時，照 D75 先問改什麼，這件事看目標站的角色，不看是哪顆按鈕。預設流程填好原本那四顆，字沒變。
+  - 原本 `split-review` 沒有 task 時 Approve 是灰的，這個條件拿掉：按鈕是通用的，放不了這種條件；execute 底下沒有 task 時 `succeeded` 照字面成立（D69），最多空跑一次。
+  - 規則沒寫 `on.failed`、`on.max_attempts` 時，讀 config 就填成 `failure` 那站，core 的 `exitFor` 不再寫死 `blocked`。W2 把 `on` 併進 `outcomes` 時照搬。
+  - use case 只收它要的角色：`createItem` 收 `entry`，`updateTask`、`deleteTask` 收 `taskReview`（沒有就一律拒絕），`requestRework` 收 `rework`（沒有就拒絕）。`listBoard` 改收整份 workflow，回傳每欄的 `outcomes` 與整個 `roles`。使用者 MCP 的 tool 說明照角色填站名，不再寫死 `refining`、`split-review`、`ready-to-rework`（D57）。
+  - tracker plugin 不變：config 從每站的 `key` 算出原本那份 `StatusMapping` 交給它。
+  - E2E：兩組都在預設十站後面多一站 `triage`（`handledBy: "person"`，一顆 Send to split），新的一條驗它成為一欄、眼睛與雷達標對、按鈕把 item 送進下一站。
+  - KAN 的設定（2026-11-21）：照 D59 的方法用 `POST /rest/api/3/workflows/update` 加了 `Triage`（`10013`，category TODO）與一條 GLOBAL 轉移，workflow 從版本 6 變 7。`.env` 的 `JIRA_TEST_ITEM_STATUSES` 多一個 `triage`。
+- 已知限制：`done` 角色必填、會出現在看板的 `roles` 裡，但目前沒有程式依它做事。站上的按鈕放在詳情 Tasks 標題的右邊，沒有 task 的自訂站也一樣放在那裡。
+- 取代：D68 的 `turn`（改名 `handledBy`）與寫死的 `AWAITING_PERSON`；D78 的 `waitsFor`；D51「看板只顯示有對照的 status」改成只顯示 `workflow.statuses` 列出的；config-and-rules.md 原本的頂層 `statuses`。
+- 重新檢視：又有程式需要點名某一站時（加角色前先看能不能用 `outcomes` 或 `handledBy` 表達）；自訂站要有 task 以外的地方放按鈕時；`done` 角色一直沒有用途時，考慮拿掉必填。
+
+## D82 看得出從哪站到哪站：按鈕、comment、Run
+
+- 背景：作者試用 W1 時發現兩件事。一是預設流程的按鈕字還是 Approve and start、Accept as done 這種寫死的動作，跟 D81 說的「按鈕只是下一步」對不上。二是 comment 跟 Runs 看不出 item 從哪站到哪站：engine 的 comment 只寫 `moved to split-review`，人移動的那則用邏輯名，Runs 完全沒有。作者也要求 status 這類固定的字要有明顯的標示。
+- 決定：
+  - 預設流程的按鈕字改成「箭頭加目標站的顯示名」：`→ Refining`、`→ In Progress`、`→ Ready to Rework`、`→ Done`。只寫站名會跟旁邊 task 的 status 標籤混在一起，箭頭讓人一看就知道是移過去。
+  - 所有寫進 comment 的 status 改成粗體的顯示名，移動一律寫成 `**From** → **To**`。規則名與 outcome 用 code 樣式。comment 存在 tracker，粗體與 code 是 markdown，Jira 上也看得到。core 加 `StatusNames`（`itemStatusNames(workflow)`、`taskStatusName`），engine 跑的五個 use case 從 deps 拿到它，`moveItem`、`requestRework` 改收整份 workflow（D81 加的 `rework` 參數因此拿掉）。task 的顯示名是固定的，core 直接用。
+  - Run 多存 `from`（被認領時 item 待的 status，就是規則的 watch）與 `to`（engine 結束時把 item 移去的地方，cancelled、abandoned 不填）。在寫入的那一刻存，因為 W4 之後規則能在網頁上改，事後算不回來。runtime store 加 `from_status`、`to_status` 兩欄，舊的 Run 兩欄都是空的，畫面上不顯示。
+  - 詳情的 Runs 每列多一行 `From → To`，兩邊都是跟標題列同款的 status 標籤，規則名用等寬字。
+- 順手修的：詳情標題列的 ref 跟關閉鈕沒對齊。description 那格雖然只放 `sr-only` 的字，外面的 `<p>` 還是佔了一行，把 ref 往上推。改成整格 `sr-only`，關閉鈕從 `top-2` 改 `top-1.5`，量過三者的中心點在同一條線上。
+- 取代：D81「預設流程填好原本那四顆，字沒變」。
+- 重新檢視：comment 要支援非英文的顯示名或多語系時；Runs 要顯示更多過程（例如中間經過 claim status）時。
+
+## D83 Jira 的 E2E 開跑前清空測試 project
+
+- 背景：KAN 同時是 E2E 與作者手動試用的地方。E2E 只在跑完時刪自己建的 item，跑之前不清，而 engine 會撿整個 project 裡在 watch status 的 item。手動留下的 `[fake:hang]` 會永遠佔住一個 Run 名額；作者在測試跑的時候動到看板上的卡，engine 照 D72 把 Run 當成「人移走了」取消，測試就等不到結果。2026-11-21 一次整套重跑就這樣掛了一條。
+- 決定：`playwright.config.ts` 載入時，若這次要跑 `jira` project，先用 JQL 找出 `JIRA_TEST_PROJECT` 裡所有 item 型別的 issue，連同 sub-task 刪掉。放在 config 載入時而不是 globalSetup，因為要比 webServer 早，engine 起來之前沒有剩下的卡可撿。worker 會重新載入 config，所以用 `TASUKI_E2E_JIRA_EMPTIED` 擋住，只在主 process 跑一次。只跑 `--project sqlite` 時不碰 KAN。
+- 實測：在 KAN 建一張 `leftover [fake:hang]`，`--project sqlite --list` 之後還在，`--project jira --list` 之後沒了；之後整套 Jira E2E 11 條全過。
+- 沒選的：E2E 換一個獨立的 Jira project（最乾淨，但要再設一套 project、status 與 workflow）。
+- 代價：手動放在 KAN 上的卡，跑一次 Jira E2E 就沒了。契約測試沒有清空，它只讀自己建的 item。
+- 重新檢視：KAN 開始放要留著的資料時（改成獨立的 E2E project）。
+

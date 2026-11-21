@@ -1,11 +1,12 @@
 # 自訂流程（草稿）
 
-讓每個人、每個團隊自己定義 item 的 stage、每一站做什麼、做完去哪，並且在前端介面上改，不用改程式。方向已定（D78），還沒有任何一段實作，切片排進了 plan.md。定案的部分會搬進 state-machine.md、config-and-rules.md、data-model.md、plugins.md，這份到時刪掉。
+讓每個人、每個團隊自己定義 item 的 stage、每一站做什麼、做完去哪，並且在前端介面上改，不用改程式。方向已定（D78），W1 已做完（D81），其餘切片排進了 plan.md。定案的部分會搬進 state-machine.md、config-and-rules.md、data-model.md、plugins.md，這份到時刪掉。
 
 ## 現況與缺口
 
 - 能自訂的：規則盯哪一站（`watch`）、派哪個 agent、給什麼 prompt（D77 的三層）、每個 verdict 去哪（`on`）、每個 status 對到 tracker 的哪個 key。
-- 不能自訂的：item 的 status 是寫死的十個（`ITEM_STATUS_DISPLAY`），config 寫別的名字啟動就失敗。verdict 只有固定五個字。`mode` 只有 split、execute、rework。
+- W1 之後能自訂的：item 的 status、順序、顯示名、誰處理（`handledBy`）、人在每站的按鈕（`outcomes`）、五個角色（D81）。
+- 還不能自訂的：verdict 只有固定五個字。`mode` 只有 split、execute、rework。
 - config 只能寫在檔案裡，改了要重啟，前端看不到也改不了。
 - runtime store 寫死是 sqlite，第三方沒辦法換成別的 DB。
 
@@ -14,10 +15,10 @@
 | 種類 | 誰動 | 看板 | 怎麼決定 |
 |---|---|---|---|
 | 靜態 | 沒人在等 | 不標 | 預設 |
-| 等人 | 人 | 眼睛 | status 設 `waitsFor: "human"` |
+| 等人 | 人 | 眼睛 | status 設 `handledBy: "person"`（D81，原本叫 `waitsFor`） |
 | engine | engine 撿起來交給 agent | 雷達 | 有規則 `watch` 它，從規則算，不用另外標 |
 
-這就是 D68「輪到誰」的一般化：現在「人」的那幾欄是寫死的清單（`needs-answers`、`split-review`、`in-review`、`blocked`），改成每個 status 自己的旗標。一個 status 同時設了 `waitsFor: "human"` 又被規則 watch 時，照 D68 標 engine。
+這就是 D68「輪到誰」的一般化：現在「人」的那幾欄是寫死的清單（`needs-answers`、`split-review`、`in-review`、`blocked`），改成每個 status 自己的旗標。一個 status 同時設了 `handledBy: "person"` 又被規則 watch 時，照 D68 標 engine。
 
 ## 2. status 自訂，特殊用途改成角色
 
@@ -35,7 +36,8 @@ status 整串由使用者列。程式裡會點名某個 item status 的地方，
 - `blocked` 的自動接回不看角色：它本來就是看規則的 `on.blocked_manual` 指到哪（state-machine.md），維持不變。
 - task 的五個 status 維持寫死。task 圖是 engine 在排、在驗的，交給使用者改，verdict 驗證就沒有依據。
 - 六條不變量全部不變。不變量 2（item status 只有人、規則 outcome、自動復原能改）跟 status 叫什麼名字無關。
-- 預設流程就是現在的十站加上對應的角色，`init` 寫進去，舊的 config 不用改就能跑。
+- 預設流程就是原本的十站加上對應的角色，省略 `workflow` 時用它。舊的頂層 `statuses` 不再收（D81，作者 2026-11-21：還沒人在用，不顧兼容）。
+- 人在每站的決定按鈕也不寫死，站自己宣告 `outcomes`（按鈕字到下一站），跟第 3 節規則的 `outcomes` 同形（D81）。
 
 ## 3. outcome 由規則宣告
 
@@ -101,10 +103,10 @@ tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各
 ## 驗收條件
 
 1. 不改程式碼，只在設定頁上加一站 `ai-review`（`mode: review`，兩個結果分別去 `in-review` 與 `ready-to-rework`），存檔後下一輪 poll 就會撿起這站的 item，跑完照 agent 選的結果移動。
-2. 看板上這站顯示雷達；把一站設成等人，顯示眼睛；兩者都沒有的不標。
+2. 看板上這站顯示雷達；把一站設成 `handledBy: "person"`，顯示眼睛；兩者都沒有的不標。
 3. agent 回一個規則沒宣告的結果名，engine 拒絕並讓 agent 重選，item 不動。
 4. 把 `entry` 角色改指到另一站，新 item 就從那裡開始；刪掉一站還有 item 在上面時，存檔被拒並說出是哪些 item。
-5. 舊的 `tasuki.config.jsonc`（今天的寫法）第一次啟動時被讀進 DB，行為跟現在一樣，現有的 E2E 全過。
+5. 檔案裡的 `workflow` 第一次啟動時被讀進 DB，行為跟讀檔時一樣，現有的 E2E 全過。
 6. 一個只在 `testkit` 契約測試裡出現的假 store plugin 能換掉內建的 sqlite store，engine 照常跑。
 7. 設定頁和 API 回應裡都看不到任何 secret 的值。
 8. 改了一條規則的 prompt 之後，設定頁看得到誰在什麼時候改了什麼，能回到前一版。
@@ -115,7 +117,7 @@ tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各
 
 | # | 切片 | 作者能看到的 |
 |---|---|---|
-| W1 | status 自訂與角色、`waitsFor`，還在檔案裡設定 | config 加一站，看板多一欄，眼睛和雷達標對 |
+| W1 | status 自訂與角色、`handledBy`、站上的 `outcomes`，還在檔案裡設定（已完成，D81） | config 加一站，看板多一欄，眼睛和雷達標對 |
 | W2 | 規則宣告 `outcomes`、`review` mode | 加一站 AI review，agent 依結果把 item 送到不同地方 |
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約 | 行為不變，契約測試多一套 |
 | W4 | 流程設定進 store、設定頁、熱重載（S9 之後） | 在網頁上改規則和 prompt，下一輪就生效 |
