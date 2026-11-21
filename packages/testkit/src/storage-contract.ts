@@ -211,6 +211,13 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         kind: 'system',
         body: 'run failed',
       })
+      // What a person clicked (D74): theirs, but not feedback an agent should act on.
+      await fixture.storage.addComment({
+        target: item.ref,
+        author: 'human',
+        kind: 'system',
+        body: 'Moved from refining to ready-to-split.',
+      })
       expect(human).toMatchObject({ target: item.ref, author: 'human', body: 'looks **good**' })
 
       const comments = await fixture.storage.comments(item.ref)
@@ -218,6 +225,7 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         ['human', 'note', 'looks **good**'],
         ['agent', 'question', 'which locale?\nsecond line'],
         ['engine', 'system', 'run failed'],
+        ['human', 'system', 'Moved from refining to ready-to-split.'],
       ])
       expect(comments[0]).toEqual(human)
     })
@@ -397,6 +405,22 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         expect([first.ref, second.ref]).not.toContain(third.ref)
         const fourth = await fixture.storage.createTask(item.ref, task('fourth'))
         expect([first.ref, second.ref, third.ref]).not.toContain(fourth.ref)
+      })
+
+      it('deletes an item with its tasks and every comment, and only an item', async () => {
+        const item = await newItem('item deletes')
+        const first = await fixture.storage.createTask(item.ref, task('first'))
+        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
+        await fixture.storage.addComment({
+          target: first.ref,
+          author: 'human',
+          kind: 'note',
+          body: 'gone with it',
+        })
+        await expect(fixture.storage.deleteItem(first.ref)).rejects.toBeInstanceOf(NotFound)
+        await fixture.storage.deleteItem(item.ref)
+        for (const ref of [item.ref, first.ref, second.ref])
+          await expect(fixture.storage.get(ref)).rejects.toBeInstanceOf(NotFound)
       })
 
       it('refuses to delete something that is not a task', async () => {
