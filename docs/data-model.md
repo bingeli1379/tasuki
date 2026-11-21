@@ -172,7 +172,7 @@ CREATE INDEX attachment_by_target ON attachment(target, id);
 CREATE TABLE ref_counter (last INTEGER NOT NULL);
 ```
 
-runtime store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，見 `packages/server/src/runtime-store/migrations.ts`；cancel、session、usage 的欄位與 `engine_state` 等用到的切片再加）：
+runtime store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，見 `packages/server/src/runtime-store/migrations.ts`；session、usage 的欄位與 `engine_state` 等用到的切片再加）：
 
 ```sql
 CREATE TABLE run (
@@ -194,7 +194,7 @@ CREATE TABLE run (
   finished_at         TEXT,
   cancel_requested_at TEXT,
   cancel_mode         TEXT CHECK (cancel_mode IN ('soft','hard')),
-  cancel_requested_by TEXT,
+  cancel_requested_by TEXT CHECK (cancel_requested_by IN ('stop','hold','moved')),
   produced_questions  INTEGER NOT NULL DEFAULT 0,
   produced_tasks      INTEGER NOT NULL DEFAULT 0,
   tokens              INTEGER,

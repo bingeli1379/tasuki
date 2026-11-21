@@ -71,7 +71,7 @@ engine 每輪 poll 在復原之後、認領之前檢查，接回到那條規則�
 | B execute | in-progress | none (lease dedupes) | in-review | blocked | blocked | blocked |
 | C rework | ready-to-rework | splitting | split-review | blocked | n/a | blocked |
 
-- `cancelled` 的 Run 不動 status。item 停在原地，由人決定下一步。
+- `cancelled` 的 Run 不動 status。item 停在原地，由人決定下一步。按 Stop 會順手貼上 `hold`，不然下一輪又會被認領（D72）。`hold` 拿掉後，停在 claim status 的 item 由 engine 送回 watch status，停在 watch status 的直接被 Poller 撿起。
 - 規則 A 要能容忍 item 底下已經有 task（refine 階段建立的 manual task）。
 - rework 的新 task 也要先過 `split-review`。想省掉這關，把規則 C 的 succeeded 出口改成 `in-progress`。
 

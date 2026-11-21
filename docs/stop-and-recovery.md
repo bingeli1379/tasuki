@@ -14,12 +14,14 @@
 | 在 item 上貼 `hold` label | soft | 不需要 engine 專屬操作，Jira 上貼就行 |
 | 把 item 移到別的 status | soft | Run 當初預期的 status 變了，視為人要接手 |
 
-後兩種靠偵測。每次 Poller tick 與 lease 續約時，engine 檢查每個存活的 Run：
+按 Stop 會同時貼上 `hold`。只砍 Run 的話，item 還在 watch status 或 claim status，下一輪就會被認領或被復原送回去重跑（D72）。在看板或使用者 MCP 貼 hold 時，有存活的 Run 就當場 soft cancel，不等下一輪。
+
+直接在 Jira 貼 label 或移動 item 靠偵測。每次 Poller tick，engine 檢查每個存活的 Run（每張讀一次 tracker，沒有存活的 Run 就不讀）：
 
 - item 帶有 `hold`，或
 - item 目前的 status 不是這個 Run 預期的（有 claim status 時是 claim status，沒有時是 watch status）
 
-符合任一個就 `requestCancel(soft, by = 'human-override')`。
+符合任一個就 `requestCancel(soft, by)`，`by` 是 `hold` 或 `moved`。Stop 是 `requestCancel(hard, by = 'stop')`。一個 Run 只記第一次的時間與原因，之後的 hard 會把 soft 升級，反過來不會。
 
 另外有一個全域的 pause，見下。
 
@@ -31,12 +33,14 @@
 | 機制 | Run 標記取消，MCP 的寫入類 tool 回 `RUN_CANCELLED`，agent 讀到就收手 | 標記取消，並對整個 process tree 送 SIGTERM |
 | 寬限 | 超過 `softGraceSeconds`（草稿：300）還沒結束，升級成 hard | 超過 `hardGraceSeconds`（草稿：10）還沒結束，送 SIGKILL |
 
-取消後 Run 的 outcome 是 `cancelled`，item 的 status 不動。item 停在哪就在哪，由人決定下一步。
+取消與升級不靠 Poller：engine 每秒看一次本機的 runtime store（不碰 tracker），hard 的送 SIGTERM，soft 超過寬限就升級成 hard，SIGTERM 之後超過寬限送 SIGKILL。按下 Stop 到 agent 收到訊號最多一秒。
+
+取消後 Run 的 outcome 是 `cancelled`，item 的 status 不動，task 也不送回（不變量 6）。item 停在哪就在哪，由人決定下一步。engine 留一則 system comment，寫是誰停的（Stop、hold、被移走）與 agent 的 summary。
 
 `hold` 被拿掉之後：
 
 - item 停在 watch status（例如 `in-progress`）且沒有存活的 Run：Poller 會再起一個 Run，續跑。
-- item 停在 claim status（例如 `splitting`）且沒有存活的 Run：復原機制把它送回 watch status，再被 Poller 撿起。
+- item 停在 claim status（例如 `splitting`）且沒有存活的 Run：復原機制把它送回 watch status，再被 Poller 撿起。只看最近一次 Run 是被 Stop 或 hold 取消的 item，先問本機的 runtime store，沒有就不碰 tracker（core 的 `resumeReleased`）。
 
 ### M1 的限制
 

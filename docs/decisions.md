@@ -562,3 +562,18 @@
   - 順手修掉 S4 起就有的看板 bug：`listBoard` 原本跟 tracker 的搜尋同時讀 `liveRuns`，本機一下就回來，Jira 要搜好幾秒。Run 在這段時間結束的話，卡片已經在結果的欄位上，卻還掛著 Running，要等下一次重讀才消失。改成 tracker 讀完才讀 `liveRuns`，Running 只會比卡片新。Jira E2E 整包跑時兩次卡在 Split Review 的 Running 就是這個。
 - 理由：自動接回讓人做完 manual 就不用再回來拖卡片，前台省一次思考，後台是一個每輪跑的 use case，沒有新的 status。回饋必填是因為 rework 的 agent 除了 comment 沒有別的依據，空的回饋只會換到一輪白跑。
 - 重新檢視：Jira 上 blocked 的 item 多到每輪的 `children` 呼叫吃掉 rate limit 時（每張停在 blocked、最近一次是 `blocked_manual` 的 item 每輪讀一次 task）；被人直接移出 blocked 的 item，最近一次 Run 會一直是 `blocked_manual`，讓閘門每輪都打開，這種多到常態時（改成記住接回或移走過的）；S7c 接上 `labels.hold` 時拿掉常數。
+
+## D72 S7c：Stop、hold、人移走視為接手
+- 決定：
+  - 按 Stop 時順手貼上 `hold`。文件原本只說 `cancelled` 不動 status，沒寫 Stop 之後怎麼辦。照字面做，item 停在 `in-progress` 下一輪就再起一個 Run，停在 `splitting` 復原就把它送回 `ready-to-split` 重跑，按了等於沒按。貼上 hold，卡片掛 On hold，人拿掉才繼續，接回的路照 stop-and-recovery.md 原本寫的走。不變量 6 不用破例。
+  - `StoragePort` 加 `addLabel` 與 `removeLabel`，一次只寫一個 label，不動 version（version 只跟 title、body、status 走）。sqlite 在同一個 process 裡同步讀改寫；Jira 用 `update.labels` 的 add / remove，不會蓋掉別人同時貼的 label。契約測試兩邊跑同一條。hold 一直都是 `labels` 裡的一個字串，兩邊都不用另外開欄位。
+  - Run 加 `cancelRequestedAt`、`cancelMode`、`cancelRequestedBy`（`stop`、`hold`、`moved`），runtime store 的 migration 加三欄。`requestCancel` 只記第一次的時間與原因，hard 會把 soft 升級，反過來不會。原本文件寫 `by = 'human-override'`，改成分開記三種，結束時的 comment 才說得出是誰停的。
+  - 偵測（core 的 `detectOverrides`）每輪在復原之後跑，每個存活的 Run 讀一次 item，沒有 Run 就不讀。原本寫 tick 與 lease 續約時都查，續約時再查等於 Jira 的呼叫多一倍，換不到什麼：tick 本來就比續約頻繁。看板與使用者 MCP 貼 hold 時有 Run 就當場 soft cancel，只有在 Jira 直接動的才等偵測。
+  - 砍 process 不走 Poller：engine 多一個 `enforce()`，server 每秒跑一次，只讀本機 runtime store。hard 送 SIGTERM，soft 超過 `softGraceSeconds`（300）升級，SIGTERM 之後超過 `hardGraceSeconds`（10）送 SIGKILL。寬限由 engine 計時，所以 `RunHandle` 只要 `terminate(signal)`，不是原本寫的 `terminate(grace)`。現在只有假 runner，它在同一個 process 裡，兩種訊號都立刻結束；真的 process tree 留給 S8 的 claude runner。
+  - `finishRun` 先看有沒有取消請求：有就記 `cancelled`，不轉移、不送回 task（不變量 6），留一則 system comment 寫原因與 agent 的 summary。agent facade 的寫入類 tool 在取消後丟 `RUN_CANCELLED` 開頭的錯誤，`report_result` 回 ok 但不記。
+  - hold 拿掉後，停在 claim status 的 item 由 core 的 `resumeReleased` 送回 watch status，同一輪就被認領。閘門跟 D71 一樣先問 runtime store：最近一次 Run 是被 Stop 或 hold 取消的才算，被人移走而取消的不算，人已經決定它去哪了。`claimItems` 跳過有 hold 的 item，不變量 5 到這裡才做完整，S7b 只在自動接回時看了 hold。
+  - config 接上 `labels.hold`（預設 `hold`，要是一個不含空白的字）與兩個寬限秒數，拿掉 engine 的常數。看板的回應多一個 `holdLabel`，前端拿它比 `item.labels` 顯示 On hold，詳情裡改 hold 之後卡片跟著更新，不用等重讀。
+  - 畫面：item 詳情有 Run 在跑時多一顆 Stop，另外一直有 Hold / Release。按了 Stop 之後詳情每秒重讀，直到 Run 結束，不然會一直停在 stopping。使用者 MCP 加 `stop_run`、`hold_item`、`release_item`（D57）。
+- 理由：Stop 不貼 hold 就沒有意義，貼了之後所有「接著怎麼辦」都落在已經寫好的 hold 規則裡，後台不多一個 status，前台一個 On hold 就說清楚是人叫它停的。
+- 沒選的做法：Run 被取消後把 claim status 的 item 直接送回 watch status，卡片會在 Ready to Split 掛 On hold，看起來也清楚。但要破不變量 6，被人移走而取消的又不能送，例外比現在多。
+- 重新檢視：被 Stop 或 hold 停下的 item 之後被人直接移走、一直沒再跑，最近一次 Run 會一直是取消的，`resumeReleased` 的閘門每輪都打開（每輪對 tracker 多一次搜尋），這種多到常態時，跟 D71 一起改成記住處理過的；S8 的真 runner 要驗證 SIGTERM 真的送到整個 process tree。

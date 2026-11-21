@@ -72,7 +72,7 @@ engine 不直接相信 verdict，先驗證再換算成 outcome，下表每一列
 
 ## 取消時
 
-Run 被取消之後，所有寫入類 tool 都回錯誤 `RUN_CANCELLED`，agent 讀到就該收手。`report_result` 被接受但忽略。
+Run 被取消之後，所有寫入類 tool（`create_task`、`add_comment`、`set_task_status`）都回錯誤，訊息以 `RUN_CANCELLED` 開頭，agent 讀到就該收手。讀取類 tool 照常可用。`report_result` 被接受但忽略。
 寬限時間過了 agent process 還沒結束，engine 對整個 process tree 送終止訊號（細節見 stop-and-recovery.md）。
 
 ## agent 必須做到的

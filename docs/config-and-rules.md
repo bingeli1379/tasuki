@@ -221,7 +221,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 3. `claim` 不等於 `watch`（可省略）。
 4. `on` 的每個目標都存在，而且規則可能產生的每個 outcome 都有目標。`failed` 與 `max_attempts` 有預設，`blocked_manual` 對 split / rework 不會發生，這三個可省略。
 5. 規則引用的 agent 存在。
-6. `${VAR}` 都能展開。
+6. `${VAR}` 都能展開。`labels.hold` 是一個不含空白的字（Jira 的 label 不能有空白）。
 7. `server.host` 非 loopback 又沒有 auth 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`；`static` 的密碼不是 hash 就拒絕啟動（見 security-and-auth.md）。
 8. Jira：mapping 的每個 status 都存在於 project 的 workflow，規則用到的每一個轉移（from 到 to）在 workflow 裡目前都允許。逐條列出不合法的轉移。
 9. agent preflight：CLI 在 PATH 上。`requires` 列出的 MCP server 與 skill 有裝。偵測方式依 CLI 而定，待驗證。
