@@ -11,6 +11,7 @@ import {
   toStoredMarkdown,
 } from '../editor'
 import { renderMarkdown } from '../markdown'
+import { TASK_COLOR } from '../task-status'
 
 const props = defineProps<{
   taskRef: string
@@ -47,7 +48,7 @@ const comments = computed(() =>
     html: renderMarkdown(c.body, props.taskRef),
   })),
 )
-// The person's edges of the task diagram (state-machine.md).
+// The person's edges of the task diagram (state-machine.md, D74).
 const moves = computed((): { label: string; to: string }[] => {
   switch (detail.value?.task.status) {
     case 'to-do':
@@ -58,14 +59,26 @@ const moves = computed((): { label: string; to: string }[] => {
         { label: 'Hand back', to: 'to-do' },
         { label: 'Mark done', to: 'done' },
       ]
+    case 'done':
+      return [
+        { label: 'Reopen as To Do', to: 'to-do' },
+        { label: 'Reopen as Manual', to: 'manual' },
+      ]
     default:
       return []
   }
 })
 
+// Bumped by every change made here. A read that started before one does not have it, and
+// is read again rather than shown over it.
+let edits = 0
+
 async function load(): Promise<void> {
+  const at = edits
   try {
-    detail.value = await call<TaskDetail>(`/api/tasks/${encodeURIComponent(props.taskRef)}`)
+    const read = await call<TaskDetail>(`/api/tasks/${encodeURIComponent(props.taskRef)}`)
+    if (at !== edits) return load()
+    detail.value = read
     error.value = ''
   } catch (e) {
     error.value = messageOf(e)
@@ -112,8 +125,11 @@ const move = (to: string): Promise<void> =>
       `/api/tasks/${encodeURIComponent(current.task.ref)}/transition`,
       sendJson('POST', { from: current.task.status, to }),
     )
-    // What the write returned is current; reading the whole task again costs Jira seconds.
-    current.task = { ...current.task, ...moved }
+    // What the write returned is shown at once; the log line it left comes in with a read
+    // in the background, which costs Jira seconds.
+    if (detail.value) detail.value.task = { ...detail.value.task, ...moved }
+    edits++
+    void load()
   }, `${props.taskRef} was moved by someone else`)
 
 function startEdit(): void {
@@ -136,7 +152,8 @@ const save = (): Promise<void> =>
         `/api/tasks/${encodeURIComponent(current.task.ref)}`,
         sendJson('PATCH', { expectedVersion: current.task.version, ...changes }),
       )
-      current.task = { ...current.task, ...edited }
+      if (detail.value) detail.value.task = { ...detail.value.task, ...edited }
+      edits++
     }
     editing.value = false
   }, `${props.taskRef} was changed by someone else; your edit is still here`)
@@ -158,7 +175,8 @@ async function addComment(): Promise<void> {
       `/api/tasks/${encodeURIComponent(current.task.ref)}/comments`,
       sendJson('POST', { body: commentDraft.value }),
     )
-    current.comments.push(comment)
+    detail.value?.comments.push(comment)
+    edits++
     commentDraft.value = ''
     error.value = ''
   } catch (e) {
@@ -176,9 +194,7 @@ const authorOf = (c: Comment): string =>
   <UModal
     v-model:open="open"
     :title="detail?.task.ref ?? taskRef"
-    :description="
-      detail ? (TASK_STATUS_DISPLAY[detail.task.status] ?? detail.task.status) : 'Loading…'
-    "
+    :description="detail ? `Task of ${detail.task.parent}` : 'Loading…'"
     :ui="{ content: 'sm:max-w-3xl' }"
   >
     <template #body>
@@ -186,9 +202,33 @@ const authorOf = (c: Comment): string =>
         <UAlert v-if="error" color="error" variant="subtle" :title="error" />
 
         <template v-if="detail">
+          <UAlert
+            v-if="confirmingDelete"
+            color="error"
+            variant="subtle"
+            :title="`Delete ${detail.task.ref} and its comments?`"
+            description="This cannot be undone."
+            :actions="[
+              {
+                label: 'Keep it',
+                color: 'neutral',
+                variant: 'outline',
+                onClick: () => (confirmingDelete = false),
+              },
+              { label: 'Delete for good', color: 'error', loading: busy, onClick: remove },
+            ]"
+          />
           <section v-if="!editing" class="flex flex-col gap-3">
             <div class="flex items-start justify-between gap-4">
-              <h2 class="text-xl font-semibold">{{ detail.task.title }}</h2>
+              <h2 class="flex items-center gap-2 text-xl font-semibold">
+                {{ detail.task.title }}
+                <UBadge
+                  :label="TASK_STATUS_DISPLAY[detail.task.status] ?? detail.task.status"
+                  :color="TASK_COLOR[detail.task.status] ?? 'neutral'"
+                  variant="subtle"
+                  size="sm"
+                />
+              </h2>
               <span class="flex shrink-0 gap-2">
                 <UButton
                   v-for="m in moves"
@@ -207,6 +247,15 @@ const authorOf = (c: Comment): string =>
                   variant="outline"
                   size="sm"
                   @click="startEdit"
+                />
+                <UButton
+                  v-if="editable"
+                  label="Delete task"
+                  color="error"
+                  variant="outline"
+                  size="sm"
+                  :disabled="busy"
+                  @click="confirmingDelete = true"
                 />
               </span>
             </div>
@@ -247,33 +296,14 @@ const authorOf = (c: Comment): string =>
                 />
               </UEditor>
             </div>
-            <div class="flex items-center justify-between gap-2">
-              <span v-if="confirmingDelete" class="flex items-center gap-2 text-sm">
-                Delete {{ detail.task.ref }} and its comments?
-                <UButton
-                  label="Keep it"
-                  color="neutral"
-                  variant="ghost"
-                  size="sm"
-                  @click="confirmingDelete = false"
-                />
-                <UButton
-                  label="Delete for good"
-                  color="error"
-                  size="sm"
-                  :loading="busy"
-                  @click="remove"
-                />
-              </span>
-              <UButton
-                v-else
-                label="Delete task"
-                color="error"
-                variant="ghost"
-                @click="confirmingDelete = true"
-              />
+            <div class="flex items-center justify-end gap-2">
               <span class="flex gap-2">
-                <UButton label="Cancel" color="neutral" variant="ghost" @click="editing = false" />
+                <UButton
+                  label="Cancel"
+                  color="neutral"
+                  variant="outline"
+                  @click="editing = false"
+                />
                 <UButton label="Save" :loading="busy" @click="save" />
               </span>
             </div>
