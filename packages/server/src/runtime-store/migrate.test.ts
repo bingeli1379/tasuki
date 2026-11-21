@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { openDatabase } from './database'
 import { migrate, schemaVersion } from './migrate'
+import { RUNTIME_MIGRATIONS } from './migrations'
 
 const tables = (db: ReturnType<typeof openDatabase>): string[] =>
   db
@@ -35,5 +36,27 @@ describe('migrate', () => {
     ).toThrow()
     expect(schemaVersion(db)).toBe(1)
     expect(tables(db)).toEqual(['a'])
+  })
+
+  it('rebuilding the run table for S7d keeps every Run and its indexes', () => {
+    const db = openDatabase(':memory:')
+    migrate(db, RUNTIME_MIGRATIONS.slice(0, 3))
+    db.exec(`INSERT INTO run (id, target, rule, agent, attempt, workspace, state, outcome,
+      lease_until, started_at, last_activity_at, log_path, produced_tasks, cancel_mode,
+      cancel_requested_by) VALUES ('r1', 'T-1', 'split', 'fake', 2, '/w', 'finished',
+      'cancelled', 'x', 'y', 'z', '/l', 3, 'hard', 'stop')`)
+    migrate(db, RUNTIME_MIGRATIONS)
+    expect(db.prepare('SELECT * FROM run').get()).toMatchObject({
+      id: 'r1',
+      attempt: 2,
+      produced_tasks: 3,
+      cancel_mode: 'hard',
+      cancel_requested_by: 'stop',
+    })
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'run'")
+      .all()
+      .map((r) => String(r['name']))
+    expect(indexes).toEqual(expect.arrayContaining(['one_live_run', 'run_by_target']))
   })
 })

@@ -24,7 +24,7 @@ const withJira = jiraVars.every((v) => process.env[v])
 process.env['TASUKI_E2E_DIR'] ??= mkdtempSync(join(tmpdir(), 'tasuki-e2e-'))
 const dir = process.env['TASUKI_E2E_DIR']
 
-// Rules split and execute on the fake runner (S4, S6). Polling every 2 seconds keeps the Jira
+// Rules split, execute and rework on the fake runner (S4, S6, S7b). Polling every 2 seconds keeps the Jira
 // run short; the agent takes 10, longer than the board needs to read itself again and show
 // it Running.
 const engineRules = {
@@ -45,6 +45,14 @@ const engineRules = {
       agent: 'fake',
       mode: 'execute',
       on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
+    },
+    {
+      id: 'rework',
+      watch: 'ready-to-rework',
+      claim: 'splitting',
+      agent: 'fake',
+      mode: 'rework',
+      on: { succeeded: 'split-review', needs_input: 'blocked' },
     },
   ],
 }

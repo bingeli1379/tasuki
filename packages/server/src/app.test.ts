@@ -35,6 +35,7 @@ const appWith = (db = openDatabase(':memory:')): ReturnType<typeof createApp> =>
     runtime: memoryRuntime(),
     statuses,
     rules: [],
+    holdLabel: 'hold',
     tokens: createRunTokens(),
   })
 
@@ -240,6 +241,97 @@ describe('item detail', () => {
   })
 })
 
+describe('tasks', () => {
+  const taskStatuses = createStatusMap({
+    item: { 'split-review': 'Split Review', 'in-progress': 'In Progress' },
+    task: { 'to-do': 'To Do', manual: 'Manual', done: 'Done' },
+  })
+  const setup = async () => {
+    const db = openDatabase(':memory:')
+    migrateTracker(db, TRACKER_MIGRATIONS)
+    const storage = createSqliteTracker(
+      { clock: { now: () => new Date() }, dataDir: '', statuses: taskStatuses },
+      db,
+      'M',
+    )
+    const app = createApp({
+      db: openDatabase(':memory:'),
+      storage,
+      runtime: memoryRuntime(),
+      statuses: taskStatuses,
+      rules: [],
+      holdLabel: 'hold',
+      tokens: createRunTokens(),
+    })
+    const item = await storage.createItem({ title: 'Item', body: '', status: 'split-review' })
+    const task = (title: string, blockedBy: string[] = []) =>
+      storage.createTask(item.ref, {
+        title,
+        body: '',
+        status: 'to-do',
+        origin: 'splitter',
+        blockedBy,
+      })
+    const first = await task('Prepare')
+    const second = await task('Build', [first.ref])
+    return { app, storage, item, first, second }
+  }
+  const send = (method: string, body: unknown): RequestInit => ({
+    method,
+    body: JSON.stringify(body),
+  })
+
+  it('reads a task with what it waits for, comments on it, and takes it over', async () => {
+    const { app, second } = await setup()
+    await app.request(`/api/tasks/${second.ref}/comments`, send('POST', { body: 'mine now' }))
+    const moved = await app.request(
+      `/api/tasks/${second.ref}/transition`,
+      send('POST', { from: 'to-do', to: 'manual' }),
+    )
+    expect(await moved.json()).toMatchObject({ status: 'manual' })
+    expect(await (await app.request(`/api/tasks/${second.ref}`)).json()).toMatchObject({
+      task: { ref: second.ref, status: 'manual', blockedBy: [expect.any(String)] },
+      comments: [
+        { author: 'human', kind: 'note', body: 'mine now' },
+        { author: 'human', kind: 'system', body: 'Moved from to-do to manual.' },
+      ],
+    })
+  })
+
+  it('a move off the task diagram is a 400, a stale one a 409', async () => {
+    const { app, first } = await setup()
+    const off = await app.request(
+      `/api/tasks/${first.ref}/transition`,
+      send('POST', { from: 'to-do', to: 'done' }),
+    )
+    expect(off.status).toBe(400)
+    expect(await off.json()).toEqual({ error: `${first.ref} cannot go from to-do to done` })
+    const stale = await app.request(
+      `/api/tasks/${first.ref}/transition`,
+      send('POST', { from: 'manual', to: 'done' }),
+    )
+    expect(stale.status).toBe(409)
+  })
+
+  it('edits and deletes a task in split-review, and refuses once the item moved on', async () => {
+    const { app, storage, item, first, second } = await setup()
+    const edited = await app.request(
+      `/api/tasks/${first.ref}`,
+      send('PATCH', { expectedVersion: first.version, title: 'Prepare well' }),
+    )
+    expect(await edited.json()).toMatchObject({ title: 'Prepare well' })
+    expect((await app.request(`/api/tasks/${second.ref}`, { method: 'DELETE' })).status).toBe(200)
+    expect((await app.request(`/api/tasks/${second.ref}`)).status).toBe(404)
+
+    await storage.transition(item.ref, 'split-review', 'in-progress')
+    const refused = await app.request(`/api/tasks/${first.ref}`, { method: 'DELETE' })
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toEqual({
+      error: `${first.ref} can only be changed while ${item.ref} is in split-review; it is in in-progress`,
+    })
+  })
+})
+
 describe("MCP for the user's AI client", () => {
   const connect = async (): Promise<Client> => {
     const app = appWith()
@@ -260,8 +352,19 @@ describe("MCP for the user's AI client", () => {
       'list_board',
       'create_item',
       'move_item',
+      'request_rework',
+      'hold_item',
+      'release_item',
+      'stop_run',
+      'pause_engine',
+      'resume_engine',
       'get_item',
       'update_item',
+      'delete_item',
+      'get_task',
+      'move_task',
+      'update_task',
+      'delete_task',
       'add_comment',
       'add_attachment',
       'get_attachment',

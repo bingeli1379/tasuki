@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { ApiError, call, messageOf, sendJson, type Item } from './api'
 import ItemDetail from './components/ItemDetail.vue'
 import { EDITOR_PROPS, EDITOR_TOOLBAR, MARKDOWN_OPTIONS, toStoredMarkdown } from './editor'
@@ -22,8 +22,12 @@ const TURN = {
 } as const
 
 const columns = ref<Column[]>([])
-// Refs an agent is working on right now.
+// Refs an agent is working on right now, and of those the ones told to stop.
 const running = ref<string[]>([])
+const stopping = ref<string[]>([])
+const loaded = ref(false)
+const holdLabel = ref('hold')
+const paused = ref(false)
 const tasks = ref<Record<string, { done: number; total: number }>>({})
 const error = ref('')
 const open = ref(false)
@@ -47,6 +51,29 @@ const newItemEditorUi = {
 }
 const detailOpen = ref(false)
 const detailRef = ref('')
+const boardEl = useTemplateRef('boardEl')
+
+const allItems = computed(() => columns.value.flatMap((c) => c.items))
+const detailItem = computed(() => allItems.value.find((i) => i.ref === detailRef.value))
+// What the board knows about the open item; the detail reads itself again when it changes.
+const detailSeen = computed(() => {
+  const i = detailItem.value
+  const r = detailRef.value
+  return i
+    ? `${i.status}|${i.version}|${i.labels.join()}|${running.value.includes(r)}|${stopping.value.includes(r)}`
+    : ''
+})
+
+// Our own writes, until the board's search has caught up with them (D54). Until then a reload
+// still lists the card as it was before, or not at all, and would undo it on screen for a
+// moment. `before` is what the board showed then: once it lists anything else, it is newer
+// than us, the engine's move included, and wins.
+const recent = new Map<string, { item: Item | null; before: string | undefined; at: number }>()
+const stateOf = (i: Item | undefined): string | undefined =>
+  i === undefined ? undefined : `${i.status}|${i.version}`
+function remember(item: Item | null, ref: string, before: Item | undefined): void {
+  recent.set(ref, { item, before: stateOf(before), at: Date.now() })
+}
 
 function openDetail(item: Item): void {
   detailRef.value = item.ref
@@ -74,10 +101,27 @@ async function load(): Promise<void> {
     const board = await call<{
       columns: Column[]
       running: string[]
+      stopping: string[]
       tasks: Record<string, { done: number; total: number }>
+      holdLabel: string
+      paused: boolean
     }>('/api/board')
     columns.value = board.columns
+    for (const [ref, mine] of recent) {
+      const listed = stateOf(board.columns.flatMap((c) => c.items).find((i) => i.ref === ref))
+      if (Date.now() - mine.at > 60_000 || listed !== mine.before) {
+        recent.delete(ref)
+        continue
+      }
+      if (mine.item) place(mine.item)
+      else
+        for (const column of columns.value) column.items = column.items.filter((i) => i.ref !== ref)
+    }
+    loaded.value = true
     running.value = board.running
+    stopping.value = board.stopping
+    holdLabel.value = board.holdLabel
+    paused.value = board.paused
     tasks.value = board.tasks
     error.value = ''
   } catch (e) {
@@ -107,6 +151,27 @@ onUnmounted(() => {
   document.removeEventListener('visibilitychange', reload)
 })
 
+// The global pause (stop-and-recovery.md); kill also stops every agent working now.
+async function setPaused(action: 'pause' | 'kill' | 'resume'): Promise<void> {
+  try {
+    await call(
+      `/api/engine/${action === 'resume' ? 'resume' : 'pause'}`,
+      sendJson('POST', { kill: action === 'kill' }),
+    )
+    paused.value = action !== 'resume'
+    error.value = ''
+  } catch (e) {
+    error.value = messageOf(e)
+  }
+}
+
+// A form opened again starts empty, not with what was typed and left last time.
+watch(open, (isOpen) => {
+  if (!isOpen) return
+  title.value = ''
+  body.value = ''
+})
+
 async function create(): Promise<void> {
   saving.value = true
   try {
@@ -116,6 +181,7 @@ async function create(): Promise<void> {
     )
     // Not a reload: the board may lag behind writes (Jira search index).
     columns.value.find((c) => c.status === item.status)?.items.push(item)
+    remember(item, item.ref, undefined)
     wrote()
     title.value = ''
     body.value = ''
@@ -128,19 +194,42 @@ async function create(): Promise<void> {
   }
 }
 
-async function move(item: Item, to: string): Promise<void> {
+// Ready to Rework takes a word on what to fix, as the Rework button does: the agent has
+// nothing else to go on (D75).
+const reworkOf = ref<Item>()
+const reworkNote = ref('')
+const reworkOpen = computed({
+  get: () => reworkOf.value !== undefined,
+  set: (value) => {
+    if (!value) reworkOf.value = undefined
+  },
+})
+
+async function sendRework(): Promise<void> {
+  const item = reworkOf.value
+  if (!item) return
+  reworkOf.value = undefined
+  await move(item, 'ready-to-rework', reworkNote.value)
+}
+
+async function move(item: Item, to: string, feedback?: string): Promise<void> {
   if (item.status === to || pending.value.includes(item.ref)) return
+  if (to === 'ready-to-rework' && feedback === undefined) {
+    reworkNote.value = ''
+    reworkOf.value = item
+    return
+  }
   pending.value.push(item.ref)
   // Moved right away: a Jira move takes a few seconds and the card should not sit still.
   place({ ...item, status: to })
   try {
     // Not a reload, for the same reason as create.
-    place(
-      await call<Item>(
-        `/api/items/${item.ref}/transition`,
-        sendJson('POST', { from: item.status, to }),
-      ),
+    const moved = await call<Item>(
+      `/api/items/${item.ref}/${feedback === undefined ? 'transition' : 'rework'}`,
+      sendJson('POST', { from: item.status, to, feedback }),
     )
+    place(moved)
+    remember(moved, item.ref, item)
     error.value = ''
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.data.item) {
@@ -170,6 +259,35 @@ function drop(to: string): void {
   over.value = undefined
 }
 
+// Near either edge while dragging, the board scrolls, so a column out of view can be reached.
+function edgeScroll(e: DragEvent): void {
+  const el = boardEl.value
+  if (!el || !dragging.value) return
+  const { left, right } = el.getBoundingClientRect()
+  if (e.clientX < left + 80) el.scrollLeft -= 24
+  else if (e.clientX > right - 80) el.scrollLeft += 24
+}
+
+function updated(item: Item): void {
+  remember(
+    item,
+    item.ref,
+    allItems.value.find((i) => i.ref === item.ref),
+  )
+  place(item)
+  wrote()
+}
+
+function deleted(ref: string): void {
+  remember(
+    null,
+    ref,
+    allItems.value.find((i) => i.ref === ref),
+  )
+  for (const column of columns.value) column.items = column.items.filter((i) => i.ref !== ref)
+  wrote()
+}
+
 // dragleave also fires when the pointer moves onto a card inside the column.
 function leave(e: DragEvent, status: string): void {
   const column = e.currentTarget as Node
@@ -187,53 +305,95 @@ onMounted(load)
         class="flex items-center justify-between border-b border-default bg-default px-6 py-3"
       >
         <h1 class="text-lg font-semibold">Tasuki</h1>
-        <UModal v-model:open="open" title="New item" :ui="{ content: 'sm:max-w-3xl' }">
-          <UButton label="New item" />
-          <template #body>
-            <!-- Only the title is a form, so Enter there creates the item; the editor toolbar
+        <span class="flex items-center gap-2">
+          <UButton
+            v-if="paused"
+            label="Resume"
+            color="neutral"
+            variant="outline"
+            @click="setPaused('resume')"
+          />
+          <UDropdownMenu
+            v-else
+            :items="[
+              { label: 'Pause', onSelect: () => setPaused('pause') },
+              {
+                label: 'Pause and stop all agents',
+                color: 'error',
+                onSelect: () => setPaused('kill'),
+              },
+            ]"
+          >
+            <UButton
+              label="Pause"
+              color="neutral"
+              variant="outline"
+              trailing-icon="i-lucide-chevron-down"
+            />
+          </UDropdownMenu>
+          <UModal v-model:open="open" title="New item" :ui="{ content: 'sm:max-w-3xl' }">
+            <UButton label="New item" />
+            <template #body>
+              <!-- Only the title is a form, so Enter there creates the item; the editor toolbar
                  buttons would submit a form around them. -->
-            <div class="flex flex-col gap-4">
-              <form @submit.prevent="create">
-                <UFormField label="Title" required>
-                  <UInput v-model="title" required autofocus class="w-full" />
-                </UFormField>
-              </form>
-              <div class="flex flex-col gap-1">
-                <span class="text-sm font-medium">Body</span>
-                <UEditor
-                  v-slot="{ editor }"
-                  v-model="body"
-                  content-type="markdown"
-                  :markdown="MARKDOWN_OPTIONS"
-                  :image="false"
-                  :mention="false"
-                  :editor-props="EDITOR_PROPS"
-                  class="rounded-md border border-default"
-                  :ui="newItemEditorUi"
-                >
-                  <UEditorToolbar
-                    :editor="editor"
-                    :items="EDITOR_TOOLBAR"
-                    class="border-b border-default px-2 py-1"
-                  />
-                </UEditor>
+              <div class="flex flex-col gap-4">
+                <form @submit.prevent="create">
+                  <UFormField label="Title" required>
+                    <UInput v-model="title" required autofocus class="w-full" />
+                  </UFormField>
+                </form>
+                <div class="flex flex-col gap-1">
+                  <span class="text-sm font-medium">Body</span>
+                  <UEditor
+                    v-slot="{ editor }"
+                    v-model="body"
+                    content-type="markdown"
+                    :markdown="MARKDOWN_OPTIONS"
+                    :image="false"
+                    :mention="false"
+                    :editor-props="EDITOR_PROPS"
+                    class="rounded-md border border-default"
+                    :ui="newItemEditorUi"
+                  >
+                    <UEditorToolbar
+                      :editor="editor"
+                      :items="EDITOR_TOOLBAR"
+                      class="border-b border-default px-2 py-1"
+                    />
+                  </UEditor>
+                </div>
+                <UButton
+                  label="Create"
+                  :loading="saving"
+                  :disabled="title.trim() === ''"
+                  class="self-end"
+                  @click="create"
+                />
               </div>
-              <UButton
-                label="Create"
-                :loading="saving"
-                :disabled="title.trim() === ''"
-                class="self-end"
-                @click="create"
-              />
-            </div>
-          </template>
-        </UModal>
+            </template>
+          </UModal>
+        </span>
       </header>
 
       <main class="flex flex-1 flex-col p-6">
         <UAlert v-if="error" color="error" variant="subtle" :title="error" class="mb-4" />
+        <UAlert
+          v-if="paused"
+          color="warning"
+          variant="subtle"
+          title="The engine is paused: no agent starts on any item until you resume it."
+          class="mb-4"
+        />
 
-        <div class="scrollbar-always flex flex-1 items-stretch gap-4 overflow-x-auto p-1 pb-4">
+        <p v-if="!loaded && !error" class="flex items-center gap-2 text-sm text-muted">
+          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+          Loading the board…
+        </p>
+        <div
+          ref="boardEl"
+          class="scrollbar-always flex flex-1 items-stretch gap-4 overflow-x-auto p-1 pb-4"
+          @dragover="edgeScroll"
+        >
           <section
             v-for="column in columns"
             :key="column.status"
@@ -275,8 +435,15 @@ onMounted(load)
                     <span>{{ item.ref }}</span>
                     <UBadge
                       v-if="running.includes(item.ref)"
-                      label="Running"
-                      color="primary"
+                      :label="stopping.includes(item.ref) ? 'Stopping' : 'Running'"
+                      :color="stopping.includes(item.ref) ? 'error' : 'primary'"
+                      variant="subtle"
+                      size="sm"
+                    />
+                    <UBadge
+                      v-if="item.labels.includes(holdLabel)"
+                      label="On hold"
+                      color="warning"
                       variant="subtle"
                       size="sm"
                     />
@@ -288,28 +455,10 @@ onMounted(load)
                       size="sm"
                     />
                   </p>
-                  <UDropdownMenu
-                    :items="
-                      columns
-                        .filter((c) => c.status !== column.status)
-                        .map((c) => ({
-                          label: c.displayName,
-                          onSelect: () => move(item, c.status),
-                        }))
-                    "
-                  >
-                    <UButton
-                      label="Move"
-                      :aria-label="`Move ${item.title}`"
-                      color="neutral"
-                      variant="ghost"
-                      size="xs"
-                      class="relative z-10"
-                    />
-                  </UDropdownMenu>
                 </div>
                 <!-- Its ::after covers the whole card, so a click anywhere opens the item while
-                     keyboard users still get one focusable button. Move sits above it. -->
+                     keyboard users still get one focusable button; moving without dragging is
+                     in the item's own More menu. -->
                 <button
                   type="button"
                   class="cursor-pointer text-left font-medium after:absolute after:inset-0 after:rounded-lg hover:underline focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary"
@@ -339,7 +488,40 @@ onMounted(load)
       v-model:open="detailOpen"
       :item-ref="detailRef"
       :status-name="statusName"
-      @updated="(item) => (place(item), wrote())"
+      :hold-label="holdLabel"
+      :initial="detailItem"
+      :seen="detailSeen"
+      :columns="columns"
+      @updated="updated"
+      @move="(to) => detailItem && move(detailItem, to)"
+      @deleted="deleted"
     />
+    <!-- After ItemDetail: opened from its More menu, it has to sit above the detail. -->
+    <UModal
+      v-model:open="reworkOpen"
+      :title="`Send ${reworkOf?.ref ?? ''} back for rework`"
+      description="The agent makes new tasks from this alone, so say what is wrong and what you expect."
+    >
+      <template #body>
+        <form class="flex flex-col gap-3" @submit.prevent="sendRework">
+          <UFormField label="What to rework">
+            <UTextarea v-model="reworkNote" :rows="4" autoresize autofocus class="w-full" />
+          </UFormField>
+          <span class="flex justify-end gap-2">
+            <UButton
+              label="Cancel"
+              color="neutral"
+              variant="outline"
+              @click="reworkOf = undefined"
+            />
+            <UButton
+              type="submit"
+              label="Send back for rework"
+              :disabled="reworkNote.trim() === ''"
+            />
+          </span>
+        </form>
+      </template>
+    </UModal>
   </UApp>
 </template>

@@ -22,9 +22,20 @@ import {
   toStoredMarkdown,
 } from '../editor'
 import { renderMarkdown } from '../markdown'
+import { TASK_COLOR } from '../task-status'
+import TaskDetail from './TaskDetail.vue'
 
-const props = defineProps<{ itemRef: string; statusName: (status: string) => string }>()
-const emit = defineEmits<{ updated: [item: Item] }>()
+const props = defineProps<{
+  itemRef: string
+  statusName: (status: string) => string
+  holdLabel: string
+  // The card as the board has it: shown at once, while the rest is read.
+  initial?: Item | undefined
+  // Changes whenever the board sees this item change (status, version, Run): read again.
+  seen: string
+  columns: { status: string; displayName: string }[]
+}>()
+const emit = defineEmits<{ updated: [item: Item]; move: [to: string]; deleted: [ref: string] }>()
 const open = defineModel<boolean>('open', { required: true })
 
 const detail = ref<ItemDetail>()
@@ -37,6 +48,17 @@ const commentDraft = ref('')
 const commenting = ref(false)
 const uploading = ref(false)
 const moving = ref(false)
+const controlling = ref(false)
+const reworking = ref(false)
+const reworkDraft = ref('')
+const confirmingDelete = ref(false)
+const openTask = ref<string>()
+const taskOpen = computed({
+  get: () => openTask.value !== undefined,
+  set: (value) => {
+    if (!value) openTask.value = undefined
+  },
+})
 const toast = useToast()
 const bodyEditor = useTemplateRef('bodyEditor')
 
@@ -49,9 +71,36 @@ const editorUi = {
   content: 'markdown [&_.ProseMirror]:min-h-[60vh] [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2',
 }
 
-const body = computed(() =>
-  detail.value ? renderMarkdown(detail.value.item.body, detail.value.item.ref) : '',
-)
+const item = computed(() => detail.value?.item ?? props.initial)
+const held = computed(() => item.value?.labels.includes(props.holdLabel) ?? false)
+// Runs come newest first; once Stop was pressed on it there is nothing more to press.
+const stoppable = computed(() => {
+  const run = detail.value?.runs[0]
+  return run?.state === 'running' && run.cancelMode !== 'hard'
+})
+const more = computed(() => [
+  {
+    label: 'Move to',
+    icon: 'i-lucide-arrow-right',
+    children: props.columns
+      .filter((c) => c.status !== item.value?.status)
+      // Ready to Rework asks what to fix right here: a dialog of the board's own would sit
+      // under this one, which takes every click outside itself.
+      .map((c) => ({
+        label: c.displayName,
+        onSelect: () =>
+          c.status === 'ready-to-rework' ? (reworking.value = true) : emit('move', c.status),
+      })),
+  },
+  {
+    label: 'Delete item',
+    icon: 'i-lucide-trash-2',
+    color: 'error' as const,
+    onSelect: () => (confirmingDelete.value = true),
+  },
+])
+
+const body = computed(() => (item.value ? renderMarkdown(item.value.body, item.value.ref) : ''))
 const comments = computed(() =>
   (detail.value?.comments ?? []).map((c) => ({
     ...c,
@@ -59,27 +108,53 @@ const comments = computed(() =>
   })),
 )
 
-// Every opening reads afresh: someone may have edited or commented in the tracker meanwhile.
+// Bumped by every change made here. A read that started before one does not have it, and
+// is read again rather than shown over it.
+let edits = 0
+
+async function load(): Promise<void> {
+  const at = edits
+  try {
+    const read = await call<ItemDetail>(`/api/items/${encodeURIComponent(props.itemRef)}`)
+    if (at !== edits) return load()
+    detail.value = read
+    error.value = ''
+  } catch (e) {
+    error.value = messageOf(e)
+  }
+}
+
+// Every opening starts clean and reads afresh: someone may have edited or commented in the
+// tracker meanwhile, and a draft left from last time is not what the person came back for.
 watch(
   () => [open.value, props.itemRef] as const,
-  async ([isOpen, itemRef]) => {
+  async ([isOpen]) => {
     if (!isOpen) return
     detail.value = undefined
     editing.value = false
+    reworking.value = false
+    reworkDraft.value = ''
+    commentDraft.value = ''
+    confirmingDelete.value = false
     error.value = ''
-    try {
-      detail.value = await call<ItemDetail>(`/api/items/${encodeURIComponent(itemRef)}`)
-    } catch (e) {
-      error.value = messageOf(e)
-    }
+    await load()
   },
   { immediate: true },
 )
 
+// The board read itself again and this item changed: the engine moved it, a Run started or
+// ended. Not mid-edit, where it would replace what the person is reading.
+watch(
+  () => props.seen,
+  () => {
+    if (open.value && detail.value !== undefined && !editing.value) void load()
+  },
+)
+
 function startEdit(): void {
-  if (!detail.value) return
-  draftTitle.value = detail.value.item.title
-  draftBody.value = detail.value.item.body
+  if (!item.value) return
+  draftTitle.value = item.value.title
+  draftBody.value = item.value.body
   editing.value = true
 }
 
@@ -101,14 +176,15 @@ async function save(): Promise<void> {
       `/api/items/${encodeURIComponent(current.item.ref)}`,
       sendJson('PATCH', { expectedVersion: current.item.version, ...changes }),
     )
-    current.item = item
+    if (detail.value) detail.value.item = item
+    edits++
     editing.value = false
     error.value = ''
     emit('updated', item)
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.data.item) {
       // Theirs is shown underneath; the draft stays, and saving again replaces theirs.
-      current.item = e.data.item
+      if (detail.value) detail.value.item = e.data.item
       emit('updated', e.data.item)
       toast.add({
         title: `${e.data.item.ref} was changed by someone else`,
@@ -132,7 +208,8 @@ async function addComment(): Promise<void> {
       `/api/items/${encodeURIComponent(current.item.ref)}/comments`,
       sendJson('POST', { body: commentDraft.value }),
     )
-    current.comments.push(comment)
+    detail.value?.comments.push(comment)
+    edits++
     commentDraft.value = ''
     error.value = ''
   } catch (e) {
@@ -155,7 +232,8 @@ async function upload(event: Event): Promise<void> {
       `/api/items/${encodeURIComponent(current.item.ref)}/attachments`,
       { method: 'POST', body: form },
     )
-    current.attachments.push(attachment)
+    detail.value?.attachments.push(attachment)
+    edits++
     error.value = ''
   } catch (e) {
     error.value = messageOf(e)
@@ -173,24 +251,68 @@ function insert(attachment: Attachment): void {
     .run()
 }
 
+// Stop and hold leave the status alone; reading again shows the Run winding down.
+async function control(action: 'stop' | 'hold' | 'release'): Promise<void> {
+  const current = detail.value
+  if (!current) return
+  controlling.value = true
+  try {
+    const ref = encodeURIComponent(current.item.ref)
+    const item = await call<Item>(
+      action === 'stop' ? `/api/items/${ref}/stop` : `/api/items/${ref}/hold`,
+      { method: action === 'stop' ? 'POST' : action === 'hold' ? 'PUT' : 'DELETE' },
+    )
+    emit('updated', item)
+    await load()
+  } catch (e) {
+    error.value = messageOf(e)
+  } finally {
+    controlling.value = false
+  }
+  // The engine ends a stopped agent within seconds: show it happen rather than leave
+  // "stopping" up until the next opening.
+  for (let i = 0; i < 30 && open.value; i++) {
+    const run = detail.value?.runs[0]
+    if (run?.state !== 'running' || run.cancelMode !== 'hard') break
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await load()
+  }
+}
+
+async function remove(): Promise<void> {
+  controlling.value = true
+  try {
+    await call(`/api/items/${encodeURIComponent(props.itemRef)}`, { method: 'DELETE' })
+    emit('deleted', props.itemRef)
+    open.value = false
+  } catch (e) {
+    error.value = messageOf(e)
+    confirmingDelete.value = false
+  } finally {
+    controlling.value = false
+  }
+}
+
 // split-review is where a person checks the tasks before any of them runs, in-review where
-// they accept the finished work.
+// they accept the finished work or send it back with what to fix.
 async function decide(to: string): Promise<void> {
   const current = detail.value
   if (!current) return
   moving.value = true
   try {
+    const ref = encodeURIComponent(current.item.ref)
     const item = await call<Item>(
-      `/api/items/${encodeURIComponent(current.item.ref)}/transition`,
-      sendJson('POST', { from: current.item.status, to }),
+      to === 'ready-to-rework' ? `/api/items/${ref}/rework` : `/api/items/${ref}/transition`,
+      sendJson('POST', { from: current.item.status, to, feedback: reworkDraft.value }),
     )
-    current.item = item
+    if (detail.value) detail.value.item = item
+    edits++
     error.value = ''
     emit('updated', item)
     open.value = false
   } catch (e) {
     if (e instanceof ApiError && e.status === 409 && e.data.item) {
-      current.item = e.data.item
+      if (detail.value) detail.value.item = e.data.item
       emit('updated', e.data.item)
       toast.add({
         title: `${e.data.item.ref} was moved by someone else`,
@@ -233,28 +355,76 @@ const authorOf = (c: Comment): string =>
 <template>
   <UModal
     v-model:open="open"
-    :title="detail?.item.ref ?? itemRef"
-    :description="detail ? statusName(detail.item.status) : 'Loading…'"
+    :title="item?.ref ?? itemRef"
+    :description="item ? statusName(item.status) : 'Loading…'"
     :ui="{ content: 'sm:max-w-5xl' }"
   >
     <template #body>
       <div class="flex flex-col gap-6">
         <UAlert v-if="error" color="error" variant="subtle" :title="error" />
+        <UAlert
+          v-if="confirmingDelete"
+          color="error"
+          variant="subtle"
+          :title="`Delete ${itemRef} with its tasks, comments and attachments?`"
+          description="This cannot be undone."
+          :actions="[
+            {
+              label: 'Keep it',
+              color: 'neutral',
+              variant: 'outline',
+              onClick: () => (confirmingDelete = false),
+            },
+            { label: 'Delete for good', color: 'error', loading: controlling, onClick: remove },
+          ]"
+        />
 
-        <template v-if="detail">
+        <template v-if="item">
           <section v-if="!editing" class="flex flex-col gap-3">
             <div class="flex items-start justify-between gap-4">
-              <h2 class="text-xl font-semibold">{{ detail.item.title }}</h2>
-              <UButton
-                label="Edit"
-                color="neutral"
-                variant="outline"
-                size="sm"
-                @click="startEdit"
-              />
+              <h2 class="flex items-center gap-2 text-xl font-semibold">
+                {{ item.title }}
+                <UBadge v-if="held" label="On hold" color="warning" variant="subtle" size="sm" />
+              </h2>
+              <span class="flex shrink-0 gap-2">
+                <UButton
+                  v-if="stoppable"
+                  label="Stop"
+                  color="error"
+                  variant="outline"
+                  size="sm"
+                  :disabled="controlling"
+                  @click="control('stop')"
+                />
+                <UButton
+                  :label="held ? 'Release' : 'Hold'"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  :disabled="controlling || !detail"
+                  @click="control(held ? 'release' : 'hold')"
+                />
+                <UButton
+                  label="Edit"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  :disabled="!detail"
+                  @click="startEdit"
+                />
+                <UDropdownMenu :items="more">
+                  <UButton
+                    icon="i-lucide-ellipsis"
+                    aria-label="More actions"
+                    color="neutral"
+                    variant="outline"
+                    size="sm"
+                  />
+                </UDropdownMenu>
+              </span>
             </div>
             <!-- eslint-disable-next-line vue/no-v-html -- markdown-it with html disabled -->
-            <div v-if="detail.item.body" class="markdown" v-html="body" />
+            <div v-if="item.body" class="markdown" v-html="body" />
             <p v-else class="text-sm text-muted">No description.</p>
           </section>
 
@@ -286,11 +456,47 @@ const authorOf = (c: Comment): string =>
               </UEditor>
             </div>
             <div class="flex justify-end gap-2">
-              <UButton label="Cancel" color="neutral" variant="ghost" @click="editing = false" />
+              <UButton label="Cancel" color="neutral" variant="outline" @click="editing = false" />
               <UButton label="Save" :loading="saving" @click="save" />
             </div>
           </div>
+        </template>
 
+        <template v-if="detail">
+          <form
+            v-if="reworking"
+            class="flex flex-col gap-2"
+            @submit.prevent="decide('ready-to-rework')"
+          >
+            <UFormField
+              label="What to rework"
+              help="The agent makes new tasks from this alone, so say what is wrong and what you expect."
+            >
+              <UTextarea v-model="reworkDraft" :rows="3" autoresize class="w-full" />
+            </UFormField>
+            <span class="flex justify-end gap-2">
+              <UButton
+                label="Cancel"
+                color="neutral"
+                variant="outline"
+                @click="reworking = false"
+              />
+              <UButton
+                type="submit"
+                label="Send back for rework"
+                :loading="moving"
+                :disabled="reworkDraft.trim() === ''"
+              />
+            </span>
+          </form>
+        </template>
+
+        <p v-if="!detail && !error" class="flex items-center gap-2 text-sm text-muted">
+          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+          Loading tasks, runs and comments…
+        </p>
+
+        <template v-if="detail">
           <section aria-labelledby="attachments-heading" class="flex flex-col gap-2">
             <div class="flex items-center justify-between">
               <h3 id="attachments-heading" class="text-sm font-medium">Attachments</h3>
@@ -338,7 +544,7 @@ const authorOf = (c: Comment): string =>
               <h3 id="tasks-heading" class="text-sm font-medium">Tasks</h3>
               <span v-if="detail.item.status === 'split-review'" class="flex gap-2">
                 <UButton
-                  label="Send back"
+                  label="Send back to Refining"
                   color="neutral"
                   variant="outline"
                   size="sm"
@@ -346,49 +552,68 @@ const authorOf = (c: Comment): string =>
                   @click="decide('refining')"
                 />
                 <UButton
-                  label="Approve"
+                  label="Approve and start"
                   size="sm"
                   :loading="moving"
                   :disabled="detail.tasks.length === 0"
                   @click="decide('in-progress')"
                 />
               </span>
-              <UButton
-                v-else-if="detail.item.status === 'in-review'"
-                label="Accept"
-                size="sm"
-                :loading="moving"
-                @click="decide('done')"
-              />
+              <span v-else-if="detail.item.status === 'in-review'" class="flex gap-2">
+                <UButton
+                  label="Rework"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  :disabled="moving"
+                  @click="reworking = true"
+                />
+                <UButton
+                  label="Accept as done"
+                  size="sm"
+                  :loading="moving"
+                  @click="decide('done')"
+                />
+              </span>
             </div>
             <p v-if="detail.tasks.length === 0" class="text-sm text-muted">No tasks yet.</p>
-            <ol class="flex flex-col gap-1">
-              <li
-                v-for="t in detail.tasks"
-                :key="t.ref"
-                :aria-label="`Task ${t.title}`"
-                class="flex items-center justify-between gap-2 text-sm"
-              >
-                <span class="flex min-w-0 flex-col">
-                  <span class="truncate">
-                    <span class="text-muted">{{ t.ref }}</span> {{ t.title }}
+            <ol class="flex flex-col">
+              <li v-for="t in detail.tasks" :key="t.ref" :aria-label="`Task ${t.title}`">
+                <!-- The whole row opens the task, so the status lines up with what it belongs to. -->
+                <button
+                  type="button"
+                  class="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto_6.5rem] items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
+                  @click="openTask = t.ref"
+                >
+                  <span class="flex min-w-0 flex-col">
+                    <span class="truncate">
+                      <span class="text-muted">{{ t.ref }}</span> {{ t.title }}
+                    </span>
+                    <span v-if="t.blockedBy.length > 0" class="truncate text-xs text-muted">
+                      after {{ t.blockedBy.map(taskTitle).join(', ') }}
+                    </span>
                   </span>
-                  <span v-if="t.blockedBy.length > 0" class="text-xs text-muted">
-                    after {{ t.blockedBy.map(taskTitle).join(', ') }}
-                  </span>
-                </span>
-                <span class="flex shrink-0 items-center gap-2 text-muted">
-                  <span v-if="t.origin" class="text-xs">{{ t.origin }}</span>
+                  <span class="text-xs text-muted">{{ t.origin }}</span>
                   <UBadge
                     :label="taskStatus(t.status)"
-                    color="neutral"
+                    :color="TASK_COLOR[t.status] ?? 'neutral'"
                     variant="subtle"
                     size="sm"
+                    class="justify-self-end"
                   />
-                </span>
+                </button>
               </li>
             </ol>
           </section>
+
+          <TaskDetail
+            v-if="openTask"
+            v-model:open="taskOpen"
+            :task-ref="openTask"
+            :item-status="detail.item.status"
+            :task-title="taskTitle"
+            @changed="load"
+          />
 
           <section aria-labelledby="runs-heading" class="flex flex-col gap-2">
             <h3 id="runs-heading" class="text-sm font-medium">Runs</h3>
@@ -406,7 +631,7 @@ const authorOf = (c: Comment): string =>
                 <span class="flex shrink-0 items-center gap-2 text-muted">
                   <time :datetime="r.startedAt">{{ new Date(r.startedAt).toLocaleString() }}</time>
                   <UBadge
-                    :label="r.outcome ?? 'running'"
+                    :label="r.outcome ?? (r.cancelMode === undefined ? 'running' : 'stopping')"
                     :color="outcomeColor(r)"
                     variant="subtle"
                     size="sm"

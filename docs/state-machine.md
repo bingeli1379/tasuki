@@ -12,7 +12,6 @@ stateDiagram-v2
     direction LR
     state "refining" as Refining
     state "ready-to-split" as ReadyToSplit
-    state "splitting" as Splitting
     state "needs-answers" as NeedsAnswers
     state "split-review" as SplitReview
     state "in-progress" as InProgress
@@ -23,12 +22,9 @@ stateDiagram-v2
 
     [*] --> Refining: human creates
     Refining --> ReadyToSplit: human
-    ReadyToSplit --> Splitting: rule A claims
-    Splitting --> SplitReview: succeeded (rule A or C)
-    Splitting --> NeedsAnswers: needs_input (rule A)
-    Splitting --> Blocked: failed or max_attempts
-    Splitting --> ReadyToSplit: lease expired (rule A), attempt + 1
-    Splitting --> ReadyToRework: lease expired (rule C), attempt + 1
+    ReadyToSplit --> SplitReview: rule A succeeded
+    ReadyToSplit --> NeedsAnswers: rule A needs_input
+    ReadyToSplit --> Blocked: rule A failed or max_attempts
     NeedsAnswers --> ReadyToSplit: human answers
     SplitReview --> InProgress: human approves
     SplitReview --> Refining: human sends back
@@ -37,9 +33,12 @@ stateDiagram-v2
     Blocked --> InProgress: auto-resume or human
     InReview --> Done: human accepts
     InReview --> ReadyToRework: human, feedback in comment
-    ReadyToRework --> Splitting: rule C claims
+    ReadyToRework --> SplitReview: rule C succeeded
+    ReadyToRework --> Blocked: rule C needs_input, failed, max_attempts
     Done --> [*]
 ```
+
+預設規則都不設 claim status：agent 跑的時候 item 留在 watch status，卡片掛 Running，lease 防重複（D74）。`splitting` 是選用的 claim status，規則設了 `claim: splitting` 才用得到，那時 item 會先被移進 `splitting`，結束時從那裡走出口，lease 過期就送回該規則的 watch status。
 
 人可以把 item 從任何狀態移到任何狀態。特別注意 `blocked` 的出口不限於 `in-progress`，補完資料後可以直接拉去 `ready-to-rework`。
 
@@ -58,19 +57,22 @@ stateDiagram-v2
 三個條件同時成立，engine 才自動接回：
 
 1. 最近一次 Run 的 outcome 是 `blocked_manual`
-2. 擋住的 manual task 都已經 `done`
+2. 擋住的 manual task 都已經 `done`：讀成 item 底下已經沒有任何 `manual` 的 task。人把 manual 交回 `to-do` 也算，下一個 Run 會去做它（D71）
 3. item 沒有 `hold`
+
+engine 每輪 poll 在復原之後、認領之前檢查，接回到那條規則的 watch status，並留一則 system comment（D67）。目標不寫死：item 要在那條規則 `on.blocked_manual` 指的 status 上才接。
 
 ### Rules and outcomes
 
 | rule | watch | claim status | succeeded | needs_input | blocked_manual | failed / max_attempts |
 |---|---|---|---|---|---|---|
-| A split | ready-to-split | splitting | split-review | needs-answers | n/a | blocked |
+| A split | ready-to-split | none (lease dedupes) | split-review | needs-answers | n/a | blocked |
 | B execute | in-progress | none (lease dedupes) | in-review | blocked | blocked | blocked |
-| C rework | ready-to-rework | splitting | split-review | blocked | n/a | blocked |
+| C rework | ready-to-rework | none (lease dedupes) | split-review | blocked | n/a | blocked |
 
-- `cancelled` 的 Run 不動 status。item 停在原地，由人決定下一步。
+- `cancelled` 的 Run 不動 status。item 停在原地，由人決定下一步。按 Stop 會順手貼上 `hold`，不然下一輪又會被認領（D72）。`hold` 拿掉後，停在 claim status 的 item 由 engine 送回 watch status，停在 watch status 的直接被 Poller 撿起。
 - 規則 A 要能容忍 item 底下已經有 task（refine 階段建立的 manual task）。
+- rework 要有人說改什麼才開跑：上一個 Run 結束之後，item 上要有一則人寫的 note。看板拖進 `ready-to-rework` 或從詳情移過去都會先問，使用者 MCP 的 `request_rework` 強制要寫；在 Jira 直接拖過去又沒留言的，engine 不派 agent，走規則的 `needs_input` 出口（預設 `blocked`）並留言請人補上（D75）。
 - rework 的新 task 也要先過 `split-review`。想省掉這關，把規則 C 的 succeeded 出口改成 `in-progress`。
 
 ## Task
@@ -95,10 +97,15 @@ stateDiagram-v2
     InProgress --> Manual: human takes over
     Manual --> Done: human finished
     Manual --> ToDo: human hands back
+    Done --> ToDo: human reopens, no live Run
+    Done --> Manual: human reopens, no live Run
     Done --> [*]
 ```
 
-- `done` 是終點，engine 不重開。rework 一律開新 task。
+- engine 不重開 `done`，agent 也不行。rework 一律開新 task。
+- 人走的邊：`to-do`、`in-progress` 接手成 `manual`，`manual` 交回 `to-do` 或做完成 `done`，按錯時把 `done` 改回 `to-do` 或 `manual`。改回去只在 item 沒有存活的 Run 時可以，agent 可能正依賴它是 done（D74）。不在這些邊上的移動拒絕（domain 的 `personMoveRefusal`）。
+- 人在看板或使用者 MCP 的每個操作（移動 item 或 task、hold、release、Stop）都留一則 author 是人、kind 是 `system` 的 comment，例如「Moved from manual to done.」。誰、什麼時候由 comment 本身記著。用 `system` 不用 `note`，因為 rework 的 agent 把人最新的 note 當成回饋（D74）。
+- 人只能在 item 是 `split-review` 時改 task 的 title、body，或刪掉 task（D70）。
 - 目前 orchestrator 一個 item 起一個 process（M1），engine 看不到裡面的 subagent。把執行中的 task 改成 `manual` 只是 soft stop，之後不再派它。要立刻停掉那張 task，只能 hard stop 整個 orchestrator。
 - task 層的「review 沒過重做幾次」engine 管不到，由 orchestrator 的 prompt 約束。item 層用 Run 的重試次數與用量設上限。
 
@@ -109,6 +116,6 @@ stateDiagram-v2
 1. 同一張 item 同時最多一個存活的 Run。
 2. item 的 status 只有三種來源能改：人、規則的 outcome、自動復原。agent 不能改。
 3. `in-progress` 的 task 只有在 item 有存活的 Run 時才可信。Run 結束（`cancelled` 除外）或被 `abandoned` 時，engine 把它們送回 `to-do`（D69）。
-4. `done` 的 task 不會被 engine 重開。
+4. `done` 的 task 不會被 engine 或 agent 重開。人可以，但只在 item 沒有存活的 Run 時（D74）。
 5. 有 `hold` 的 item，Poller 跳過它，存活的 Run 被取消。
 6. `cancelled` 的 Run 不動任何 status。

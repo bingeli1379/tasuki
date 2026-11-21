@@ -47,6 +47,17 @@ const execute: Rule = {
   on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
 }
 
+// Rule C: same claim status as split, and its new tasks go through split-review too.
+const rework: Rule = {
+  id: 'rework',
+  watch: 'ready-to-rework',
+  claim: 'splitting',
+  agent: 'fake',
+  mode: 'rework',
+  maxAttempts: 2,
+  on: { succeeded: 'split-review', needs_input: 'blocked' },
+}
+
 // What a scripted agent does once started: it gets an MCP client already connected to the
 // facade with its Run's token, and returns how its process exits.
 type Script = (mcp: Client, spec: RunSpec) => Promise<RunExit>
@@ -123,16 +134,22 @@ function setup(
     storage,
     runtime,
     statuses,
-    rules: [split, execute],
+    rules: [split, execute, rework],
+    holdLabel: 'hold',
     tokens,
   })
   const scripts: Script[] = []
   const started: RunSpec[] = []
+  // The signals each agent got, in order; with ignoreSigterm an agent outlives SIGTERM.
+  const signals: string[] = []
+  const agent = { ignoreSigterm: false }
   const runner: RunnerPort = {
     start(spec) {
       started.push(spec)
       const script = scripts.shift() ?? splitInto()
-      const exit = (async () => {
+      let killed: (exit: RunExit) => void = () => {}
+      const dead = new Promise<RunExit>((resolve) => (killed = resolve))
+      const alive = (async () => {
         const mcp = new Client({ name: 'agent', version: '0' })
         await mcp.connect(
           new StreamableHTTPClientTransport(new URL(spec.mcp.url), {
@@ -142,7 +159,13 @@ function setup(
         )
         return script(mcp, spec)
       })()
-      return { exit }
+      return {
+        exit: Promise.race([alive, dead]),
+        terminate(signal) {
+          signals.push(signal)
+          if (signal === 'SIGKILL' || !agent.ignoreSigterm) killed({ code: null, signal })
+        },
+      }
     },
   }
   const logs: string[] = []
@@ -152,7 +175,14 @@ function setup(
       runtime,
       clock,
       rules,
-      limits: { maxConcurrentRuns, leaseSeconds: 120, defaultMaxAttempts: 3 },
+      limits: {
+        maxConcurrentRuns,
+        leaseSeconds: 120,
+        defaultMaxAttempts: 3,
+        softGraceSeconds: 300,
+        hardGraceSeconds: 10,
+      },
+      holdLabel: 'hold',
       workspaceRoot: mkdtempSync(join(tmpdir(), 'tasuki-ws-')),
       runners: { fake: runner },
       tokens,
@@ -194,6 +224,8 @@ function setup(
     approvedItem,
     scripts,
     started,
+    signals,
+    agent,
     engine,
     readyItem,
     now,
@@ -540,6 +572,7 @@ describe('rule execute on a fake agent', () => {
     expect(names).toEqual([
       'get_item',
       'list_tasks',
+      'list_comments',
       'add_comment',
       'set_task_status',
       'report_result',
@@ -598,6 +631,151 @@ describe('rule execute on a fake agent', () => {
     expect(second.logs).toEqual([])
     expect((await second.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('abandoned')
     expect((await second.storage.get(other.ref)).status).toBe('splitting')
+  })
+})
+
+describe('auto-resume (state-machine.md)', () => {
+  // Executes what it can, then stops at the manual task.
+  const stopAtManual: Script = async (mcp, spec) => {
+    const tasks = JSON.parse(
+      text(await mcp.callTool({ name: 'list_tasks', arguments: {} })),
+    ) as TaskNode[]
+    for (const status of ['in-progress', 'in-review', 'done'])
+      await move(mcp, tasks[0]?.ref ?? '', status)
+    return report('blocked_manual')(mcp, spec)
+  }
+
+  it('picks a blocked item up again once a person has done its manual task', async () => {
+    const t = setup()
+    t.scripts.push(stopAtManual, walk)
+    const [item, , manual] = await t.approvedItem(
+      ['Schema', 'to-do'],
+      ['Sign the contract', 'manual'],
+      ['Endpoint', 'to-do'],
+    )
+    const ref = item?.ref ?? ''
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(ref)).status).toBe('blocked')
+
+    // Still manual: the next round leaves it.
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(1)
+
+    await t.storage.transition(manual?.ref ?? '', 'manual', 'done')
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(2)
+    expect((await t.storage.get(ref)).status).toBe('in-review')
+    expect((await t.runtime.runsFor(ref)).map((r) => [r.attempt, r.outcome])).toEqual([
+      [1, 'succeeded'],
+      [1, 'blocked_manual'],
+    ])
+    expect((await t.storage.comments(ref)).map((c) => c.body)).toContain(
+      'No task is manual any more. Moved back to in-progress for rule execute to carry on.',
+    )
+  })
+
+  it('leaves an item blocked for another reason where it is', async () => {
+    const t = setup()
+    t.scripts.push(ask)
+    const [item] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
+    expect(t.started).toHaveLength(1)
+  })
+})
+
+describe('rule rework on a fake agent', () => {
+  // Finished work a person did not accept: every task done, the item in in-review.
+  const reviewedItem = async (t: ReturnType<typeof setup>): Promise<WorkUnit> => {
+    const [item, ...tasks] = await t.approvedItem(['Schema', 'done'])
+    for (const task of tasks) expect(task.status).toBe('done')
+    return t.storage.transition(item?.ref ?? '', 'in-progress', 'in-review')
+  }
+  const send = (t: ReturnType<typeof setup>, ref: string, feedback: string) =>
+    t.app.request(`/api/items/${ref}/rework`, {
+      method: 'POST',
+      body: JSON.stringify({ from: 'in-review', feedback }),
+    })
+
+  it("makes new tasks from the person's feedback and sends them to split-review", async () => {
+    const t = setup()
+    let feedback = ''
+    t.scripts.push(async (mcp, spec) => {
+      const comments = JSON.parse(
+        text(await mcp.callTool({ name: 'list_comments', arguments: {} })),
+      ) as { author: string; kind: string; body: string }[]
+      feedback = comments.findLast((c) => c.author === 'human' && c.kind === 'note')?.body ?? ''
+      await mcp.callTool({ name: 'create_task', arguments: { title: 'Fix it', body: feedback } })
+      return report('succeeded')(mcp, spec)
+    })
+    const item = await reviewedItem(t)
+    expect((await send(t, item.ref, 'The button is the wrong colour.')).status).toBe(200)
+    expect((await t.storage.get(item.ref)).status).toBe('ready-to-rework')
+
+    const engine = t.engine([rework])
+    await engine.tick()
+    await engine.settled()
+    expect(feedback).toBe('The button is the wrong colour.')
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    // The done task stays done; the fix is a new task (invariant 4).
+    expect((await t.storage.children(item.ref)).map((c) => [c.title, c.status])).toEqual([
+      ['Schema', 'done'],
+      ['Fix it', 'to-do'],
+    ])
+  })
+
+  it('is failed when it made no task in this run, even with tasks on the item', async () => {
+    const t = setup()
+    t.scripts.push(report('succeeded'))
+    const item = await reviewedItem(t)
+    await send(t, item.ref, 'Wrong.')
+    const engine = t.engine([rework])
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+  })
+
+  it('moved there in the tracker with no word on what to fix, it waits in blocked for one', async () => {
+    const t = setup()
+    const item = await reviewedItem(t)
+    await t.storage.transition(item.ref, 'in-review', 'ready-to-rework')
+    const engine = t.engine([rework])
+    await engine.tick()
+    expect(t.started).toHaveLength(0)
+    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+      'Rule rework needs a comment saying what to rework, and none was left since the last run. Moved to blocked: write one, then move it back to ready-to-rework.',
+    )
+
+    // A note written straight in the tracker is feedback too.
+    t.scripts.push(splitInto('Fix it'))
+    await t.storage.addComment({
+      target: item.ref,
+      author: 'human',
+      kind: 'note',
+      body: 'Fix the colour.',
+    })
+    await t.storage.transition(item.ref, 'blocked', 'ready-to-rework')
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(1)
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('a send-back without feedback is a 400 and the item stays', async () => {
+    const t = setup()
+    const item = await reviewedItem(t)
+    const res = await send(t, item.ref, ' ')
+    expect(res.status).toBe(400)
+    expect((await t.storage.get(item.ref)).status).toBe('in-review')
   })
 })
 
@@ -684,6 +862,287 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
   })
 })
 
+describe('stopping a run (stop-and-recovery.md)', () => {
+  const stop = (t: ReturnType<typeof setup>, ref: string) =>
+    t.app.request(`/api/items/${ref}/stop`, { method: 'POST' })
+  const hold = (t: ReturnType<typeof setup>, ref: string, method: 'PUT' | 'DELETE') =>
+    t.app.request(`/api/items/${ref}/hold`, { method })
+  // Waits for the go, tries to write, reports, then never exits on its own.
+  const lateWriter = () => {
+    let go: () => void = () => {}
+    let wrote: (refusal: string) => void = () => {}
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    const refusal = new Promise<string>((resolve) => (wrote = resolve))
+    const script: Script = async (mcp, spec) => {
+      await gate
+      const res = await mcp.callTool({ name: 'create_task', arguments: { title: 'Late' } })
+      await report('succeeded')(mcp, spec)
+      wrote(text(res))
+      return hang(mcp, spec)
+    }
+    return { script, go, refusal }
+  }
+
+  it('Stop ends the agent, holds the item where it was, and releasing starts it over', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    expect((await stop(t, item.ref)).status).toBe(200)
+    await engine.enforce()
+    await engine.settled()
+
+    expect(t.signals).toEqual(['SIGTERM'])
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      outcome: 'cancelled',
+      cancelMode: 'hard',
+      cancelRequestedBy: 'stop',
+    })
+    expect(await t.storage.get(item.ref)).toMatchObject({ status: 'splitting', labels: ['hold'] })
+    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+      'Rule split, attempt 1: cancelled, a person pressed Stop. The engine moved nothing.',
+    )
+    await engine.tick()
+    expect(t.started).toHaveLength(1)
+
+    expect((await hold(t, item.ref, 'DELETE')).status).toBe(200)
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(2)
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      attempt: 1,
+      outcome: 'succeeded',
+    })
+    expect((await t.storage.comments(item.ref)).map((c) => c.body)).toContain(
+      'The hold is off. Moved back to ready-to-split for rule split to start again.',
+    )
+  })
+
+  it('Stop after the round already saw its hold label still says Stop', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    // On Jira the label lands seconds before the hard cancel; a round can come in between.
+    await t.storage.addLabel(item.ref, 'hold')
+    await engine.tick()
+    await stop(t, item.ref)
+    await engine.enforce()
+    await engine.settled()
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      cancelMode: 'hard',
+      cancelRequestedBy: 'stop',
+    })
+    expect((await t.storage.comments(item.ref)).at(-1)?.body).toContain('a person pressed Stop')
+  })
+
+  it('Stop with no agent on the item is a 400 and puts nothing on hold', async () => {
+    const t = setup()
+    const item = await t.readyItem()
+    expect((await stop(t, item.ref)).status).toBe(400)
+    expect((await t.storage.get(item.ref)).labels).toEqual([])
+  })
+
+  it('an agent that ignores SIGTERM gets SIGKILL after hardGraceSeconds', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    t.agent.ignoreSigterm = true
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await stop(t, item.ref)
+    await engine.enforce()
+    t.now.t += 9_000
+    await engine.enforce()
+    expect(t.signals).toEqual(['SIGTERM'])
+    t.now.t += 1_000
+    await engine.enforce()
+    await engine.settled()
+    expect(t.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('cancelled')
+  })
+
+  it("hold refuses the agent's writes and ignores its report; past softGraceSeconds it is ended", async () => {
+    const t = setup()
+    const agent = lateWriter()
+    t.scripts.push(agent.script)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    expect((await hold(t, item.ref, 'PUT')).status).toBe(200)
+    agent.go()
+    expect(await agent.refusal).toMatch(/^RUN_CANCELLED/)
+
+    t.now.t += 299_000
+    await engine.enforce()
+    expect(t.signals).toEqual([])
+    t.now.t += 1_000
+    await engine.enforce()
+    await engine.settled()
+    expect(t.signals).toEqual(['SIGTERM'])
+    const [run] = await t.runtime.runsFor(item.ref)
+    expect(run).toMatchObject({
+      outcome: 'cancelled',
+      cancelMode: 'hard',
+      cancelRequestedBy: 'hold',
+    })
+    expect(run?.verdict).toBeUndefined()
+    expect(await t.storage.children(item.ref)).toEqual([])
+    expect((await t.storage.get(item.ref)).status).toBe('splitting')
+  })
+
+  it('a hold set in the tracker by hand, or a person moving the item, is noticed by the round', async () => {
+    const t = setup()
+    t.scripts.push(hang, hang)
+    const [held] = await t.approvedItem()
+    const moved = await t.readyItem()
+    const engine = t.engine([split, execute])
+    await engine.tick()
+    expect(t.started).toHaveLength(2)
+
+    await t.storage.addLabel(held?.ref ?? '', 'hold')
+    await t.storage.transition(moved.ref, 'splitting', 'refining')
+    await engine.tick()
+    expect(
+      (await t.runtime.liveRuns())
+        .map((r) => [r.target, r.cancelMode, r.cancelRequestedBy])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual([
+      [held?.ref, 'soft', 'hold'],
+      [moved.ref, 'soft', 'moved'],
+    ])
+    expect(t.started).toHaveLength(2)
+
+    t.now.t += 300_000
+    await engine.enforce()
+    await engine.settled()
+    expect((await t.storage.comments(moved.ref)).at(-1)?.body).toBe(
+      'Rule split, attempt 1: cancelled, the item was moved while it ran. The engine moved nothing.',
+    )
+    expect((await t.storage.get(moved.ref)).status).toBe('refining')
+    expect((await t.storage.get(held?.ref ?? '')).status).toBe('in-progress')
+  })
+
+  it('leaves an item on hold alone until it is released', async () => {
+    const t = setup()
+    const item = await t.readyItem()
+    await hold(t, item.ref, 'PUT')
+    const engine = t.engine()
+    await engine.tick()
+    expect(t.started).toHaveLength(0)
+    await hold(t, item.ref, 'DELETE')
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('an item is deleted with its tasks, but not while an agent works on it', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const [item, task] = await t.approvedItem()
+    const engine = t.engine([execute])
+    await engine.tick()
+    const del = () => t.app.request(`/api/items/${item?.ref}`, { method: 'DELETE' })
+    expect((await del()).status).toBe(400)
+    await stop(t, item?.ref ?? '')
+    await engine.enforce()
+    await engine.settled()
+    expect((await del()).status).toBe(200)
+    for (const ref of [item?.ref, task?.ref])
+      expect((await t.app.request(`/api/items/${ref}`)).status).toBe(404)
+  })
+
+  it('only an item goes on hold', async () => {
+    const t = setup()
+    const [, task] = await t.approvedItem()
+    expect((await hold(t, task?.ref ?? '', 'PUT')).status).toBe(400)
+  })
+})
+
+describe('global pause (stop-and-recovery.md)', () => {
+  const pause = (t: ReturnType<typeof setup>, kill = false) =>
+    t.app.request('/api/engine/pause', { method: 'POST', body: JSON.stringify({ kill }) })
+  const resume = (t: ReturnType<typeof setup>) =>
+    t.app.request('/api/engine/resume', { method: 'POST' })
+
+  it('starts no Run while paused, across a restart, and carries on once resumed', async () => {
+    const t = setup()
+    const item = await t.readyItem()
+    expect((await pause(t)).status).toBe(200)
+    await t.engine().tick()
+    expect(t.started).toHaveLength(0)
+    expect(await (await t.app.request('/api/board')).json()).toMatchObject({ paused: true })
+
+    const again = setup(t.runtimeDb, t.trackerDb, t.now)
+    const engine = again.engine()
+    await engine.tick()
+    expect(again.started).toHaveLength(0)
+    expect((await resume(again)).status).toBe(200)
+    await engine.tick()
+    await engine.settled()
+    expect((await again.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('lets a Run already working finish', async () => {
+    const t = setup()
+    let go: () => void = () => {}
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    t.scripts.push(async (mcp, spec) => {
+      await gate
+      return splitInto()(mcp, spec)
+    })
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await pause(t)
+    await engine.enforce()
+    go()
+    await engine.settled()
+    expect(t.signals).toEqual([])
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('with kill stops every Run; resumed, each item starts over where its rule starts', async () => {
+    const t = setup()
+    // Split is claimed before execute in each round.
+    t.scripts.push(hang, hang, splitInto(), walk)
+    const split1 = await t.readyItem()
+    const [exec] = await t.approvedItem()
+    const engine = t.engine([split, execute])
+    await engine.tick()
+    expect(t.started).toHaveLength(2)
+
+    expect(await (await pause(t, true)).json()).toMatchObject({ stopped: expect.any(Array) })
+    await engine.enforce()
+    await engine.settled()
+    expect(t.signals).toEqual(['SIGTERM', 'SIGTERM'])
+    for (const ref of [split1.ref, exec?.ref ?? ''])
+      expect((await t.runtime.runsFor(ref))[0]).toMatchObject({
+        outcome: 'cancelled',
+        cancelRequestedBy: 'pause',
+      })
+
+    // Still paused: the split item goes back to wait in ready-to-split, nothing starts.
+    await engine.tick()
+    expect(t.started).toHaveLength(2)
+    expect((await t.storage.get(split1.ref)).status).toBe('ready-to-split')
+    expect((await t.storage.get(exec?.ref ?? '')).status).toBe('in-progress')
+    expect((await t.storage.comments(split1.ref)).at(-1)?.body).toBe(
+      'Stopped by pausing the engine. Moved back to ready-to-split for rule split to start again.',
+    )
+
+    await resume(t)
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(4)
+    expect((await t.storage.get(split1.ref)).status).toBe('split-review')
+    expect((await t.storage.get(exec?.ref ?? '')).status).toBe('in-review')
+  })
+})
+
 describe('the MCP facade for agents', () => {
   it('reads only its own item, takes one report, and shuts the door once the Run is over', async () => {
     const t = setup()
@@ -747,6 +1206,7 @@ describe('the MCP facade for agents', () => {
       for (const call of [
         { name: 'create_task', arguments: { title: 'x', blockedBy: [theirs.ref] } },
         { name: 'add_comment', arguments: { target: other.ref, kind: 'note', body: 'hi' } },
+        { name: 'list_comments', arguments: { target: theirs.ref } },
         { name: 'create_task', arguments: { title: 'x', initialStatus: 'done' } },
       ])
         errors.push((await mcp.callTool(call)).isError === true)
@@ -757,7 +1217,7 @@ describe('the MCP facade for agents', () => {
     await engine.tick()
     await engine.settled()
 
-    expect(errors).toEqual([true, true, true])
+    expect(errors).toEqual([true, true, true, true])
     expect(await t.storage.children(item.ref)).toEqual([])
     expect(await t.storage.comments(other.ref)).toEqual([])
   })
@@ -773,7 +1233,14 @@ describe('the MCP facade for agents', () => {
     const engine = t.engine()
     await engine.tick()
     await engine.settled()
-    expect(names).toEqual(['get_item', 'list_tasks', 'create_task', 'add_comment', 'report_result'])
+    expect(names).toEqual([
+      'get_item',
+      'list_tasks',
+      'create_task',
+      'list_comments',
+      'add_comment',
+      'report_result',
+    ])
   })
 
   it('turns away a request without a live Run token', async () => {

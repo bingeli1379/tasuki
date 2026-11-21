@@ -4,6 +4,7 @@ import type { Ref } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
+import { assertRunTarget } from './run-target'
 
 export interface AddAgentCommentDeps {
   storage: StoragePort
@@ -24,11 +25,7 @@ export async function addAgentComment(
   input: AddAgentCommentInput,
 ): Promise<Comment> {
   if (input.body.trim() === '') throw new InvalidInput('comment is empty')
-  if (
-    input.target !== run.target &&
-    !(await storage.children(run.target)).some((t) => t.ref === input.target)
-  )
-    throw new InvalidInput(`${input.target} is not this run's item or one of its tasks`)
+  await assertRunTarget(storage, run, input.target)
   const comment = await storage.addComment({
     target: input.target,
     author: 'agent',

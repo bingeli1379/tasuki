@@ -3,15 +3,26 @@ import {
   addAttachment,
   addComment,
   createItem,
+  deleteItem,
+  deleteTask,
   EditConflict,
   getItem,
+  getTask,
+  holdItem,
   InvalidInput,
   listBoard,
   MAX_ATTACHMENT_BYTES,
   moveItem,
+  moveTask,
   NotFound,
+  pauseEngine,
+  releaseItem,
+  requestRework,
+  resumeEngine,
   StatusConflict,
+  stopRun,
   updateItem,
+  updateTask,
   type Rule,
   type RuntimeStorePort,
   type StatusMap,
@@ -40,10 +51,19 @@ export interface AppDeps {
   runtime: RuntimeStorePort
   statuses: StatusMap
   rules: readonly Rule[]
+  holdLabel: string
   tokens: RunTokens
 }
 
-export function createApp({ db, storage, runtime, statuses, rules, tokens }: AppDeps): Hono {
+export function createApp({
+  db,
+  storage,
+  runtime,
+  statuses,
+  rules,
+  holdLabel,
+  tokens,
+}: AppDeps): Hono {
   const app = new Hono()
   app.onError((e, c) => {
     if (e instanceof InvalidInput) return c.json({ error: e.message }, 400)
@@ -61,6 +81,7 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
         runtime,
         { item: statuses.mapped('item'), task: statuses.mapped('task') },
         rules,
+        holdLabel,
       ),
     ),
   )
@@ -84,6 +105,38 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
       }),
     )
   })
+  app.post('/api/items/:ref/rework', async (c) => {
+    const body = await c.req.json<{ from?: unknown; feedback?: unknown }>()
+    if (typeof body.from !== 'string') throw new InvalidInput('from is required')
+    return c.json(
+      await requestRework(storage, statuses.mapped('item'), {
+        ref: c.req.param('ref'),
+        from: body.from,
+        feedback: typeof body.feedback === 'string' ? body.feedback : '',
+      }),
+    )
+  })
+  app.post('/api/engine/pause', async (c) => {
+    const body = await c.req.json<{ kill?: unknown }>().catch(() => ({}) as { kill?: unknown })
+    return c.json({ stopped: await pauseEngine(runtime, body.kill === true) })
+  })
+  app.post('/api/engine/resume', async (c) => {
+    await resumeEngine(runtime)
+    return c.json({ ok: true })
+  })
+  app.post('/api/items/:ref/stop', async (c) =>
+    c.json(await stopRun({ storage, runtime }, holdLabel, c.req.param('ref'))),
+  )
+  app.put('/api/items/:ref/hold', async (c) =>
+    c.json(await holdItem({ storage, runtime }, holdLabel, c.req.param('ref'))),
+  )
+  app.delete('/api/items/:ref/hold', async (c) =>
+    c.json(await releaseItem(storage, holdLabel, c.req.param('ref'))),
+  )
+  app.delete('/api/items/:ref', async (c) => {
+    await deleteItem({ storage, runtime }, c.req.param('ref'))
+    return c.json({ ok: true })
+  })
   app.get('/api/items/:ref', async (c) =>
     c.json(await getItem(storage, runtime, c.req.param('ref'))),
   )
@@ -101,6 +154,43 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
     )
   })
   app.post('/api/items/:ref/comments', async (c) => {
+    const body = await c.req.json<{ body?: unknown }>()
+    const comment = await addComment(storage, {
+      ref: c.req.param('ref'),
+      body: typeof body.body === 'string' ? body.body : '',
+    })
+    return c.json(comment, 201)
+  })
+  app.get('/api/tasks/:ref', async (c) => c.json(await getTask(storage, c.req.param('ref'))))
+  app.post('/api/tasks/:ref/transition', async (c) => {
+    const body = await c.req.json<{ from?: unknown; to?: unknown }>()
+    if (typeof body.from !== 'string' || typeof body.to !== 'string')
+      throw new InvalidInput('from and to are required')
+    return c.json(
+      await moveTask(
+        { storage, runtime },
+        { ref: c.req.param('ref'), from: body.from, to: body.to },
+      ),
+    )
+  })
+  app.patch('/api/tasks/:ref', async (c) => {
+    const body = await c.req.json<{ expectedVersion?: unknown; title?: unknown; body?: unknown }>()
+    if (typeof body.expectedVersion !== 'string')
+      throw new InvalidInput('expectedVersion is required')
+    return c.json(
+      await updateTask(storage, {
+        ref: c.req.param('ref'),
+        expectedVersion: body.expectedVersion,
+        ...(typeof body.title === 'string' ? { title: body.title } : {}),
+        ...(typeof body.body === 'string' ? { body: body.body } : {}),
+      }),
+    )
+  })
+  app.delete('/api/tasks/:ref', async (c) => {
+    await deleteTask(storage, c.req.param('ref'))
+    return c.json({ ok: true })
+  })
+  app.post('/api/tasks/:ref/comments', async (c) => {
     const body = await c.req.json<{ body?: unknown }>()
     const comment = await addComment(storage, {
       ref: c.req.param('ref'),
@@ -142,7 +232,7 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ storage, runtime, statuses, rules }).connect(transport)
+    await createMcpServer({ storage, runtime, statuses, rules, holdLabel }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   // The facade for agents the engine started: only a live Run's token gets in.

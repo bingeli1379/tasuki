@@ -15,6 +15,8 @@ export interface ClaimLimits {
   leaseSeconds: number
   // <dataDir>/workspaces; each item gets its own folder under it.
   workspaceRoot: string
+  // Items with this label are left alone (invariant 5).
+  holdLabel: string
 }
 
 export interface Claimed {
@@ -40,8 +42,13 @@ export async function claimItems(
   for (const rule of rules) {
     for (const item of waiting.filter((i) => i.status === rule.watch)) {
       if (slots <= 0) return claimed
-      if (busy.has(item.ref)) continue
-      const previous = (await runtime.runsFor(item.ref)).find((r) => r.rule === rule.id)
+      if (busy.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
+      const runs = await runtime.runsFor(item.ref)
+      if (rule.mode === 'rework' && !(await hasFeedback(storage, item.ref, runs[0]))) {
+        await askForFeedback(storage, rule, item.ref)
+        continue
+      }
+      const previous = runs.find((r) => r.rule === rule.id)
       const attempt = nextAttempt(previous)
       // The Run goes first: a crash before the claim leaves only a lease that expires,
       // with the item still where it was (architecture.md).
@@ -79,6 +86,38 @@ export async function claimItems(
     }
   }
   return claimed
+}
+
+// A reworking agent goes by what a person wrote since the last Run on the item ended. The
+// board and the user MCP ask for it, but an item moved here in Jira by hand may have none
+// (D75). The two clocks are the engine's and the tracker's; they are close enough for this.
+async function hasFeedback(
+  storage: StoragePort,
+  ref: string,
+  last: Run | undefined,
+): Promise<boolean> {
+  const since = last?.finishedAt === undefined ? 0 : Date.parse(last.finishedAt)
+  return (await storage.comments(ref)).some(
+    (c) => c.author === 'human' && c.kind === 'note' && Date.parse(c.createdAt) > since,
+  )
+}
+
+// Without feedback there is nothing to rework from: no agent starts, and the item takes the
+// rule's needs_input exit, as a reworking agent asking for it would.
+async function askForFeedback(storage: StoragePort, rule: Rule, ref: string): Promise<void> {
+  const to = exitFor(rule, 'needs_input') ?? 'blocked'
+  try {
+    await storage.transition(ref, rule.watch, to)
+  } catch (e) {
+    if (!(e instanceof StatusConflict)) throw e
+    return
+  }
+  await storage.addComment({
+    target: ref,
+    author: 'engine',
+    kind: 'system',
+    body: `Rule ${rule.id} needs a comment saying what to rework, and none was left since the last run. Moved to ${to}: write one, then move it back to ${rule.watch}.`,
+  })
 }
 
 // max_attempts is recorded as a Run of its own (D38), so pulling the item back later starts

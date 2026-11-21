@@ -39,7 +39,15 @@ try {
 
   // Loopback only until auth lands (S9, security-and-auth.md).
   serve({
-    fetch: createApp({ db, storage, runtime, statuses, rules: config.rules, tokens }).fetch,
+    fetch: createApp({
+      db,
+      storage,
+      runtime,
+      statuses,
+      rules: config.rules,
+      holdLabel: config.holdLabel,
+      tokens,
+    }).fetch,
     port: config.port,
     hostname: '127.0.0.1',
   })
@@ -49,6 +57,7 @@ try {
     clock: systemClock,
     rules: config.rules,
     limits: config.limits,
+    holdLabel: config.holdLabel,
     workspaceRoot: join(config.dataDir, 'workspaces'),
     runners,
     tokens,
@@ -57,6 +66,8 @@ try {
   // The first round runs at start, so Runs a crash left behind are recovered right away.
   await engine.tick()
   setInterval(() => void engine.tick(), config.pollSeconds * 1000)
+  // Stop reaches the agent within a second, not a poll interval later.
+  setInterval(() => void engine.enforce(), 1000)
   console.log(`data dir: ${config.dataDir}`)
   console.log(`tracker: ${config.tracker.plugin}`)
   console.log(`rules: ${config.rules.map((r) => r.id).join(', ') || 'none'}`)

@@ -2,6 +2,8 @@ import {
   InvalidInput,
   NotFound,
   RunConflict,
+  type CancelMode,
+  type CancelReason,
   type Clock,
   type Outcome,
   type Run,
@@ -33,6 +35,11 @@ function toRun(row: Row): Run {
       questions: Number(row['produced_questions']),
       tasks: Number(row['produced_tasks']),
     },
+    ...optional('cancelRequestedAt', row['cancel_requested_at']),
+    ...(optional('cancelMode', row['cancel_mode']) as { cancelMode?: CancelMode }),
+    ...(optional('cancelRequestedBy', row['cancel_requested_by']) as {
+      cancelRequestedBy?: CancelReason
+    }),
     leaseUntil: String(row['lease_until']),
     startedAt: String(row['started_at']),
     lastActivityAt: String(row['last_activity_at']),
@@ -117,6 +124,24 @@ export function createRuntimeStore(
         "UPDATE run SET state = 'finished', outcome = ?, finished_at = ? WHERE id = ? AND state = 'running'",
       ).run(outcome, clock.now().toISOString(), id)
     },
+    async requestCancel(id, mode, by) {
+      db.prepare(
+        `UPDATE run SET cancel_requested_at = COALESCE(cancel_requested_at, ?1),
+           cancel_requested_by = CASE
+             WHEN cancel_mode = 'hard' THEN cancel_requested_by
+             WHEN ?2 = 'hard' THEN ?3
+             ELSE COALESCE(cancel_requested_by, ?3) END,
+           cancel_mode = CASE WHEN cancel_mode = 'hard' THEN 'hard' ELSE ?2 END
+         WHERE id = ?4 AND state = 'running'`,
+      ).run(clock.now().toISOString(), mode, by, id)
+    },
+    async isPaused() {
+      return db.prepare("SELECT 1 FROM engine_state WHERE key = 'paused'").get() !== undefined
+    },
+    async setPaused(paused) {
+      if (paused) db.prepare("INSERT OR IGNORE INTO engine_state VALUES ('paused', 'true')").run()
+      else db.prepare("DELETE FROM engine_state WHERE key = 'paused'").run()
+    },
     async liveRuns() {
       return db
         .prepare(`SELECT * FROM run WHERE state = 'running' ${NEWEST_FIRST}`)
@@ -125,6 +150,15 @@ export function createRuntimeStore(
     },
     async runsFor(target) {
       return db.prepare(`SELECT * FROM run WHERE target = ? ${NEWEST_FIRST}`).all(target).map(toRun)
+    },
+    async latestRunsEndedIn(outcome) {
+      return db
+        .prepare(
+          `SELECT * FROM (SELECT *, ROW_NUMBER() OVER (PARTITION BY target ${NEWEST_FIRST}) AS n FROM run)
+           WHERE n = 1 AND outcome = ?`,
+        )
+        .all(outcome)
+        .map(toRun)
     },
   }
 }

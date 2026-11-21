@@ -133,7 +133,7 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 實際讀的欄位（S6）：`dataDir`、`server.port`、`tracker`、`statuses.item`、`statuses.task`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。有 `mode: split` 的規則時，`statuses.task` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+目前 server 實際讀的欄位（S7b）：`dataDir`、`server.port`、`tracker`、`statuses.item`、`statuses.task`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。有 `mode: split` 或 `mode: rework` 的規則時，`statuses.task` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
 ## Rule 欄位
 
@@ -141,7 +141,7 @@ my-instance/
 |---|---|
 | `id` | 規則名稱，Run 與 log 會引用 |
 | `watch` | 監看的 item status 邏輯名。規則只作用在 item，所以沒有 `kind` 欄位 |
-| `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複 |
+| `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複，item 留在 watch status，卡片掛 Running。預設規則都不設（D74）。沒寫 `statuses` 時，`splitting` 只在有規則 claim 它時才對照，不然看板會多一欄永遠是空的 |
 | `agent` | 用哪個 agent（agents 裡的 key） |
 | `mode` | `split` / `execute` / `rework`，以 `TASUKI_MODE` 傳給 agent |
 | `prompt` / `promptFile` | 給 agent 的指令範本，省略時用引擎內建、對應 `mode` 的預設 prompt。兩個不能同時設 |
@@ -163,7 +163,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
   {
     "id": "split",
     "watch": "ready-to-split",
-    "claim": "splitting",
     "agent": "claude-main",
     "mode": "split",
     "session": "per-item",
@@ -177,7 +176,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
   {
     "id": "execute",
     "watch": "in-progress",
-    // no claim status: dedupe by lease
     "agent": "claude-main",
     "mode": "execute",
     "timeoutMinutes": 480,
@@ -193,7 +191,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
   {
     "id": "rework",
     "watch": "ready-to-rework",
-    "claim": "splitting",
     "agent": "claude-main",
     "mode": "rework",
     "session": "per-item",
@@ -216,12 +213,12 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 
 啟動時與 `doctor` 指令都跑同一組檢查，錯誤要指出是哪條規則、哪個欄位。
 
-1. 規則用到的每個 status 都存在於 `statuses.item`。`statuses` 裡沒有不認識的 status。有 split 規則時，`statuses.task` 對照了 `to-do` 與 `manual`；有 execute 規則時，五個都對照了。
+1. 規則用到的每個 status 都存在於 `statuses.item`。`statuses` 裡沒有不認識的 status。有 split 或 rework 規則時，`statuses.task` 對照了 `to-do` 與 `manual`；有 execute 規則時，五個都對照了。
 2. 不同規則的 `watch` 不重複。兩條規則監看同一個 status 會產生歧義。
 3. `claim` 不等於 `watch`（可省略）。
 4. `on` 的每個目標都存在，而且規則可能產生的每個 outcome 都有目標。`failed` 與 `max_attempts` 有預設，`blocked_manual` 對 split / rework 不會發生，這三個可省略。
 5. 規則引用的 agent 存在。
-6. `${VAR}` 都能展開。
+6. `${VAR}` 都能展開。`labels.hold` 是一個不含空白的字（Jira 的 label 不能有空白）。
 7. `server.host` 非 loopback 又沒有 auth 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`；`static` 的密碼不是 hash 就拒絕啟動（見 security-and-auth.md）。
 8. Jira：mapping 的每個 status 都存在於 project 的 workflow，規則用到的每一個轉移（from 到 to）在 workflow 裡目前都允許。逐條列出不合法的轉移。
 9. agent preflight：CLI 在 PATH 上。`requires` 列出的 MCP server 與 skill 有裝。偵測方式依 CLI 而定，待驗證。

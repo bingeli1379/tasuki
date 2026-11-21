@@ -16,8 +16,14 @@ export interface Board {
   columns: BoardColumn[]
   // Items an agent is working on right now.
   running: Ref[]
+  // Of those, the ones a person asked to stop: the agent is winding down.
+  stopping: Ref[]
   // Per item that has tasks, how many are done.
   tasks: Record<Ref, { done: number; total: number }>
+  // An item with this among its labels is on hold.
+  holdLabel: string
+  // The engine starts no new Run while paused.
+  paused: boolean
 }
 
 // One column per item status the config maps, in board order. Tasks come from one more
@@ -27,13 +33,16 @@ export async function listBoard(
   runtime: RuntimeStorePort,
   mapped: { item: readonly string[]; task: readonly string[] },
   rules: readonly Rule[],
+  holdLabel: string,
 ): Promise<Board> {
   const statuses = ITEM_STATUSES.filter((s) => mapped.item.includes(s))
-  const [items, tasks, live] = await Promise.all([
+  const [items, tasks] = await Promise.all([
     storage.list('item', statuses),
     storage.list('task', mapped.task),
-    runtime.liveRuns(),
   ])
+  // After the tracker, which takes seconds on Jira: read alongside it, a Run that ended
+  // meanwhile shows as Running on a card already in its outcome's column.
+  const [live, paused] = await Promise.all([runtime.liveRuns(), runtime.isPaused()])
   const watched = new Set(rules.map((r) => r.watch))
   const columns = statuses.map((status) => ({
     status,
@@ -52,5 +61,12 @@ export async function listBoard(
     count.total++
     if (t.status === 'done') count.done++
   }
-  return { columns, running: live.map((r) => r.target), tasks: counts }
+  return {
+    columns,
+    running: live.map((r) => r.target),
+    stopping: live.filter((r) => r.cancelRequestedAt !== undefined).map((r) => r.target),
+    tasks: counts,
+    holdLabel,
+    paused,
+  }
 }

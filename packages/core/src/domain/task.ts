@@ -35,3 +35,19 @@ export function agentMoveRefusal(
     return `${task.ref} waits for tasks that are not done`
   return undefined
 }
+
+// The person's edges of the task diagram: take a task over, hand it back, finish it by hand,
+// and undo a done by mistake. The engine never reopens a done task (invariant 4); a person
+// may, while no Run is on the item (D74).
+const PERSON_MOVES: Readonly<Record<string, readonly string[]>> = {
+  'to-do': ['manual'],
+  'in-progress': ['manual'],
+  manual: ['done', 'to-do'],
+  done: ['to-do', 'manual'],
+}
+
+// Why a person may not move a task from `from` to `to`, or undefined when they may.
+export function personMoveRefusal(ref: Ref, from: string, to: string): string | undefined {
+  if (!(PERSON_MOVES[from] ?? []).includes(to)) return `${ref} cannot go from ${from} to ${to}`
+  return undefined
+}

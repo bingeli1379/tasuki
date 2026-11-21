@@ -58,6 +58,18 @@ export interface StoragePort {
   // Throws EditConflict when the unit is no longer at expectedVersion. Fields left out
   // of the patch are not written at all.
   updateItem(ref: Ref, expectedVersion: string, patch: ItemPatch): Promise<WorkUnit>
+  // Removes the task with its dependencies either way, comments and attachments; a task that
+  // waited for it no longer does. Its ref is never handed out again. Throws NotFound when ref
+  // is not a task.
+  deleteTask(ref: Ref): Promise<void>
+  // Removes the item with all its tasks, as deleteTask would each, and its own comments and
+  // attachments. Throws NotFound when ref is not an item.
+  deleteItem(ref: Ref): Promise<void>
+  // Adding a label the unit has, or removing one it lacks, changes nothing; neither touches
+  // the version. Only that one label is written, so a label someone else set meanwhile stays.
+  // Throws NotFound when ref does not exist. Returns the unit after the change.
+  addLabel(ref: Ref, label: string): Promise<WorkUnit>
+  removeLabel(ref: Ref, label: string): Promise<WorkUnit>
   // Oldest first.
   comments(target: Ref): Promise<Comment[]>
   addComment(comment: NewComment): Promise<Comment>

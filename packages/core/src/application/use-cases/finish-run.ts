@@ -1,5 +1,5 @@
 import { exitFor, outcomeOf, runningStatus, type Rule, type RunExit } from '../../domain/rule'
-import type { Outcome } from '../../domain/run'
+import type { CancelReason, Outcome } from '../../domain/run'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
 import { StatusConflict } from '../status-conflict'
@@ -9,6 +9,13 @@ import { releaseTasks } from './release-tasks'
 export interface FinishDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
+}
+
+const WHY: Record<CancelReason, string> = {
+  stop: 'a person pressed Stop',
+  hold: 'the item was put on hold',
+  moved: 'the item was moved while it ran',
+  pause: 'the engine was paused with every run stopped',
 }
 
 // The agent process is gone: turn what it reported into an outcome and move the item.
@@ -21,6 +28,21 @@ export async function finishRun(
   const run = await runtime.getRun(runId)
   // Recovery already gave up on it, and the item may be on its next attempt by now.
   if (run.outcome !== undefined) return run.outcome
+  // A person asked it to stop: whatever it reported, nothing moves (invariant 6).
+  if (run.cancelRequestedAt !== undefined) {
+    await runtime.finishRun(run.id, 'cancelled')
+    const lines = [
+      `Rule ${rule.id}, attempt ${run.attempt}: cancelled, ${WHY[run.cancelRequestedBy ?? 'stop']}. The engine moved nothing.`,
+    ]
+    if (run.summary !== undefined && run.summary !== '') lines.push('', run.summary)
+    await storage.addComment({
+      target: run.target,
+      author: 'engine',
+      kind: 'system',
+      body: lines.join('\n'),
+    })
+    return 'cancelled'
+  }
   const tasks = await listTasks(storage, run.target)
   let { outcome, reason } = outcomeOf(rule.mode, run.verdict, exit, {
     tasks,

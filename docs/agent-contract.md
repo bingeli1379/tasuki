@@ -33,7 +33,7 @@
 
 刻意沒有的：任何改 item status 的 tool、刪除、跨 item 存取。
 
-目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`update_task`、`list_comments` 隨用到的切片長出來。
+目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`list_comments`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69、S7b D71）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`list_comments` 的 `target` 一樣省略時是 item，只能讀被派的 item 與它的 task。人留的 comment 裡，`note` 是人寫的話（rework 的回饋就是最新那則），`system` 是人按按鈕留下的紀錄，不是要 agent 做的事（D74）。`update_task` 隨用到的切片長出來。
 
 為什麼 orchestrator 不能建 task：task 圖是人在 `split-review` 檢查過才放行的，放行後再讓 AI 加 task 等於繞過關卡。orchestrator 發現需要新工作時，用 `add_comment` 寫下來，由 verdict 帶出去。
 
@@ -66,13 +66,13 @@ engine 不直接相信 verdict，先驗證再換算成 outcome，下表每一列
 | `blocked_manual` | 至少有一個 task 是 `manual` 且未 `done`，而且沒有任何 `to-do` task 的 blockedBy 已全部 done（代表沒有 auto task 還能跑） | `failed` |
 | `failed` | 無 | `failed` |
 
-只有 engine 能產生的 outcome：`cancelled`（人按了 Stop 或貼了 hold）、`max_attempts`（重試超過上限）、`abandoned`（lease 過期）。
+只有 engine 能產生的 outcome：`cancelled`（人按了 Stop、貼了 hold、移走 item，或連同 Run 一起暫停 engine）、`max_attempts`（重試超過上限）、`abandoned`（lease 過期）。
 
 沒呼叫 `report_result` 就結束，一律 `failed`，原因記為「沒有 verdict」。非零 exit code 也是 `failed`。逾時被 hard stop 也是 `failed`。這些情況 engine 都會寫一則 `system` comment，附上 exit code 與 log 尾端。
 
 ## 取消時
 
-Run 被取消之後，所有寫入類 tool 都回錯誤 `RUN_CANCELLED`，agent 讀到就該收手。`report_result` 被接受但忽略。
+Run 被取消之後，所有寫入類 tool（`create_task`、`add_comment`、`set_task_status`）都回錯誤，訊息以 `RUN_CANCELLED` 開頭，agent 讀到就該收手。讀取類 tool 照常可用。`report_result` 被接受但忽略。
 寬限時間過了 agent process 還沒結束，engine 對整個 process tree 送終止訊號（細節見 stop-and-recovery.md）。
 
 ## agent 必須做到的

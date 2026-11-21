@@ -21,6 +21,26 @@ describe('loadConfig', () => {
     expect(config.statuses.task?.['to-do']).toBe('To Do')
   })
 
+  it('leaves splitting off the default mapping unless a rule claims it', () => {
+    expect(loadConfig(write('{}')).statuses.item?.['splitting']).toBeUndefined()
+    const claiming = write(
+      JSON.stringify({
+        agents: { fake: { plugin: '@tasuki/fake-runner' } },
+        rules: [
+          {
+            id: 'split',
+            watch: 'ready-to-split',
+            claim: 'splitting',
+            agent: 'fake',
+            mode: 'split',
+            on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+          },
+        ],
+      }),
+    )
+    expect(loadConfig(claiming).statuses.item?.['splitting']).toBe('Splitting')
+  })
+
   it('expands ${VAR} from a .env next to the config', () => {
     const path = write(
       '{ "tracker": { "plugin": "x", "options": { "token": "${TASUKI_TEST_TOKEN}" } } }',
@@ -73,8 +93,20 @@ describe('loadConfig', () => {
       maxConcurrentRuns: 2,
       leaseSeconds: 120,
       defaultMaxAttempts: 3,
+      softGraceSeconds: 300,
+      hardGraceSeconds: 10,
     })
+    expect(config.holdLabel).toBe('hold')
     expect(config.pollSeconds).toBe(5)
+  })
+
+  it('takes the hold label from labels.hold, as one word Jira can store', () => {
+    expect(loadConfig(write('{ "labels": { "hold": "tasuki-hold" } }')).holdLabel).toBe(
+      'tasuki-hold',
+    )
+    expect(() => loadConfig(write('{ "labels": { "hold": "on hold" } }'))).toThrow(
+      'config labels.hold must be one word with no spaces',
+    )
   })
 
   it('has no rules when it lists none, so the engine leaves every item alone', () => {
@@ -105,6 +137,35 @@ describe('loadConfig', () => {
     expect(() => loadConfig(withRules([rule]))).toThrow(message)
   })
 
+  it('refuses a rework rule the same way: it makes tasks too', () => {
+    const path = write(
+      JSON.stringify({
+        statuses: {
+          item: Object.fromEntries(
+            ['refining', 'ready-to-rework', 'splitting', 'split-review', 'blocked'].map((s) => [
+              s,
+              s,
+            ]),
+          ),
+          task: { 'to-do': 'T' },
+        },
+        agents: { fake: { plugin: 'x' } },
+        rules: [
+          {
+            ...split,
+            id: 'rework',
+            watch: 'ready-to-rework',
+            mode: 'rework',
+            on: { succeeded: 'split-review', needs_input: 'blocked' },
+          },
+        ],
+      }),
+    )
+    expect(() => loadConfig(path)).toThrow(
+      'config statuses.task must map manual: rule rework makes tasks',
+    )
+  })
+
   it('refuses a split rule when the task statuses its tasks start in are not mapped', () => {
     const path = write(
       JSON.stringify({
@@ -126,7 +187,7 @@ describe('loadConfig', () => {
       }),
     )
     expect(() => loadConfig(path)).toThrow(
-      'config statuses.task must map manual: rule split splits items into tasks',
+      'config statuses.task must map manual: rule split makes tasks',
     )
   })
 

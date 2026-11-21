@@ -18,7 +18,8 @@ import { setTimeout as sleep } from 'node:timers/promises'
 // claims success without making any. Anything else splits the item into two tasks, unless
 // it already has some, and succeeds; [fake:manual] makes the second one manual.
 // Executing, it walks every task it can run to done, then reports succeeded, or
-// blocked_manual when manual tasks are left.
+// blocked_manual when manual tasks are left. Reworking, it makes one task, Rework, carrying
+// the latest comment a person left.
 const plugin: Plugin = definePlugin({
   name: '@tasuki/fake-runner',
   apiVersion: API_VERSION,
@@ -65,6 +66,15 @@ const plugin: Plugin = definePlugin({
                 next = tasks.find((t) => isRunnable(t, tasks))
               }
               if (tasks.some((t) => t.status === 'manual')) verdict = 'blocked_manual'
+            } else if (verdict === 'succeeded' && spec.mode === 'rework') {
+              const comments =
+                await call<{ author: string; kind: string; body: string }[]>('list_comments')
+              const feedback =
+                comments.findLast((c) => c.author === 'human' && c.kind === 'note')?.body ?? ''
+              await call('create_task', {
+                title: 'Rework',
+                body: feedback === '' ? 'Made by the fake runner.' : feedback,
+              })
             } else if (verdict === 'succeeded' && marker !== 'no_tasks') {
               // Splitting again after being sent back keeps what is there (D30).
               if ((await call<unknown[]>('list_tasks')).length === 0) {
@@ -88,15 +98,21 @@ const plugin: Plugin = definePlugin({
             await client.close()
           }
         }
-        // A real CLI that hits an error exits non-zero; so does this one.
-        const exit = run().then(
-          (): RunExit => ({ code: 0, signal: null }),
-          (e: unknown): RunExit => {
-            console.error(`fake runner on ${spec.target}: ${String(e)}`)
-            return { code: 1, signal: null }
-          },
-        )
-        return { exit }
+        let killed: (exit: RunExit) => void = () => {}
+        // A real CLI that hits an error exits non-zero; so does this one. RUN_CANCELLED is one.
+        const exit = Promise.race([
+          run().then(
+            (): RunExit => ({ code: 0, signal: null }),
+            (e: unknown): RunExit => {
+              console.error(`fake runner on ${spec.target}: ${String(e)}`)
+              return { code: 1, signal: null }
+            },
+          ),
+          new Promise<RunExit>((resolve) => (killed = resolve)),
+        ])
+        // In-process, so either signal ends it at once: what a process does on SIGTERM is
+        // the real runner's to show (S8).
+        return { exit, terminate: (signal) => killed({ code: null, signal }) }
       },
     }
   },

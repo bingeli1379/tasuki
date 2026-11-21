@@ -86,6 +86,10 @@ interface StoragePort {
   readAttachment(target: Ref, id: string): Promise<{ attachment: Attachment; data: Uint8Array }>
   // children and dependencies see a task the moment it exists, unlike list: verdicts are checked against them
   createTask(item: Ref, t: NewTask): Promise<WorkUnit>   // throws InvalidInput when blockedBy is not a task of item
+  deleteTask(ref: Ref): Promise<void>         // with its dependencies either way and comments; the ref is never reused (D70)
+  deleteItem(ref: Ref): Promise<void>         // with all its tasks, comments and attachments (D74)
+  addLabel(ref: Ref, label: string): Promise<WorkUnit>     // one label only, leaves the version alone (hold, D72)
+  removeLabel(ref: Ref, label: string): Promise<WorkUnit>
   updateTask(ref: Ref, patch: TaskPatch): Promise<void>
   setLabels(ref: Ref, labels: string[]): Promise<void>
 }
@@ -105,7 +109,10 @@ interface RuntimeStorePort {
   finishRun(id: string, outcome: Outcome): Promise<void>                  // + usage
   liveRuns(): Promise<Run[]>
   runsFor(target: Ref): Promise<Run[]>        // newest first
-  // requestCancel(id, mode, by), getState / setState ('paused')
+  latestRunsEndedIn(outcome: Outcome): Promise<Run[]>   // newest Run per target, if it ended so (auto-resume, D71)
+  requestCancel(id: string, mode: CancelMode, by: CancelReason): Promise<void>  // first time stays; a hard one upgrades soft and its reason wins (D73)
+  isPaused(): Promise<boolean>                // the global pause, kept in engine_state (D73)
+  setPaused(paused: boolean): Promise<void>
 }
 
 interface RunnerPort {
@@ -120,7 +127,8 @@ interface RunSpec {                  // + prompt, env, session (S8)
 }
 interface RunHandle {
   readonly exit: Promise<{ code: number | null; signal: string | null }>
-  // + sessionId, terminate(grace) (S7, S8)
+  terminate(signal: 'SIGTERM' | 'SIGKILL'): void   // the whole process tree; the engine times the grace (D72)
+  // + sessionId (S8)
 }
 
 interface AuthPort {

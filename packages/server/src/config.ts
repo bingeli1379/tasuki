@@ -1,4 +1,5 @@
 import {
+  CLAIM_ONLY,
   ITEM_STATUS_DISPLAY,
   ITEM_STATUSES,
   TASK_STATUS_DISPLAY,
@@ -21,6 +22,9 @@ export interface Limits {
   maxConcurrentRuns: number
   leaseSeconds: number
   defaultMaxAttempts: number
+  // A soft cancel turns hard after this long; a hard one sends SIGKILL after this long.
+  softGraceSeconds: number
+  hardGraceSeconds: number
 }
 
 export interface Config {
@@ -31,6 +35,8 @@ export interface Config {
   statuses: StatusMapping
   pollSeconds: number
   limits: Limits
+  // The label that keeps the engine off an item.
+  holdLabel: string
   agents: Record<string, PluginRef>
   rules: Rule[]
 }
@@ -162,9 +168,17 @@ export function loadConfig(path: string): Config {
   const server = (raw['server'] ?? {}) as Raw
   const tracker = pluginRef(raw['tracker'] ?? { plugin: '@tasuki/sqlite' }, 'tracker')
 
-  // Without a mapping, sqlite stores the display names (config-and-rules.md example).
+  // Without a mapping, sqlite stores the display names (config-and-rules.md example), and a
+  // claim-only status is left off unless a rule claims it.
+  const claimed = (Array.isArray(raw['rules']) ? raw['rules'] : []).map((r: unknown) =>
+    isObject(r) ? r['claim'] : undefined,
+  )
   const statuses = (raw['statuses'] ?? {
-    item: ITEM_STATUS_DISPLAY,
+    item: Object.fromEntries(
+      Object.entries(ITEM_STATUS_DISPLAY).filter(
+        ([s]) => !CLAIM_ONLY.includes(s) || claimed.includes(s),
+      ),
+    ),
     task: TASK_STATUS_DISPLAY,
   }) as StatusMapping
   for (const [kind, known] of [
@@ -184,7 +198,13 @@ export function loadConfig(path: string): Config {
     maxConcurrentRuns: positive(rawLimits, 'maxConcurrentRuns', 2, 'limits'),
     leaseSeconds: positive(rawLimits, 'leaseSeconds', 120, 'limits'),
     defaultMaxAttempts: positive(rawLimits, 'defaultMaxAttempts', 3, 'limits'),
+    softGraceSeconds: positive(rawLimits, 'softGraceSeconds', 300, 'limits'),
+    hardGraceSeconds: positive(rawLimits, 'hardGraceSeconds', 10, 'limits'),
   }
+  const holdLabel = (isObject(raw['labels']) ? raw['labels']['hold'] : undefined) ?? 'hold'
+  // Jira labels cannot hold spaces.
+  if (typeof holdLabel !== 'string' || !/^\S+$/.test(holdLabel))
+    throw new Error('config labels.hold must be one word with no spaces')
   const agents = Object.fromEntries(
     Object.entries(isObject(raw['agents']) ? raw['agents'] : {}).map(([name, agent]) => [
       name,
@@ -200,12 +220,12 @@ export function loadConfig(path: string): Config {
     agents,
     limits.defaultMaxAttempts,
   )
-  // The tasks a splitting agent can make start in one of these.
-  const splitter = rules.find((r) => r.mode === 'split')
+  // The tasks a splitting or reworking agent can make start in one of these.
+  const splitter = rules.find((r) => r.mode === 'split' || r.mode === 'rework')
   const missing = ['to-do', 'manual'].filter((s) => statuses.task?.[s] === undefined)
   if (splitter !== undefined && missing.length > 0)
     throw new Error(
-      `config statuses.task must map ${missing.join(', ')}: rule ${splitter.id} splits items into tasks`,
+      `config statuses.task must map ${missing.join(', ')}: rule ${splitter.id} makes tasks`,
     )
   // An executing agent walks every task status.
   const executor = rules.find((r) => r.mode === 'execute')
@@ -228,6 +248,7 @@ export function loadConfig(path: string): Config {
       'poll',
     ),
     limits,
+    holdLabel,
     agents,
     rules,
   }

@@ -211,6 +211,13 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         kind: 'system',
         body: 'run failed',
       })
+      // What a person clicked (D74): theirs, but not feedback an agent should act on.
+      await fixture.storage.addComment({
+        target: item.ref,
+        author: 'human',
+        kind: 'system',
+        body: 'Moved from refining to ready-to-split.',
+      })
       expect(human).toMatchObject({ target: item.ref, author: 'human', body: 'looks **good**' })
 
       const comments = await fixture.storage.comments(item.ref)
@@ -218,6 +225,7 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         ['human', 'note', 'looks **good**'],
         ['agent', 'question', 'which locale?\nsecond line'],
         ['engine', 'system', 'run failed'],
+        ['human', 'system', 'Moved from refining to ready-to-split.'],
       ])
       expect(comments[0]).toEqual(human)
     })
@@ -236,6 +244,19 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         data: PNG,
       })
       expect((await fixture.storage.get(item.ref)).version).toBe(item.version)
+    })
+
+    it('adds and removes one label at a time, leaving the others and the version', async () => {
+      const item = await newItem('labels')
+      expect((await fixture.storage.addLabel(item.ref, 'keep')).labels).toEqual(['keep'])
+      const held = await fixture.storage.addLabel(item.ref, 'hold')
+      expect([...held.labels].sort()).toEqual(['hold', 'keep'])
+      expect((await fixture.storage.addLabel(item.ref, 'hold')).labels).toHaveLength(2)
+      expect(held.version).toBe(item.version)
+      expect((await fixture.storage.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
+      expect((await fixture.storage.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
+      expect((await fixture.storage.get(item.ref)).labels).toEqual(['keep'])
+      await expect(fixture.storage.addLabel('NOPE-999999', 'hold')).rejects.toBeInstanceOf(NotFound)
     })
 
     it('an attachment is listed and reads back byte for byte', async () => {
@@ -351,6 +372,61 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         await expect(
           fixture.storage.transition(created.ref, 'to-do', 'manual'),
         ).rejects.toBeInstanceOf(StatusConflict)
+      })
+
+      it('edits a task the same way as an item', async () => {
+        const item = await newItem('task edits')
+        const created = await fixture.storage.createTask(item.ref, task('before'))
+        const edited = await fixture.storage.updateItem(created.ref, created.version, {
+          title: 'after',
+          body: 'More detail.',
+        })
+        expect(edited).toMatchObject({ ref: created.ref, title: 'after', body: 'More detail.' })
+        expect(edited.version).not.toBe(created.version)
+      })
+
+      it('deletes a task with its dependencies, at once, and never reuses its ref', async () => {
+        const item = await newItem('task deletes')
+        const first = await fixture.storage.createTask(item.ref, task('first'))
+        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
+        await fixture.storage.addComment({
+          target: second.ref,
+          author: 'human',
+          kind: 'note',
+          body: 'gone with it',
+        })
+        await fixture.storage.deleteTask(second.ref)
+        expect((await fixture.storage.children(item.ref)).map((t) => t.ref)).toEqual([first.ref])
+        await expect(fixture.storage.get(second.ref)).rejects.toBeInstanceOf(NotFound)
+        // A task waiting for a deleted one no longer waits.
+        const third = await fixture.storage.createTask(item.ref, task('third', [first.ref]))
+        await fixture.storage.deleteTask(first.ref)
+        expect(await fixture.storage.dependencies(item.ref)).toEqual([])
+        expect([first.ref, second.ref]).not.toContain(third.ref)
+        const fourth = await fixture.storage.createTask(item.ref, task('fourth'))
+        expect([first.ref, second.ref, third.ref]).not.toContain(fourth.ref)
+      })
+
+      it('deletes an item with its tasks and every comment, and only an item', async () => {
+        const item = await newItem('item deletes')
+        const first = await fixture.storage.createTask(item.ref, task('first'))
+        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
+        await fixture.storage.addComment({
+          target: first.ref,
+          author: 'human',
+          kind: 'note',
+          body: 'gone with it',
+        })
+        await expect(fixture.storage.deleteItem(first.ref)).rejects.toBeInstanceOf(NotFound)
+        await fixture.storage.deleteItem(item.ref)
+        for (const ref of [item.ref, first.ref, second.ref])
+          await expect(fixture.storage.get(ref)).rejects.toBeInstanceOf(NotFound)
+      })
+
+      it('refuses to delete something that is not a task', async () => {
+        const item = await newItem('not a task')
+        await expect(fixture.storage.deleteTask(item.ref)).rejects.toBeInstanceOf(NotFound)
+        expect((await fixture.storage.get(item.ref)).ref).toBe(item.ref)
       })
 
       it('lists tasks by status with their item, after the usual lag', async () => {

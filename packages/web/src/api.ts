@@ -4,6 +4,7 @@ export interface Item {
   title: string
   body: string
   status: string
+  labels: string[]
   version: string
 }
 
@@ -29,6 +30,8 @@ export interface Run {
   attempt: number
   state: 'running' | 'finished'
   outcome?: string
+  // Set once a person asked it to stop; hard ends the agent within seconds.
+  cancelMode?: 'soft' | 'hard'
   startedAt: string
   finishedAt?: string
 }
@@ -40,6 +43,12 @@ export interface Task {
   origin?: 'refine' | 'splitter' | 'human'
   // Refs of tasks it waits for.
   blockedBy: string[]
+}
+
+export interface TaskDetail {
+  task: Task & { parent: string; body: string; version: string }
+  // Oldest first; the engine's say why it or an agent moved the task.
+  comments: Comment[]
 }
 
 export interface ItemDetail {
