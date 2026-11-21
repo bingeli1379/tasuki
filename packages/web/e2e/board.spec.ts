@@ -255,7 +255,9 @@ test('an item dragged to Ready to Split is split, approved, executed, and accept
   // The fake runner made two tasks, the second waiting for the first.
   await expect(dialog.getByRole('listitem', { name: /^Task / })).toHaveCount(2)
   await expect(dialog.getByRole('listitem', { name: 'Task Prepare' })).toContainText('To Do')
-  await expect(dialog.getByRole('listitem', { name: 'Task Build' })).toContainText('after Prepare')
+  await expect(dialog.getByRole('listitem', { name: 'Task Build' })).toContainText(
+    /Waits for [A-Z]+-\d+ Prepare/,
+  )
   await dialog.getByRole('button', { name: 'Approve' }).click()
   await expect(dialog).toBeHidden()
 
@@ -318,7 +320,7 @@ test('tasks are fixed by hand in split review, and a task done by hand counts', 
   await task.getByRole('button', { name: 'Delete for good' }).click()
   await expect(page.getByRole('dialog')).toHaveCount(1)
   await expect(dialog.getByRole('listitem', { name: /^Task / })).toHaveCount(1)
-  await expect(dialog.getByRole('listitem', { name: 'Task Build' })).not.toContainText('after')
+  await expect(dialog.getByRole('listitem', { name: 'Task Build' })).not.toContainText('Waits for')
 
   // Rename the other, then do it by hand.
   await dialog.getByRole('listitem', { name: 'Task Build' }).getByRole('button').click()

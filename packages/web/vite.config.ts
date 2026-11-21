@@ -9,7 +9,12 @@ export default defineConfig({
     // network cannot reach. One missing from the collection fails the build.
     ui({
       router: false,
-      icon: { clientBundle: { icons: ['i-lucide-radar', 'i-lucide-eye'] } },
+      colorMode: true,
+      icon: {
+        clientBundle: {
+          icons: ['i-lucide-radar', 'i-lucide-eye', 'i-lucide-sun', 'i-lucide-moon'],
+        },
+      },
     }),
   ],
   // Nuxt UI's editor loads TipTap unbundled. Pre-bundling the TipTap packages the board

@@ -1,5 +1,144 @@
 @import 'tailwindcss';
 @import '@nuxt/ui';
+@import '@fontsource-variable/bricolage-grotesque/standard.css';
+
+/* Tasuki is the sash a relay runner hands on. Ochre is kept for the sash in the wordmark;
+   everything else is indigo, on cool paper by day and indigo night after dark. */
+@theme {
+  --font-sans: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, sans-serif;
+  --color-sash: var(--sash);
+}
+
+:root {
+  --sash: #c98c0e;
+  --lane: #e8eaf1;
+  --ui-primary: #34449b;
+  --ui-bg: #fbfbfd;
+  --ui-bg-muted: #f1f2f6;
+  --ui-bg-elevated: #e8eaf1;
+  --ui-bg-accented: #dcdfe9;
+  --ui-text: #2a2f45;
+  --ui-text-highlighted: #161a2e;
+  --ui-text-toned: #4a5068;
+  --ui-text-muted: #666c86;
+  --ui-text-dimmed: #8a8fa6;
+  --ui-border: #dcdfe9;
+  --ui-border-muted: #e8eaf1;
+  --ui-border-accented: #c5c9d8;
+  --ui-radius: 0.375rem;
+}
+
+.dark {
+  --sash: #e8b53a;
+  --lane: #161b30;
+  --ui-primary: #95a3f0;
+  --ui-bg: #1c2240;
+  --ui-bg-muted: #0f1326;
+  --ui-bg-elevated: #232a4b;
+  --ui-bg-accented: #2c345a;
+  --ui-text: #d8dbea;
+  --ui-text-highlighted: #f1f2f8;
+  --ui-text-toned: #b5bad0;
+  --ui-text-muted: #9095b0;
+  --ui-text-dimmed: #6e7393;
+  --ui-border: #2c345a;
+  --ui-border-muted: #232a4b;
+  --ui-border-accented: #3a4370;
+}
+
+body {
+  font-optical-sizing: auto;
+  font-feature-settings: 'tnum';
+}
+
+/* A card's 1.5px frame sits behind it, so it is as thick on the corners as on the sides. It is
+   a quiet line until an agent works on the card; then a stretch of indigo light travels round
+   it. */
+@property --ring-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+:root {
+  --ring-from: #34449b;
+  --ring-to: #7d8ff0;
+}
+.dark {
+  --ring-from: #5b6ad0;
+  --ring-to: #b4c0ff;
+}
+.card-frame {
+  background: var(--ui-border-muted);
+}
+.card-frame:hover {
+  background: var(--ui-border-accented);
+}
+.card-frame.agent-ring {
+  background: conic-gradient(
+    from var(--ring-angle),
+    var(--ui-border-muted) 0deg 250deg,
+    var(--ring-from) 310deg,
+    var(--ring-to) 345deg,
+    var(--ui-border-muted) 360deg
+  );
+  animation: ring-travel 3s linear infinite;
+}
+.card-frame.agent-ring-stopping {
+  filter: grayscale(1);
+  opacity: 0.7;
+}
+@keyframes ring-travel {
+  to {
+    --ring-angle: 360deg;
+  }
+}
+
+/* A card that just arrived in a column settles in, so the eye finds where it went. */
+.card-enter-active {
+  transition:
+    opacity 220ms ease-out,
+    transform 260ms cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+.card-enter-from {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.97);
+}
+.card-move {
+  transition: transform 220ms ease-out;
+}
+
+/* Switching day and night spreads out from the button that did it. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-new(root) {
+  animation: theme-reveal 480ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+@keyframes theme-reveal {
+  from {
+    clip-path: circle(0 at var(--reveal-x, 100%) var(--reveal-y, 0));
+  }
+  to {
+    clip-path: circle(150vmax at var(--reveal-x, 100%) var(--reveal-y, 0));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* Still marked, without the motion. */
+  .card-frame.agent-ring {
+    animation: none;
+    background: var(--ring-from);
+  }
+  .card-enter-active,
+  .card-move {
+    transition: none;
+  }
+  ::view-transition-new(root) {
+    animation: none;
+  }
+}
 
 /* macOS hides overlay scrollbars until you scroll; a styled one stays, so the board shows
    there are more columns to the right. */
