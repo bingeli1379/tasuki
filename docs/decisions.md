@@ -641,3 +641,17 @@
 - 注意：commit 帶著 Claude Code 內建的 `Co-Authored-By` 行，`--setting-sources ""` 不會拿掉它。不要的話寫進基礎層，或之後給 agent 一個 `settings` option。
 - 重新檢視：基礎層需要跨 agent 共用很多份時（考慮在 agent 之外加一個共用的基礎層）；codex runner 沒有對應 `--append-system-prompt` 的東西時，基礎層改成接在契約後面。
 
+## D78 流程可以自訂，設定進 DB，store 也是 plugin
+
+- 背景：每個人、每個團隊的 stage 都不一樣，tasuki 要主打彈性。現在 item 的 status 寫死十個、verdict 寫死五個、config 只能寫在檔案裡，runtime store 寫死是 sqlite。作者要同時支援自己一台機器用，和部署在共用機器上大家一起用，之後還要接 postgres 等其他 DB，並讓第三方照介面自己寫 DB 的 plugin。
+- 決定（細節在 custom-workflow.md）：
+  - stage 分三種：靜態、等人（看板標眼睛，status 的 `waitsFor: "human"`）、engine（標雷達，有規則 watch 就是）。是 D68 的一般化。
+  - item 的 status 由使用者列，程式點名的五站改成角色：`entry`、`done`、`failure`、`taskReview`、`rework`。task 的 status 維持寫死。六條不變量不變。
+  - 規則宣告 `outcomes`（結果名到下一站），`on` 併進來。每個 mode 都能宣告額外的結果，內建結果的驗證不變。agent 只能回結果名，不能回站名。
+  - `mode` 留著當工具組，多一個只能讀與留 comment 的 `review`。
+  - 流程設定（status、角色、規則、agent、prompt、status 對照）放 store，前端能改，下一輪 poll 生效，每次修改留歷史。啟動設定（store 的 plugin 與連線、`dataDir`、`server`、`auth`、tracker）留在檔案。secret 一律在環境變數，DB 只存 `${VAR}`。不做匯出匯入。
+  - store 變成 plugin 的一個角色，跟 tracker 一樣有 `testkit` 契約，migration 由 plugin 自己帶。內建的 sqlite 是第一個。
+  - 切片：W1、W2、W3 排在 S9 之前，W4（設定頁）在 S9 之後，postgres 之後再排。W1、W2 先在檔案上定型，搬進 DB 時才不會每改一次設計就多一次 migration。
+- 取代：D68 寫死的 `AWAITING_PERSON` 清單改成每個 status 的 `waitsFor`。D51 的「看板順序照 state-machine.md」改成照使用者列的順序。D37 第 3 點的 `on.failed`、`on.max_attempts` 改成 `outcomes` 底下的同名結果，預設仍是 `failure` 角色那一站。state-machine.md 那十站從定案改成預設流程，等 W1、W2 做完時一併改寫它與 config-and-rules.md。
+- 重新檢視：角色不夠用時（又有程式需要點名某一站）；store 契約大到第三方寫不動時；共用部署需要多個團隊各自一套流程時（現在一個 engine 一套）。
+
