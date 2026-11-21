@@ -238,6 +238,19 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       expect((await fixture.storage.get(item.ref)).version).toBe(item.version)
     })
 
+    it('adds and removes one label at a time, leaving the others and the version', async () => {
+      const item = await newItem('labels')
+      expect((await fixture.storage.addLabel(item.ref, 'keep')).labels).toEqual(['keep'])
+      const held = await fixture.storage.addLabel(item.ref, 'hold')
+      expect([...held.labels].sort()).toEqual(['hold', 'keep'])
+      expect((await fixture.storage.addLabel(item.ref, 'hold')).labels).toHaveLength(2)
+      expect(held.version).toBe(item.version)
+      expect((await fixture.storage.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
+      expect((await fixture.storage.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
+      expect((await fixture.storage.get(item.ref)).labels).toEqual(['keep'])
+      await expect(fixture.storage.addLabel('NOPE-999999', 'hold')).rejects.toBeInstanceOf(NotFound)
+    })
+
     it('an attachment is listed and reads back byte for byte', async () => {
       const item = await newItem('attachment')
       const added = await fixture.storage.addAttachment(item.ref, {
