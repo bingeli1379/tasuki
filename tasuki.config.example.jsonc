@@ -54,7 +54,8 @@
     {
       "id": "split",
       "watch": "ready-to-split",
-      "claim": "splitting", // where the item waits while the agent works
+      // No claim: the item stays in ready-to-split, its card says Running, and only the lease
+      // keeps a second Run off it. "claim": "splitting" moves it there while the agent works.
       "agent": "fake",
       "mode": "split",
       // failed and max_attempts go to blocked unless given here.
@@ -67,6 +68,14 @@
       "agent": "fake",
       "mode": "execute",
       "on": { "succeeded": "in-review", "needs_input": "blocked", "blocked_manual": "blocked" },
+    },
+    {
+      "id": "rework",
+      "watch": "ready-to-rework",
+      "agent": "fake",
+      "mode": "rework",
+      // Its new tasks go through split-review too; done ones are never reopened by an agent.
+      "on": { "succeeded": "split-review", "needs_input": "blocked" },
     },
   ],
 
