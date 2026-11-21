@@ -96,15 +96,21 @@ const plugin: Plugin = definePlugin({
             await client.close()
           }
         }
-        // A real CLI that hits an error exits non-zero; so does this one.
-        const exit = run().then(
-          (): RunExit => ({ code: 0, signal: null }),
-          (e: unknown): RunExit => {
-            console.error(`fake runner on ${spec.target}: ${String(e)}`)
-            return { code: 1, signal: null }
-          },
-        )
-        return { exit }
+        let killed: (exit: RunExit) => void = () => {}
+        // A real CLI that hits an error exits non-zero; so does this one. RUN_CANCELLED is one.
+        const exit = Promise.race([
+          run().then(
+            (): RunExit => ({ code: 0, signal: null }),
+            (e: unknown): RunExit => {
+              console.error(`fake runner on ${spec.target}: ${String(e)}`)
+              return { code: 1, signal: null }
+            },
+          ),
+          new Promise<RunExit>((resolve) => (killed = resolve)),
+        ])
+        // In-process, so either signal ends it at once: what a process does on SIGTERM is
+        // the real runner's to show (S8).
+        return { exit, terminate: (signal) => killed({ code: null, signal }) }
       },
     }
   },
