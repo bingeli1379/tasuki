@@ -549,3 +549,16 @@
 - 理由：splitter 拆得差不多但有一兩張不對時，原本只能打回重拆，等一輪 agent。人在 `split-review` 直接修，前台省一次重跑，後台只多一個 port 方法和一個狀態檢查。
 - 沒選的做法：任何時候都能改 task，`in-progress` 時會跟 orchestrator 讀到的內容打架；sqlite 軟刪除，每個查詢都要多一個條件。
 - 重新檢視：要在 `split-review` 調整依賴時（補 blockedBy 的寫入）；agent facade 的 `update_task`（agent-contract.md）做的時候，跟這裡共用驗證。
+
+## D71 S7b：blocked 自動接回與 rework
+- 決定：
+  - 自動接回是 core 的 `resumeBlocked`，engine 每輪在 `recoverRuns` 之後、`claimItems` 之前跑，接回的 item 同一輪就被認領。先問本機的 runtime store 有沒有「最近一次 Run 停在 `blocked_manual`」的 item（`RuntimeStorePort.latestRunsEndedIn`），沒有就整輪不碰 tracker；有才對 tracker 搜一次。第一版每輪都對 Jira 多一支搜尋，E2E 每 2 秒一輪，整包跑時另外兩條 Jira E2E 被拖慢到逾時，單獨跑又會過。只看規則 `on.blocked_manual` 指到的 status，三個條件照 state-machine.md：最近一次 Run 是 `blocked_manual`（而且已經結束）、item 底下沒有 `manual` 的 task、沒有 hold label。接回到那條規則的 watch status，留一則 system comment（D67）。撞上 `StatusConflict` 或 `NotFound` 就跳過那張，不擋住這一輪。
+  - 「擋住的 manual task」讀成「現在所有的 manual task」。runtime store 沒記當初是哪幾張擋住的，要記得多一欄；人在 blocked 期間新增的 manual 本來就該等。人把 manual 交回 `to-do` 也會接回，下一個 Run 去做它。
+  - hold label 的名稱先寫死成 `hold`（engine 的常數），config 的 `labels.hold` 跟 hold 的其他行為在 S7c 一起接。
+  - rework：人在 `in-review` 按 Rework，一定要寫回饋才送得出去。use case `requestRework` 先確認 item 還在人看到的 status，再留 comment，最後移到 `ready-to-rework`。順序是 comment 在前：規則 C 可能一移過去就認領，agent 只能從這則 comment 知道要改什麼。item 已經被移走時不留 comment，回 409。REST 是 `POST /api/items/:ref/rework`，使用者 MCP 加 `request_rework`（D57）。從 `blocked` 拖到 `ready-to-rework` 還是一般的 `moveItem`，不強制回饋。
+  - agent facade 加 `list_comments`（item 或它的 task，跟 `add_comment` 共用同一個範圍檢查），split、execute、rework 都有。
+  - config：有 rework 規則時，`statuses.task` 一樣要對照 `to-do` 與 `manual`，rework 也會建 task。
+  - 假 runner 的 rework 模式建一張 `Rework` task，內容是最新一則人寫的 comment，再回報 `succeeded`。
+  - 順手修掉 S4 起就有的看板 bug：`listBoard` 原本跟 tracker 的搜尋同時讀 `liveRuns`，本機一下就回來，Jira 要搜好幾秒。Run 在這段時間結束的話，卡片已經在結果的欄位上，卻還掛著 Running，要等下一次重讀才消失。改成 tracker 讀完才讀 `liveRuns`，Running 只會比卡片新。Jira E2E 整包跑時兩次卡在 Split Review 的 Running 就是這個。
+- 理由：自動接回讓人做完 manual 就不用再回來拖卡片，前台省一次思考，後台是一個每輪跑的 use case，沒有新的 status。回饋必填是因為 rework 的 agent 除了 comment 沒有別的依據，空的回饋只會換到一輪白跑。
+- 重新檢視：Jira 上 blocked 的 item 多到每輪的 `children` 呼叫吃掉 rate limit 時（每張停在 blocked、最近一次是 `blocked_manual` 的 item 每輪讀一次 task）；被人直接移出 blocked 的 item，最近一次 Run 會一直是 `blocked_manual`，讓閘門每輪都打開，這種多到常態時（改成記住接回或移走過的）；S7c 接上 `labels.hold` 時拿掉常數。

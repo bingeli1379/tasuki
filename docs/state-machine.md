@@ -58,8 +58,10 @@ stateDiagram-v2
 三個條件同時成立，engine 才自動接回：
 
 1. 最近一次 Run 的 outcome 是 `blocked_manual`
-2. 擋住的 manual task 都已經 `done`
+2. 擋住的 manual task 都已經 `done`：讀成 item 底下已經沒有任何 `manual` 的 task。人把 manual 交回 `to-do` 也算，下一個 Run 會去做它（D71）
 3. item 沒有 `hold`
+
+engine 每輪 poll 在復原之後、認領之前檢查，接回到那條規則的 watch status，並留一則 system comment（D67）。目標不寫死：item 要在那條規則 `on.blocked_manual` 指的 status 上才接。
 
 ### Rules and outcomes
 

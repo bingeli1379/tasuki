@@ -106,6 +106,7 @@ interface RuntimeStorePort {
   finishRun(id: string, outcome: Outcome): Promise<void>                  // + usage
   liveRuns(): Promise<Run[]>
   runsFor(target: Ref): Promise<Run[]>        // newest first
+  latestRunsEndedIn(outcome: Outcome): Promise<Run[]>   // newest Run per target, if it ended so (auto-resume, D71)
   // requestCancel(id, mode, by), getState / setState ('paused')
 }
 

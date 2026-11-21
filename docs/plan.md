@@ -47,7 +47,7 @@
 | S5 | task 與 `split-review` 放行（已完成，D65） | 看到拆出的 task，人放行或打回 |
 | S6 | execute：task 狀態與 verdict 驗證（已完成，D69） | item 一路走到 `in-review`、`done` |
 | S7a | task 詳情（內文與 comment，含 D67 的原因）、人改 task status（接手、交回、manual 做完）、在 `split-review` 編輯與刪除 task（已完成，D70） | 點開 task 看內容與原因；不用重拆就能修 task |
-| S7b | blocked 自動接回、規則 C rework、`in-review` 打回 `ready-to-rework` 的按鈕 | manual 做完後 item 自己回 `in-progress`；打回後重拆、再進 `split-review` |
+| S7b | blocked 自動接回、規則 C rework、`in-review` 打回 `ready-to-rework` 的按鈕（已完成，D71） | manual 做完後 item 自己回 `in-progress`；打回後重拆、再進 `split-review` |
 | S7c | Stop（hard）、hold（soft）、人移走 item 視為接手、`RUN_CANCELLED`、soft 與 hard 的寬限升級 | 按 Stop 後 Run 變 cancelled；貼 hold 後 engine 不碰它 |
 | S7d | 全域 pause 與 `pause --kill` | 暫停後不再起新的 Run |
 | S8 | 真的 claude runner（plugin）、MCP facade、run token | 在玩具 repo 上用真的 claude 跑一次 |

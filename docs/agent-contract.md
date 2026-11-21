@@ -33,7 +33,7 @@
 
 刻意沒有的：任何改 item status 的 tool、刪除、跨 item 存取。
 
-目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`update_task`、`list_comments` 隨用到的切片長出來。
+目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`list_comments`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69、S7b D71）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`list_comments` 的 `target` 一樣省略時是 item，只能讀被派的 item 與它的 task。`update_task` 隨用到的切片長出來。
 
 為什麼 orchestrator 不能建 task：task 圖是人在 `split-review` 檢查過才放行的，放行後再讓 AI 加 task 等於繞過關卡。orchestrator 發現需要新工作時，用 `add_comment` 寫下來，由 verdict 帶出去。
 
