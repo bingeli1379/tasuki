@@ -8,13 +8,15 @@
 | 項目 | 內容 |
 |---|---|
 | cwd | `<workspace.root>/<ITEM-KEY>/` |
-| prompt | rule 的範本展開後的文字 |
+| prompt | engine 契約加上 rule 的範本，展開後的文字（三層見 config-and-rules.md） |
 | env `TASUKI_RUN_ID` | Run id |
 | env `TASUKI_TARGET` | item 的 ref |
 | env `TASUKI_MODE` | `split` / `execute` / `rework` |
 | env `TASUKI_WORKSPACE` | 同 cwd |
-| MCP | 指向 engine 的 MCP facade（`/agent-mcp`），帶 run token（`Authorization: Bearer <token>`）。runner 從 `RunSpec.mcp` 拿到網址與 token，在 spawn 時注入，做法依 CLI 而定（待驗證） |
-| session | rule 的 `session` 是 `per-item` 且找得到舊 session 時，runner 用 resume。找不到或 resume 失敗就開新的 |
+| MCP | 指向 engine 的 MCP facade（`/agent-mcp`），帶 run token（`Authorization: Bearer <token>`）。runner 從 `RunSpec.mcp` 拿到網址與 token，在 spawn 時注入，做法依 CLI 而定。claude 是 `--mcp-config` 給一個 `type: "http"` 的 server，名字是 `tasuki`，tool 在 CLI 裡叫 `mcp__tasuki__<tool>`。連不上時 claude 不會失敗，只是沒有 tool 可用，最後因為沒有 verdict 而 `failed` |
+| env | 只有 runner 放行的少數變數（claude-cli 是 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TMPDIR`、`LANG`、`TERM`）、上面的 `TASUKI_*`，以及 agent 的 `options.env`。engine 自己的環境（含 `.env` 載入的 tracker token）不傳下去（D76） |
+| session | rule 的 `session` 是 `per-item` 且找得到舊 session 時，runner 用 resume。找不到或 resume 失敗就開新的。runner 透過 `onSession` 回報這次用的 session，記在 Run 上 |
+| log | runner 把 agent 的輸出寫到 `RunSpec.logPath`（`<dataDir>/logs/<runId>.log`），每有輸出就呼叫 `onActivity`，engine 一秒最多寫一次 `lastActivityAt` |
 
 ## MCP tools
 

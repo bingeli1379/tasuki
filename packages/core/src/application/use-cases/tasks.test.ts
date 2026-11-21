@@ -184,6 +184,8 @@ describe('listBoard', () => {
       agent: 'a',
       mode: 'split',
       maxAttempts: 3,
+      prompt: '',
+      session: 'fresh',
       on: {},
     })
     const board = await listBoard(

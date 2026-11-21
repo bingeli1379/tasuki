@@ -26,6 +26,7 @@ function toRun(row: Row): Run {
     rule: String(row['rule']),
     agent: String(row['agent']),
     attempt: Number(row['attempt']),
+    ...optional('sessionId', row['session_id']),
     workspace: String(row['workspace']),
     state: row['state'] as Run['state'],
     ...(optional('outcome', row['outcome']) as { outcome?: Outcome }),
@@ -101,6 +102,15 @@ export function createRuntimeStore(
         later(leaseSeconds),
         id,
       )
+    },
+    async touch(id) {
+      db.prepare("UPDATE run SET last_activity_at = ? WHERE id = ? AND state = 'running'").run(
+        clock.now().toISOString(),
+        id,
+      )
+    },
+    async recordSession(id, sessionId) {
+      db.prepare('UPDATE run SET session_id = ? WHERE id = ?').run(sessionId, id)
     },
     async report(id, verdict, summary) {
       const { changes } = db

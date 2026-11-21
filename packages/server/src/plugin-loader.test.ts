@@ -7,6 +7,7 @@ import { loadRunner, loadTracker } from './plugin-loader'
 
 const ctx = (dataDir: string): PluginContext => ({
   clock: { now: () => new Date('2026-11-16T12:00:00Z') },
+  configDir: '',
   dataDir,
   statuses: createStatusMap({ item: ITEM_STATUS_DISPLAY }),
 })

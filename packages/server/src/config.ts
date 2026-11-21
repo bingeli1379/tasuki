@@ -7,11 +7,13 @@ import {
   type Rule,
   type RuleExit,
   type RuleMode,
+  type RuleSession,
   type StatusMapping,
 } from '@tasuki/core'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { parseJsonc } from './jsonc'
+import { defaultPrompt } from './prompts'
 
 export interface PluginRef {
   plugin: string
@@ -44,6 +46,7 @@ export interface Config {
 type Raw = Record<string, unknown>
 
 const MODES: readonly RuleMode[] = ['split', 'execute', 'rework']
+const SESSIONS: readonly RuleSession[] = ['fresh', 'per-item']
 const EXITS: readonly RuleExit[] = [
   'succeeded',
   'needs_input',
@@ -68,12 +71,13 @@ function pluginRef(value: unknown, path: string): PluginRef {
   return { plugin: value['plugin'], options: value['options'] ?? {} }
 }
 
-// The checks doctor also runs on rules (config-and-rules.md, 1 to 5).
+// The checks doctor also runs on rules (config-and-rules.md, 1 to 5 and 11).
 function parseRules(
   value: unknown,
   mapped: readonly string[],
   agents: Record<string, PluginRef>,
   defaultMaxAttempts: number,
+  configDir: string,
 ): Rule[] {
   if (value === undefined) return []
   if (!Array.isArray(value)) throw new Error('config rules must be a list')
@@ -116,6 +120,18 @@ function parseRules(
       if (on[key] === undefined) throw new Error(`config ${path}.on.${key} is required`)
     for (const key of ['failed', 'max_attempts'] as const)
       if (on[key] === undefined) status(`on.${key} (default)`, 'blocked')
+    if (raw['prompt'] !== undefined && raw['promptFile'] !== undefined)
+      throw new Error(`config ${path}: set prompt or promptFile, not both`)
+    let prompt = defaultPrompt(mode)
+    if (raw['prompt'] !== undefined) prompt = text('prompt')
+    if (raw['promptFile'] !== undefined) {
+      const file = resolve(configDir, text('promptFile'))
+      if (!existsSync(file)) throw new Error(`config ${path}.promptFile: ${file} does not exist`)
+      prompt = readFileSync(file, 'utf8')
+    }
+    const session = (raw['session'] ?? 'fresh') as RuleSession
+    if (!SESSIONS.includes(session))
+      throw new Error(`config ${path}.session must be one of ${SESSIONS.join(', ')}`)
     return {
       id,
       watch,
@@ -124,6 +140,8 @@ function parseRules(
       mode,
       maxAttempts: positive(raw, 'maxAttempts', defaultMaxAttempts, path),
       on,
+      prompt,
+      session,
     }
   })
   for (const [i, rule] of rules.entries()) {
@@ -219,6 +237,7 @@ export function loadConfig(path: string): Config {
     Object.keys(statuses.item ?? {}),
     agents,
     limits.defaultMaxAttempts,
+    configDir,
   )
   // The tasks a splitting or reworking agent can make start in one of these.
   const splitter = rules.find((r) => r.mode === 'split' || r.mode === 'rework')

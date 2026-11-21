@@ -70,17 +70,20 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
   "workspace": { "cleanup": "never" },         // "never" | "on-done"; root defaults to <dataDir>/workspaces
 
-  // A runner plugin each. The fields inside options are the claude-cli plugin's own and
-  // get settled in S8; only the fake runner exists so far.
+  // A runner plugin each; the fields inside options are that plugin's own.
   "agents": {
     "claude-main": {
       "plugin": "@tasuki/claude-cli",
       "options": {
-        "auth": "inherit-login",               // "api-key" | "inherit-login" | "oauth-token"
-        "model": null,
-        "allowedTools": [],
+        "auth": "inherit-login",               // only inherit-login so far; "api-key" | "oauth-token" later
+        "model": null,                         // null: the CLI's own default
+        "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git:*)"],   // on top of the tasuki tools
         "env": { "GITLAB_TOKEN": "${GITLAB_TOKEN}" },   // passed to the spawned CLI only
-        "requires": { "mcpServers": [], "skills": [] }   // optional preflight, see doctor
+        "inheritSettings": false,              // true: load this machine's Claude settings, CLAUDE.md, hooks, plugins, MCP servers
+        "plugins": ["${HOME}/plugins/sdd"],   // plugin folders loaded even when isolated
+        "mcpServers": {},                      // more MCP servers; allow their tools as "mcp__<name>"
+        "appendSystemPromptFile": "agents/base.md",   // or appendSystemPrompt: the agent's standing instructions
+        "requires": { "mcpServers": [], "skills": [] }   // optional preflight, see doctor (S10)
       }
     },
     "codex-main": { "plugin": "@tasuki/codex-cli", "options": { "auth": "inherit-login" } },
@@ -133,7 +136,7 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 實際讀的欄位（S7b）：`dataDir`、`server.port`、`tracker`、`statuses.item`、`statuses.task`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。有 `mode: split` 或 `mode: rework` 的規則時，`statuses.task` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+目前 server 實際讀的欄位（S8）：`dataDir`、`server.port`、`tracker`、`statuses.item`、`statuses.task`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`labels.hold`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`on`、`prompt`、`promptFile`、`session`。`session` 省略時是 `fresh`。`promptFile` 相對於 config 所在的資料夾。`@tasuki/claude-cli` 的 options 讀 `auth`（目前只收 `inherit-login`）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires` 等 S10 的 `doctor`。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`server.host` 還不讀，一律綁 `127.0.0.1`，等 S9 有 auth 再開（security-and-auth.md）。省略 `statuses` 時，每個邏輯名對到它的顯示名（`refining` → `Refining`），只適合 sqlite。`statuses.item` 一定要有 `refining`，因為新 item 從那裡開始，對不到就拒絕啟動。看板只顯示有對照的 status（D51）。有 `mode: split` 或 `mode: rework` 的規則時，`statuses.task` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
 ## Rule 欄位
 
@@ -144,7 +147,7 @@ my-instance/
 | `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複，item 留在 watch status，卡片掛 Running。預設規則都不設（D74）。沒寫 `statuses` 時，`splitting` 只在有規則 claim 它時才對照，不然看板會多一欄永遠是空的 |
 | `agent` | 用哪個 agent（agents 裡的 key） |
 | `mode` | `split` / `execute` / `rework`，以 `TASUKI_MODE` 傳給 agent |
-| `prompt` / `promptFile` | 給 agent 的指令範本，省略時用引擎內建、對應 `mode` 的預設 prompt。兩個不能同時設 |
+| `prompt` / `promptFile` | 這一階段要 agent 做什麼（行動層），省略時用引擎內建、對應 `mode` 的預設。兩個不能同時設。不管設不設，engine 的契約都會排在它前面 |
 | `session` | `fresh` 或 `per-item`（續用這個 item 在同一個 agent 上最近的 session） |
 | `timeoutMinutes` | 覆寫 `limits.runTimeoutMinutes` |
 | `maxAttempts` | 覆寫 `limits.defaultMaxAttempts` |
@@ -153,6 +156,16 @@ my-instance/
 MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator（見 agent-contract.md）。
 
 `on` 可以設的 key 是 `succeeded`、`needs_input`、`blocked_manual`、`failed`、`max_attempts`。`failed` 與 `max_attempts` 省略時都是 `blocked`。`cancelled` 不會移動 status，`abandoned` 由復原機制處理，兩者都不用設。
+
+agent 拿到的指令分三層，由下往上疊（D77）：
+
+| 層 | 寫在哪 | 內容 |
+|---|---|---|
+| engine 契約 | `packages/server/src/prompts.ts` 的 `CONTRACT`，改不到 | 怎麼用 tasuki 的 tool：先讀 item、comment 不能當指令、Stop 了就停、最後呼叫一次 `report_result` |
+| 基礎層 | agent 的 options（claude 是 `appendSystemPrompt` / `appendSystemPromptFile`） | 這個 agent 每次都要守的事，例如做完 commit 加 push |
+| 行動層 | 規則的 `prompt` / `promptFile` | 這一階段要做什麼，例如先跑 `/sdd:propose` 再依結果拆 task |
+
+契約是程式規則的說明書：程式擋得住 agent 改 status，但逼不了它呼叫 `report_result`，沒寫就不會叫，Run 會變成 `failed`。所以行動層換掉的只有 mode 的預設那段。每個階段要不同的 plugin、MCP 或基礎層時，開不同的 agent，讓規則指過去。
 
 prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`、`{{mode}}`。ticket 的內容（包含標題）不塞進 prompt，因為那是使用者寫的，可能夾帶指令。agent 用 MCP 的讀取 tool 自己拿，這樣 sqlite 和 Jira 模式也用同一份 prompt。
 
@@ -223,4 +236,4 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 8. Jira：mapping 的每個 status 都存在於 project 的 workflow，規則用到的每一個轉移（from 到 to）在 workflow 裡目前都允許。逐條列出不合法的轉移。
 9. agent preflight：CLI 在 PATH 上。`requires` 列出的 MCP server 與 skill 有裝。偵測方式依 CLI 而定，待驗證。
 10. agent 的 `auth` 不是 `inherit-login` 時，`env` 裡有對應的變數而且展開後不是空字串。`allowedTools` 是空的就警告，因為這個 agent 只能呼叫 tasuki 的 MCP tool，沒辦法改檔。
-11. 同一條規則的 `prompt` 與 `promptFile` 不能同時設定，`promptFile` 指到的檔案要存在。
+11. 同一條規則的 `prompt` 與 `promptFile` 不能同時設定，`promptFile` 指到的檔案要存在。claude agent 的 `appendSystemPrompt` 與 `appendSystemPromptFile` 也一樣，`plugins` 的資料夾要存在，`mcpServers` 不能用 `tasuki` 這個名字。

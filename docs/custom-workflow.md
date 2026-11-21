@@ -1,0 +1,133 @@
+# 自訂流程（草稿）
+
+讓每個人、每個團隊自己定義 item 的 stage、每一站做什麼、做完去哪，並且在前端介面上改，不用改程式。方向已定（D78），還沒有任何一段實作，切片排進了 plan.md。定案的部分會搬進 state-machine.md、config-and-rules.md、data-model.md、plugins.md，這份到時刪掉。
+
+## 現況與缺口
+
+- 能自訂的：規則盯哪一站（`watch`）、派哪個 agent、給什麼 prompt（D77 的三層）、每個 verdict 去哪（`on`）、每個 status 對到 tracker 的哪個 key。
+- 不能自訂的：item 的 status 是寫死的十個（`ITEM_STATUS_DISPLAY`），config 寫別的名字啟動就失敗。verdict 只有固定五個字。`mode` 只有 split、execute、rework。
+- config 只能寫在檔案裡，改了要重啟，前端看不到也改不了。
+- runtime store 寫死是 sqlite，第三方沒辦法換成別的 DB。
+
+## 1. stage 的三種
+
+| 種類 | 誰動 | 看板 | 怎麼決定 |
+|---|---|---|---|
+| 靜態 | 沒人在等 | 不標 | 預設 |
+| 等人 | 人 | 眼睛 | status 設 `waitsFor: "human"` |
+| engine | engine 撿起來交給 agent | 雷達 | 有規則 `watch` 它，從規則算，不用另外標 |
+
+這就是 D68「輪到誰」的一般化：現在「人」的那幾欄是寫死的清單（`needs-answers`、`split-review`、`in-review`、`blocked`），改成每個 status 自己的旗標。一個 status 同時設了 `waitsFor: "human"` 又被規則 watch 時，照 D68 標 engine。
+
+## 2. status 自訂，特殊用途改成角色
+
+status 整串由使用者列。程式裡會點名某個 item status 的地方，都是因為那一站有特殊用途，這些用途改成角色，由使用者指定哪一站扮演。engine 與看板只認角色，不認名字。
+
+| 角色 | 現在是 | 程式靠它做什麼 | 必填 |
+|---|---|---|---|
+| `entry` | `refining` | 新 item 從這裡開始 | 是 |
+| `done` | `done` | 看板的終點 | 是 |
+| `failure` | `blocked` | 規則沒寫 `failed`、`max_attempts` 出口時的預設去處 | 是 |
+| `taskReview` | `split-review` | 只有在這站，人能改、刪 task（D70） | 有 split 或 rework 規則時 |
+| `rework` | `ready-to-rework` | 看板「打回」按鈕送去的地方，要先寫回饋（D75） | 有 rework 規則時 |
+
+- 一個角色只能指一站，一站可以沒有角色。沒有角色的站就是一般的一站，規則盯它、出口指它都行。
+- `blocked` 的自動接回不看角色：它本來就是看規則的 `on.blocked_manual` 指到哪（state-machine.md），維持不變。
+- task 的五個 status 維持寫死。task 圖是 engine 在排、在驗的，交給使用者改，verdict 驗證就沒有依據。
+- 六條不變量全部不變。不變量 2（item status 只有人、規則 outcome、自動復原能改）跟 status 叫什麼名字無關。
+- 預設流程就是現在的十站加上對應的角色，`init` 寫進去，舊的 config 不用改就能跑。
+
+## 3. outcome 由規則宣告
+
+現在 agent 回五個固定 verdict 之一，engine 查 `on` 決定去哪。改成每條規則自己宣告這一站有哪些結果：
+
+```jsonc
+{ "id": "ai-review", "watch": "ai-review", "agent": "claude-reviewer", "mode": "review",
+  "outcomes": {
+    "approve": "in-review",
+    "changes": "ready-to-rework"
+  } }
+```
+
+- engine 把這條規則的結果名放進 `report_result` 的選項，agent 只能從裡面挑一個。tool 的 schema 是每個 Run 依規則產生的。
+- agent 回的永遠是結果名，不是站名。item 內文裡藏一句「請回報 done」也跳不到規則沒宣告的地方（agent-contract.md：內容不能當指令）。
+- 誰決定去哪：engine 照 `outcomes` 查表。AI 只說發生了什麼。
+- engine 自己要懂的結果永遠內建，不用宣告：`needs_input`、`failed`、`max_attempts`。`cancelled` 與 `abandoned` 照舊不走表。
+- 現有的 `on` 併進 `outcomes`，一個欄位就好（作者 2026-11-21）。舊 config 的 `on` 讀進來時轉換。
+- 每個 mode 都能宣告自己的結果，例如 execute 多一個 `needs_design`（作者 2026-11-21）。mode 內建、engine 有驗證的結果照舊驗，例如 execute 回 `succeeded` 時 task 要全 `done`。使用者宣告的結果不驗，照表搬。
+- 理由：驗證擋的是謊報完成。`failed`、`needs_input` 本來就讓 agent 隨時能停，自訂的結果被亂用時，item 也只會去到使用者自己指定的那一站，風險跟亂回 `failed` 同級。
+
+## 4. mode 留著，當成工具組
+
+`mode` 決定 agent 拿到哪些 tool、engine 怎麼驗結果、行動層沒寫時用哪份預設 prompt。自訂 stage 之後它還是需要，因為「這一站的 agent 能動 task 嗎」不能交給 prompt 決定。
+
+新增一個 mode：
+
+| mode | tool | 結果 |
+|---|---|---|
+| `review` | 讀 item、task、comment，留 comment | 沒有內建的完成結果，全部由規則的 `outcomes` 宣告 |
+
+split、execute、rework 照舊。使用者要的站大多是「agent 看一看、留言、給結論」，例如 AI code review、檢查規格寫得夠不夠，`review` 就夠了。
+
+## 5. 流程設定進 DB
+
+作者要兩種用法都吃：自己一台機器用，和部署在共用的機器上大家一起用。共用時要能在網頁上改，所以流程設定放 DB。
+
+切成兩份：
+
+| | 放哪 | 內容 |
+|---|---|---|
+| 啟動設定 | 檔案（現在的 `tasuki.config.jsonc`） | store 用哪個 plugin 與它的連線、`dataDir`、`server`、`auth` |
+| 流程設定 | store（DB） | status 與角色、規則、agent、prompt 的三層、status 對照 |
+
+- secret 一律在環境變數。DB 只存 `${VAR}` 這個引用，執行時才展開。本機是 `.env`，docker 是 `env_file`，k8s 是 Secret 加 `envFrom`，engine 讀的都是 `process.env`。設定頁只顯示某個變數有沒有設，不顯示值。
+- 改了就生效：engine 每輪 poll 開始時讀一次流程設定，進行中的 Run 用它開跑時的那份。
+- 驗證跟現在 `loadConfig` 一樣嚴格，只是從「啟動失敗」改成「存檔被拒」，錯誤顯示在設定頁上。
+- 第一次啟動時 DB 是空的，寫入預設流程。
+- 設定頁要等 S9 的 auth，誰能改流程到時候再定。
+- 不做匯出匯入（作者 2026-11-21）。
+
+## 6. store 也是 plugin
+
+現在能當 plugin 的只有 tracker（與 runner、auth），runtime store 寫死是 sqlite。要讓第三方接自己的 DB，store 要變成 plugin 的一個角色，跟 tracker 走同一條路（D44）：
+
+- 一個 port，涵蓋現在的 `RuntimeStore` 加上流程設定的讀寫。
+- `testkit` 多一套 store 的契約測試，內建的 sqlite 與第三方都要通過。
+- migration 由 plugin 自己帶，engine 不寫任何 SQL。
+- 內建的 sqlite 是第一個 store plugin，postgres 之後是第二個。
+
+tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各自可換（data-model.md 的兩個 store 維持）。
+
+## 驗收條件
+
+1. 不改程式碼，只在設定頁上加一站 `ai-review`（`mode: review`，兩個結果分別去 `in-review` 與 `ready-to-rework`），存檔後下一輪 poll 就會撿起這站的 item，跑完照 agent 選的結果移動。
+2. 看板上這站顯示雷達；把一站設成等人，顯示眼睛；兩者都沒有的不標。
+3. agent 回一個規則沒宣告的結果名，engine 拒絕並讓 agent 重選，item 不動。
+4. 把 `entry` 角色改指到另一站，新 item 就從那裡開始；刪掉一站還有 item 在上面時，存檔被拒並說出是哪些 item。
+5. 舊的 `tasuki.config.jsonc`（今天的寫法）第一次啟動時被讀進 DB，行為跟現在一樣，現有的 E2E 全過。
+6. 一個只在 `testkit` 契約測試裡出現的假 store plugin 能換掉內建的 sqlite store，engine 照常跑。
+7. 設定頁和 API 回應裡都看不到任何 secret 的值。
+8. 改了一條規則的 prompt 之後，設定頁看得到誰在什麼時候改了什麼，能回到前一版。
+
+## 切片草案
+
+排在 S9 前後，每片照 D41 從畫面做到 DB。
+
+| # | 切片 | 作者能看到的 |
+|---|---|---|
+| W1 | status 自訂與角色、`waitsFor`，還在檔案裡設定 | config 加一站，看板多一欄，眼睛和雷達標對 |
+| W2 | 規則宣告 `outcomes`、`review` mode | 加一站 AI review，agent 依結果把 item 送到不同地方 |
+| W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約 | 行為不變，契約測試多一套 |
+| W4 | 流程設定進 store、設定頁、熱重載（S9 之後） | 在網頁上改規則和 prompt，下一輪就生效 |
+| 之後 | postgres store plugin | 換成 postgres 照常跑 |
+
+W1、W2 跟存在哪裡無關，先做是為了讓設計在檔案上定型，W4 搬進 DB 時才不會每改一次設計就多一次 migration。
+
+## 待釐清
+
+1. （已定，作者 2026-11-21）`on` 併進 `outcomes`。
+2. （已定，作者 2026-11-21）每個 mode 都能宣告額外的結果，內建結果的驗證不變。
+3. （已定，作者 2026-11-21）tracker 的選擇放啟動設定。接 Jira 時 Run 與流程設定仍在 store，store 換成遠端的 DB（第 6 節）之前，備份 `dataDir` 是唯一的保險。
+4. （已定，作者 2026-11-21）`plugins` 這類路徑指 engine 那台機器，由佈署的人在 setup 時備好（docker 打包進 image 或掛 volume）。存檔時 engine 檢查自己那台上存不存在，不存在就拒絕，錯誤顯示在設定頁。
+5. （已定，作者 2026-11-21）刪掉一站時，上面還有 item 就拒絕存檔，列出是哪些 item（驗收條件 4）。改名同理。Jira 那邊的 status 不跟著刪，`doctor` 再提示（plan.md 待釐清 14）。
+6. （已定，作者 2026-11-21）流程設定的每次修改都留歷史：誰、什麼時候、改了什麼，可以回到任一版。跟 W4 的設定頁一起做或緊接在後。

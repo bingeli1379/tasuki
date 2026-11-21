@@ -104,6 +104,8 @@ interface RuntimeStorePort {
   createRun(r: NewRun): Promise<Run>          // throws RunConflict if target already has a live Run; the store assigns id and logPath
   getRun(id: string): Promise<Run>
   renewLease(id: string, leaseSeconds: number): Promise<void>
+  touch(id: string): Promise<void>            // lastActivityAt = now (D34)
+  recordSession(id: string, sessionId: string): Promise<void>
   report(id: string, verdict: Verdict, summary: string): Promise<void>   // first report only
   bumpProduced(id: string, key: 'questions' | 'tasks'): Promise<void>
   finishRun(id: string, outcome: Outcome): Promise<void>                  // + usage
@@ -118,17 +120,21 @@ interface RuntimeStorePort {
 interface RunnerPort {
   start(spec: RunSpec): RunHandle    // spawn headless CLI, returns handle
 }
-interface RunSpec {                  // + prompt, env, session (S8)
+interface RunSpec {
   runId: string
   target: Ref
   mode: 'split' | 'execute' | 'rework'
   workspace: string                  // created by the engine, the agent's cwd
   mcp: { url: string; token: string }   // the MCP facade, bound to this Run
+  prompt: string                     // the engine's contract and the rule's template, variables filled in
+  resume?: string                    // session to pick up (per-item); the runner falls back to a new one
+  logPath: string                    // the runner writes the agent's output here
+  onActivity(): void                 // output seen: lastActivityAt (D34)
+  onSession(id: string): void        // the session this Run is in, kept on the Run
 }
 interface RunHandle {
   readonly exit: Promise<{ code: number | null; signal: string | null }>
   terminate(signal: 'SIGTERM' | 'SIGKILL'): void   // the whole process tree; the engine times the grace (D72)
-  // + sessionId (S8)
 }
 
 interface AuthPort {

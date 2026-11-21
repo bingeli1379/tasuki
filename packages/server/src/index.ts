@@ -25,7 +25,7 @@ try {
   const db = openDatabase(dbPath)
   migrate(db, RUNTIME_MIGRATIONS)
   const runtime = createRuntimeStore(db, systemClock, join(config.dataDir, 'logs'))
-  const ctx = { clock: systemClock, dataDir: config.dataDir, statuses }
+  const ctx = { clock: systemClock, configDir: config.configDir, dataDir: config.dataDir, statuses }
   const storage = await loadTracker(
     config.tracker.plugin,
     config.tracker.options,

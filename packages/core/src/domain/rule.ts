@@ -3,6 +3,10 @@ import { isRunnable, type TaskNode } from './task'
 
 export type RuleMode = 'split' | 'execute' | 'rework'
 
+// fresh: every Run starts a new agent session. per-item: a Run picks up the newest session
+// this agent had on the item (data-model.md).
+export type RuleSession = 'fresh' | 'per-item'
+
 // The outcomes a rule moves the item on. cancelled leaves it where it is; abandoned is
 // recovery's business.
 export type RuleExit = Exclude<Outcome, 'cancelled' | 'abandoned'>
@@ -16,6 +20,24 @@ export interface Rule {
   mode: RuleMode
   maxAttempts: number
   on: Partial<Record<RuleExit, string>>
+  // The template given to the agent, before its variables are filled in.
+  prompt: string
+  session: RuleSession
+}
+
+// The variables a prompt template can use (config-and-rules.md). Ticket content stays out:
+// a person wrote it and it may carry instructions, so the agent reads it through the facade.
+export function expandPrompt(
+  template: string,
+  vars: { ref: string; runId: string; workspace: string; mode: RuleMode },
+): string {
+  const values: Record<string, string> = {
+    'item.ref': vars.ref,
+    'run.id': vars.runId,
+    workspace: vars.workspace,
+    mode: vars.mode,
+  }
+  return template.replace(/\{\{\s*([a-z.]+)\s*\}\}/g, (all, name: string) => values[name] ?? all)
 }
 
 export function exitFor(rule: Rule, outcome: RuleExit): string | undefined {

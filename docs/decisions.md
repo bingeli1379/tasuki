@@ -612,3 +612,46 @@
   - 三種用法都要顧：自己在本機用 sqlite、架在 VM 上大家用、大家在 Jira 上協作而作者在本機接 Jira。前兩種所有操作都經過 tasuki 的畫面或 MCP，第一層就擋住；第三種靠第二層。
 - 理由：沒有回饋的 rework，agent 開不出有意義的 task，最好的情況是被驗收判成 `failed` 掉進 `blocked`，等於白跑一輪還看不出原因。認領前多讀一次 comment（Jira 上一支 API），換到的是不白跑、而且留言直接說要補什麼。
 - 重新檢視：有人希望沒寫回饋也能重跑（例如只想換個 agent 再試一次）時，改成規則上的選項。
+
+## D76 S8：真的 claude runner
+- 決定：
+  - 新套件 `@tasuki/claude-cli`，跟其他 plugin 走同一條載入路徑。每個 Run spawn 一次 `claude -p <prompt> --output-format stream-json --verbose`，cwd 是 item 的 workspace，自己一個 process group（`detached`），`terminate` 對整個 group 送訊號，CLI 叫起來的子 process 一起停。
+  - 權限：`--permission-mode dontAsk`，`--allowedTools` 一律是 `mcp__tasuki` 加上 `options.allowedTools`。白名單外的 tool 直接拒絕，不會停下來等人（D35）。
+  - 預設隔離：`--setting-sources ""` 加 `--strict-mcp-config`，agent 不載入這台機器的 Claude 設定、CLAUDE.md、hooks、plugin、MCP server，同一個 Run 換台機器跑結果一樣。`options.inheritSettings: true` 改成跟互動 session 一樣全部載入，要用自己裝的 skill 或 MCP 時開。`requires` 的檢查留給 S10 的 `doctor`，只在繼承時才有意義。
+  - env 白名單：engine 的 process 載入了 `.env`，裡面有 tracker 的 token，整包繼承會讓 agent 拿到它（違反 agent-contract.md 的第一條）。runner 只放行 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TMPDIR`、`LANG`、`TERM`，加上 `TASUKI_*` 與 `options.env`。
+  - session：runner 自己產生 uuid 用 `--session-id` 開新的，不用從輸出解析。`per-item` 時 engine 找這張 item 上同一個 agent 最近一個有 `sessionId` 的 Run，交給 runner `--resume`。claude 找不到 session 時 exit 1、stderr 是 `No conversation found with session ID`，runner 看到就改開新的，不算失敗。用到的 session 透過 `onSession` 記在 Run 上（`run.session_id`）。規則省略 `session` 時是 `fresh`。
+  - log：stdout 與 stderr 寫進 `<dataDir>/logs/<runId>.log`，每有輸出就 `onActivity`，engine 一秒最多寫一次 `lastActivityAt`。Run 沒有 verdict 或 exit code 不是 0 時，system comment 附 log 最後 20 行（最多 2000 字）。
+  - `RunSpec` 多了 `prompt`、`resume`、`logPath`、`onActivity`、`onSession`。runner 是 callback 回報，不是 `RunHandle` 上的欄位，因為 resume 失敗改開新的時，session 會在 Run 中途換掉。
+  - prompt：規則的 `prompt`、`promptFile` 與三個 mode 的預設 prompt 從 S12 拉進 S8，沒有 prompt 就不可能真的跑。預設 prompt 寫在 `packages/server/src/prompts.ts`，含 D30 的冪等準則（待釐清 6 的措辭）。
+- 實測（2026-11-21，claude 2.1.323，sonnet，sqlite，玩具 repo `~/Test/tasuki-toy`）：split 一輪 9 秒、$0.06，拆成兩張有 blockedBy 的 task，facade 只掛 splitter 的六個 tool。第一次 execute 失敗：agent 把 `ls && git clone && cd && cat` 串成一條 Bash，`dontAsk` 要每一段都在白名單裡，整條被拒。agent 老實回報 `failed`、task 送回 `to-do`、留言說缺權限，失敗的路是通的。預設 prompt 因此補上一條：白名單外沒人會允許，讀改檔用檔案 tool，一次 shell 只跑一條指令。
+- 還沒做：`runTimeoutMinutes` 與 `idleTimeoutMinutes`（卡住只能按 Stop）、`api-key` 與 `oauth-token` 的認證、看板上的 Run log 檢視、Run 記 pid 供 engine 重啟後清理（待釐清 7）。
+- 重新檢視：agent 常因為 shell 指令被擋而失敗時（考慮內建一份預設的 `allowedTools`，或在 log 裡把 `permission_denials` 寫進失敗 comment）；做 codex runner 時，看 `RunSpec` 的 callback 夠不夠用。
+
+## D77 prompt 分三層，agent 自帶 plugin 與 MCP
+
+- 背景：agent 要能跑在兩種機器上，作者自己的筆電，和什麼都沒裝的 VM。D76 的預設隔離讓兩邊結果一樣，但隔離之後 agent 用不到作者的 skill（例如 sdd 的 `/propose`、`/apply`）。另外 D37 的寫法是 rule 一設 `prompt` 就整份換掉預設，連怎麼用 tasuki 的那段也一起不見，agent 不知道要呼叫 `report_result`，Run 必定 `failed`。
+- 決定：
+  - prompt 分三層：engine 契約（`CONTRACT`，永遠排在最前面，使用者改不到）、agent 的基礎層（claude 的 `appendSystemPrompt` / `appendSystemPromptFile`，走 `--append-system-prompt`）、規則的行動層（`prompt` / `promptFile`，省略時用 mode 的預設）。D37 的「省略時用預設」現在只指行動層。
+  - 契約是程式規則的說明書。status、verdict 驗證、`RUN_CANCELLED` 都由程式擋，但呼叫 `report_result` 只能靠文字告訴 agent。
+  - claude-cli 的 options 加 `plugins`（`--plugin-dir`）與 `mcpServers`（跟 tasuki 併進同一份 `--mcp-config`）。隔離時照樣載入，所以同一份 config 在 VM 上跑得一樣。額外 MCP server 的 tool 一樣要寫進 `allowedTools`，不自動放行（D35）。
+  - 每個階段要不同的 plugin、MCP 或基礎層，就開不同的 agent，規則指過去。runner 專屬的東西留在 agent 上，規則不長出 claude 才有的欄位，之後接 codex 不用動規則。
+  - push、propose 的產物怎麼處理、做完留什麼 comment，都是 prompt 的事，engine 不碰 git（workspace-and-git.md）。
+  - `PluginContext` 加 `configDir`，plugin 的 options 裡的相對路徑對它解析，跟 config 其他路徑一致。
+- 實測（2026-11-21，claude 2.1.323，sonnet，sqlite，玩具 repo 加一個 bare remote）：split 規則的 agent 載入 `eli-marketplace/plugins/sdd`，基礎層寫「沒有 clone 就 clone 到 cwd、開 `feature/<ref>`、做完 commit 加 push」，行動層寫「跑 `/sdd:propose`，依 tasks.md 拆：能一路 apply 完的併成一張，要人決定的拆成 manual」。一輪 37 秒、$0.25、22 turns、沒有任何 tool 被擋。agent clone 進 workspace、開 branch、`/sdd:propose` 寫出 proposal、design、spec、tasks 四份檔，判斷可以一次 apply 完，只開一張 task（body 寫著 `Run /sdd:apply add-farewell`），commit 加 push 到 remote，留 comment 說明拆法與假設，item 到 `split-review`。init 訊息確認隔離還在：只載入 sdd，作者裝的其他 plugin 都沒有。這也驗證了 headless 底下 skill 叫得起來（agent 用 `Skill` tool 呼叫 `sdd:propose`），plan.md 待驗證的那條因此移除。
+- 注意：commit 帶著 Claude Code 內建的 `Co-Authored-By` 行，`--setting-sources ""` 不會拿掉它。不要的話寫進基礎層，或之後給 agent 一個 `settings` option。
+- 重新檢視：基礎層需要跨 agent 共用很多份時（考慮在 agent 之外加一個共用的基礎層）；codex runner 沒有對應 `--append-system-prompt` 的東西時，基礎層改成接在契約後面。
+
+## D78 流程可以自訂，設定進 DB，store 也是 plugin
+
+- 背景：每個人、每個團隊的 stage 都不一樣，tasuki 要主打彈性。現在 item 的 status 寫死十個、verdict 寫死五個、config 只能寫在檔案裡，runtime store 寫死是 sqlite。作者要同時支援自己一台機器用，和部署在共用機器上大家一起用，之後還要接 postgres 等其他 DB，並讓第三方照介面自己寫 DB 的 plugin。
+- 決定（細節在 custom-workflow.md）：
+  - stage 分三種：靜態、等人（看板標眼睛，status 的 `waitsFor: "human"`）、engine（標雷達，有規則 watch 就是）。是 D68 的一般化。
+  - item 的 status 由使用者列，程式點名的五站改成角色：`entry`、`done`、`failure`、`taskReview`、`rework`。task 的 status 維持寫死。六條不變量不變。
+  - 規則宣告 `outcomes`（結果名到下一站），`on` 併進來。每個 mode 都能宣告額外的結果，內建結果的驗證不變。agent 只能回結果名，不能回站名。
+  - `mode` 留著當工具組，多一個只能讀與留 comment 的 `review`。
+  - 流程設定（status、角色、規則、agent、prompt、status 對照）放 store，前端能改，下一輪 poll 生效，每次修改留歷史。啟動設定（store 的 plugin 與連線、`dataDir`、`server`、`auth`、tracker）留在檔案。secret 一律在環境變數，DB 只存 `${VAR}`。不做匯出匯入。
+  - store 變成 plugin 的一個角色，跟 tracker 一樣有 `testkit` 契約，migration 由 plugin 自己帶。內建的 sqlite 是第一個。
+  - 切片：W1、W2、W3 排在 S9 之前，W4（設定頁）在 S9 之後，postgres 之後再排。W1、W2 先在檔案上定型，搬進 DB 時才不會每改一次設計就多一次 migration。
+- 取代：D68 寫死的 `AWAITING_PERSON` 清單改成每個 status 的 `waitsFor`。D51 的「看板順序照 state-machine.md」改成照使用者列的順序。D37 第 3 點的 `on.failed`、`on.max_attempts` 改成 `outcomes` 底下的同名結果，預設仍是 `failure` 角色那一站。state-machine.md 那十站從定案改成預設流程，等 W1、W2 做完時一併改寫它與 config-and-rules.md。
+- 重新檢視：角色不夠用時（又有程式需要點名某一站）；store 契約大到第三方寫不動時；共用部署需要多個團隊各自一套流程時（現在一個 engine 一套）。
+

@@ -19,6 +19,7 @@
 | 10 | security-and-auth.md | auth port、loopback 檢查、run token、secret | 已確認，loopback 檢查作者曾質疑 |
 | 11 | decisions.md | 決定紀錄與理由 | 持續更新 |
 | 12 | plan.md | 範圍、切片、測試、風險、待釐清、待驗證 | 草稿 |
+| 13 | custom-workflow.md | 自訂 stage、角色、規則宣告的結果、流程設定進 DB、store plugin | 方向已定（D78），未實作 |
 
 ## 慣例
 

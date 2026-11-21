@@ -62,4 +62,6 @@ export const RUNTIME_MIGRATIONS: readonly string[] = [
   ALTER TABLE run_next RENAME TO run;
   CREATE UNIQUE INDEX one_live_run ON run(target) WHERE state = 'running';
   CREATE INDEX run_by_target ON run(target, started_at DESC);`,
+  // S8: the agent session a Run ran in, for the next Run on the item to resume.
+  `ALTER TABLE run ADD COLUMN session_id TEXT;`,
 ]

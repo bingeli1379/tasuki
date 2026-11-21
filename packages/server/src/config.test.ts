@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { loadConfig } from './config'
+import { defaultPrompt } from './prompts'
 
 const write = (config: string, env?: string): string => {
   const dir = mkdtempSync(join(tmpdir(), 'tasuki-config-'))
@@ -88,7 +89,9 @@ describe('loadConfig', () => {
     expect(config.agents).toEqual({
       fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } },
     })
-    expect(config.rules).toEqual([{ ...split, maxAttempts: 3 }])
+    expect(config.rules).toEqual([
+      { ...split, maxAttempts: 3, prompt: defaultPrompt('split'), session: 'fresh' },
+    ])
     expect(config.limits).toEqual({
       maxConcurrentRuns: 2,
       leaseSeconds: 120,
@@ -98,6 +101,14 @@ describe('loadConfig', () => {
     })
     expect(config.holdLabel).toBe('hold')
     expect(config.pollSeconds).toBe(5)
+  })
+
+  it('takes the prompt from the rule, or from a file next to the config', () => {
+    const inline = loadConfig(withRules([{ ...split, prompt: 'Split {{item.ref}}.' }]))
+    expect(inline.rules[0]?.prompt).toBe('Split {{item.ref}}.')
+    const path = withRules([{ ...split, promptFile: 'split.md', session: 'per-item' }])
+    writeFileSync(join(path, '..', 'split.md'), 'From a file.')
+    expect(loadConfig(path).rules[0]).toMatchObject({ prompt: 'From a file.', session: 'per-item' })
   })
 
   it('takes the hold label from labels.hold, as one word Jira can store', () => {
@@ -133,6 +144,9 @@ describe('loadConfig', () => {
       { ...split, maxAttempts: 0 },
       'rules[0] (split).maxAttempts must be a whole number of at least 1',
     ],
+    [{ ...split, session: 'always' }, 'rules[0] (split).session must be one of fresh, per-item'],
+    [{ ...split, prompt: 'a', promptFile: 'b.md' }, 'rules[0] (split): set prompt or promptFile'],
+    [{ ...split, promptFile: 'missing.md' }, 'missing.md does not exist'],
   ])('refuses a rule that cannot work: %j', (rule, message) => {
     expect(() => loadConfig(withRules([rule]))).toThrow(message)
   })

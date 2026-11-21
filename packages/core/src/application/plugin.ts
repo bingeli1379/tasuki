@@ -7,6 +7,8 @@ export const API_VERSION = 1
 
 export interface PluginContext {
   clock: Clock
+  // The folder the config file is in; relative paths in plugin options resolve against it.
+  configDir: string
   dataDir: string
   statuses: StatusMap
 }
