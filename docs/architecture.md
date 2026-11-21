@@ -213,7 +213,7 @@ Jira 模式下 ticket 在 Jira，Run 在本機，兩邊靠 key 互指。
 
 - 語言：TypeScript，Node。
 - engine：單一 monolith process，同時 serve REST、MCP、靜態前端。
-- 前端：Vue 3 + Vite SPA，打包成靜態檔由 engine serve。不用 Nuxt，因為是 API 後面的管理介面，不需要 SSR。元件用 Nuxt UI（在純 Vue + Vite 底下用，不需要 Nuxt），見 D56。
+- 前端：Vue 3 + Vite SPA，打包成靜態檔由 engine serve。不用 Nuxt，因為是 API 後面的管理介面，不需要 SSR。元件用 Nuxt UI（在純 Vue + Vite 底下用，不需要 Nuxt），見 D56。字型是 Bricolage Grotesque，用 `@fontsource-variable` 打包進 bundle，不連 Google Fonts，公司內網也能用（D79）。
 - repo：pnpm workspace。
 - 工具鏈：Vite+（`vp`），lint、format、type check、測試、build 都走它，見 D27、D28。`.vue` 的 template 型別檢查另外用 vue-tsc（配 `web` 自己的 TS 6），見 D58；git hook 走 `vp config` 與 `vp staged`，見 D53。library 用 `vp pack`（tsdown）打包。
 
