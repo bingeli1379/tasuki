@@ -384,6 +384,18 @@ export function createJiraTracker(
       await jira('DELETE', `/issue/${ref}`)
     },
 
+    // update.labels adds or removes the one label, unlike fields.labels, which replaces all.
+    async addLabel(ref, label) {
+      await getUnit(ref)
+      await jira('PUT', `/issue/${ref}`, { update: { labels: [{ add: label }] } })
+      return toWorkUnit(await getIssue(ref))
+    },
+    async removeLabel(ref, label) {
+      await getUnit(ref)
+      await jira('PUT', `/issue/${ref}`, { update: { labels: [{ remove: label }] } })
+      return toWorkUnit(await getIssue(ref))
+    },
+
     async comments(target) {
       await getUnit(target)
       const fetchAll = async (expand: string): Promise<JiraComment[]> => {
