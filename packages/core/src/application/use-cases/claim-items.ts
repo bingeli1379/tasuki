@@ -15,6 +15,8 @@ export interface ClaimLimits {
   leaseSeconds: number
   // <dataDir>/workspaces; each item gets its own folder under it.
   workspaceRoot: string
+  // Items with this label are left alone (invariant 5).
+  holdLabel: string
 }
 
 export interface Claimed {
@@ -40,7 +42,7 @@ export async function claimItems(
   for (const rule of rules) {
     for (const item of waiting.filter((i) => i.status === rule.watch)) {
       if (slots <= 0) return claimed
-      if (busy.has(item.ref)) continue
+      if (busy.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
       const previous = (await runtime.runsFor(item.ref)).find((r) => r.rule === rule.id)
       const attempt = nextAttempt(previous)
       // The Run goes first: a crash before the claim leaves only a lease that expires,

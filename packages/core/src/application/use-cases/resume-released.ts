@@ -1,0 +1,50 @@
+import type { Rule } from '../../domain/rule'
+import type { Ref } from '../../domain/work-unit'
+import { NotFound } from '../not-found'
+import type { RuntimeStorePort } from '../ports/runtime-store'
+import type { StoragePort } from '../ports/storage'
+import { StatusConflict } from '../status-conflict'
+
+export interface ReleasedDeps {
+  storage: StoragePort
+  runtime: RuntimeStorePort
+}
+
+// A Run cancelled by Stop or hold leaves the item where it was (invariant 6). Once the hold
+// is off, an item left in a claim status goes back to that rule's watch status for the next
+// round to pick up (stop-and-recovery.md); one left in a watch status needs nothing here.
+// Returns the refs it moved.
+export async function resumeReleased(
+  { storage, runtime }: ReleasedDeps,
+  rules: readonly Rule[],
+  holdLabel: string,
+): Promise<Ref[]> {
+  const claims = [...new Set(rules.flatMap((r) => (r.claim === undefined ? [] : [r.claim])))]
+  if (claims.length === 0) return []
+  // The local store first, as in resumeBlocked: no candidate, no tracker call.
+  const candidates = (await runtime.latestRunsEndedIn('cancelled')).filter(
+    (r) => r.cancelRequestedBy === 'stop' || r.cancelRequestedBy === 'hold',
+  )
+  if (candidates.length === 0) return []
+  const moved: Ref[] = []
+  for (const item of await storage.list('item', claims)) {
+    if (item.labels.includes(holdLabel)) continue
+    const latest = candidates.find((r) => r.target === item.ref)
+    const rule = rules.find((r) => r.id === latest?.rule)
+    if (rule?.claim !== item.status) continue
+    try {
+      await storage.transition(item.ref, rule.claim, rule.watch)
+    } catch (e) {
+      if (e instanceof StatusConflict || e instanceof NotFound) continue
+      throw e
+    }
+    await storage.addComment({
+      target: item.ref,
+      author: 'engine',
+      kind: 'system',
+      body: `The hold is off. Moved back to ${rule.watch} for rule ${rule.id} to start again.`,
+    })
+    moved.push(item.ref)
+  }
+  return moved
+}

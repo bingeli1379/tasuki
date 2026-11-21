@@ -144,6 +144,7 @@ describe('listBoard', () => {
       runtimeStub({ liveRuns: () => Promise.resolve([]) }),
       { item: ['split-review'], task: ['to-do', 'done'] },
       [],
+      'hold',
     )
     expect(board.columns[0]?.items).toEqual([item])
     expect(board.tasks).toEqual({ 'X-1': { done: 1, total: 2 }, 'Y-1': { done: 0, total: 1 } })
@@ -170,6 +171,7 @@ describe('listBoard', () => {
       }),
       { item: ['split-review'], task: ['to-do'] },
       [],
+      'hold',
     )
     expect(board.running).toEqual([])
   })
@@ -189,6 +191,7 @@ describe('listBoard', () => {
       { item: ['refining', 'ready-to-split', 'split-review', 'blocked'], task: [] },
       // A rule on a status that would wait for a person: the engine picks it up, so it wins.
       [watch('ready-to-split'), watch('blocked')],
+      'hold',
     )
     expect(board.columns.map((c) => [c.status, c.turn])).toEqual([
       ['refining', undefined],

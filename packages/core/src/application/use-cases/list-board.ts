@@ -18,6 +18,8 @@ export interface Board {
   running: Ref[]
   // Per item that has tasks, how many are done.
   tasks: Record<Ref, { done: number; total: number }>
+  // An item with this among its labels is on hold.
+  holdLabel: string
 }
 
 // One column per item status the config maps, in board order. Tasks come from one more
@@ -27,6 +29,7 @@ export async function listBoard(
   runtime: RuntimeStorePort,
   mapped: { item: readonly string[]; task: readonly string[] },
   rules: readonly Rule[],
+  holdLabel: string,
 ): Promise<Board> {
   const statuses = ITEM_STATUSES.filter((s) => mapped.item.includes(s))
   const [items, tasks] = await Promise.all([
@@ -54,5 +57,5 @@ export async function listBoard(
     count.total++
     if (t.status === 'done') count.done++
   }
-  return { columns, running: live.map((r) => r.target), tasks: counts }
+  return { columns, running: live.map((r) => r.target), tasks: counts, holdLabel }
 }

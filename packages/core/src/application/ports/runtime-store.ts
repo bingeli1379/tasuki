@@ -1,4 +1,4 @@
-import type { Outcome, Run, Verdict } from '../../domain/run'
+import type { CancelMode, CancelReason, Outcome, Run, Verdict } from '../../domain/run'
 import type { Ref } from '../../domain/work-unit'
 
 export interface NewRun {
@@ -23,6 +23,9 @@ export interface RuntimeStorePort {
   // Counts what the agent made, for checking its verdict later.
   bumpProduced(id: string, key: 'questions' | 'tasks'): Promise<void>
   finishRun(id: string, outcome: Outcome): Promise<void>
+  // Only on a live Run. The first request's time and reason stay; a later hard one turns a
+  // soft cancel hard, and nothing turns it back.
+  requestCancel(id: string, mode: CancelMode, by: CancelReason): Promise<void>
   liveRuns(): Promise<Run[]>
   // Newest first.
   runsFor(target: Ref): Promise<Run[]>

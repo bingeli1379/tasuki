@@ -14,6 +14,9 @@ export interface RunSpec {
 
 export interface RunHandle {
   readonly exit: Promise<RunExit>
+  // Ends the agent's whole process tree with this signal. The engine sends SIGTERM first and
+  // SIGKILL once hardGraceSeconds pass without exit settling (stop-and-recovery.md).
+  terminate(signal: 'SIGTERM' | 'SIGKILL'): void
 }
 
 export interface RunnerPort {
