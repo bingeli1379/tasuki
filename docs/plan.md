@@ -51,11 +51,11 @@
 | S7c | Stop（hard）、hold（soft）、人移走 item 視為接手、`RUN_CANCELLED`、soft 與 hard 的寬限升級（已完成，D72） | 按 Stop 後 Run 變 cancelled；貼 hold 後 engine 不碰它 |
 | S7d | 全域 pause 與 `pause --kill`（已完成，D73；CLI 指令跟 S12 一起） | 暫停後不再起新的 Run |
 | S7e | 作者試用 S7 後的回饋：預設規則不用 claim status、刪除 item、人可以改回 done 的 task、人的操作留紀錄、看板與詳情的使用性、沒有回饋的 rework 不開跑（已完成，D74、D75） | 卡片留在原欄掛 Running；按錯能改回；詳情秒開、跟著看板更新 |
-| S8 | 真的 claude runner（plugin）、MCP facade、run token | 在玩具 repo 上用真的 claude 跑一次 |
+| S8 | 真的 claude runner（plugin）、規則的 prompt 與 session、預設 prompt（MCP facade 與 run token 在 S4 就有了）（已完成，D76）。之後補了 prompt 三層與 agent 自帶 plugin、MCP（D77） | 在玩具 repo 上用真的 claude 跑一次 |
 | S9 | auth（`none`、`static`、`http`）、session cookie 與 CSRF、`/mcp` 的個人 API token、登入防暴力、`Host` 檢查（D60） | 登入畫面、ttl 過期、產生與撤銷 token、沒登入打 API 被拒 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
-| S12 | codex runner、npm CLI 打包、container image、預設 prompt | `init`、`doctor`、`start` 可用 |
+| S12 | codex runner、npm CLI 打包、container image | `init`、`doctor`、`start` 可用 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |
 
 ## 測試策略
@@ -85,7 +85,6 @@
 | 切片 | 要先定 | 為什麼卡 |
 |---|---|---|
 | S8 | `stop-and-recovery.md` 的數字：`leaseSeconds` 120、`softGraceSeconds` 300、`hardGraceSeconds` 10 | 都是草稿。S4 先照草稿當預設值，邏輯用假 clock 測過；接上真的 claude 後，用實際的輸出間隔回頭調 |
-| S8 | 「待驗證」裡 headless CLI 那幾項：session resume、http MCP、取得 session id | 結果可能讓 runner 設計大改，例如只支援 stdio 時要加 shim |
 
 ## 待釐清（設計）
 
@@ -94,7 +93,7 @@
 3. （已定，D38）`attempt` 的歸零規則：只有 `abandoned` 之後累計，`max_attempts` 也記成一筆 Run，人拉回來就從 1 重算。
 4. item 層的成本上限怎麼算、放哪裡。
 5. （已定，D57）sqlite 模式下，互動式 agent（refine 階段）怎麼寫回 tracker：engine 在 `/mcp` 提供綁使用者身分的 MCP，Claude Code 與 Codex 都能接。
-6. splitter 遇到 item 底下已經有 task（refine 階段建的 manual task、被打回後重拆）時的冪等準則，要寫進預設 prompt。方向已定（D30）：engine 不判斷，由 agent 讀 item 裡的 task 與 comment 記錄自己決定有沒有拆過，prompt 的措辭 S8 再寫。
+6. （已定，D30、D76）splitter 遇到 item 底下已經有 task 時的冪等準則：engine 不判斷，預設 prompt 叫 agent 保留現有的 task、只補缺的。
 7. `Run` 是否要記 pid 或 process group，供 engine 重啟後清理殘留的 CLI process。
 8. （已定）UI 的細節範圍：kanban 直接改 status（S2）；task 在 `split-review` 能改 title、body 與刪除，blockedBy 不能改（D70）。
 9. license。
@@ -108,13 +107,11 @@
 
 這些在設計時是憑印象寫的。
 
-- `claude` 與 `codex` 的 headless 指令：輸出格式、session resume、工具白名單、注入 MCP 設定的方式。
-- `claude` 與 `codex` 各自的 `api-key`、`oauth-token` 認證要吃哪個環境變數，以及 `allowedTools` 的名稱格式（D35）。
-- slash command 與 skill 在 headless 模式下能不能被呼叫。
-- 兩個 CLI 是否支援 http 版的 MCP；只支援 stdio 時要不要加一個轉到 REST 的 shim。
-- runner 怎麼取得 session id。
+- `codex` 的 headless 指令：輸出格式、session resume、工具白名單、注入 MCP 設定的方式。`claude` 已在 S8 用 2.1.323 驗過（D76）：`-p --output-format stream-json --verbose`、`--session-id` 自訂 uuid、`--resume`（找不到時 exit 1）、`--mcp-config` 給 http server 帶 header、`--allowedTools` 的格式是 `mcp__<server>` 與 `Bash(git:*)`。
+- `claude` 與 `codex` 各自的 `api-key`、`oauth-token` 認證要吃哪個環境變數（D35）。claude-cli 目前只做 `inherit-login`。
+- codex 是否支援 http 版的 MCP；只支援 stdio 時要不要加一個轉到 REST 的 shim。claude 支援（D76）。
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
-- agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。
+- agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。claude 有答案（D77）：stream-json 的第一筆 `init` 列出 `plugins`、`skills`、`slash_commands`、`mcp_servers`。codex 還沒查。
 - 使用者 MCP 接 Codex（D57）：2026-11-16 用 codex-cli 0.169.0 驗過 `initialize` 與 `tools/list`（中間放 proxy 記錄請求），`tools/call` 沒驗，因為手上沒有 Codex 帳號，模型叫不起來。Claude Code 2.1.311 已實際呼叫 `create_item` 與 `list_board` 成功。
 - Jira Cloud：API token 的 rate limit。transitions API 已在 S2 實際走過（D59）；ADF 轉換（marklassian 加自寫的反向）與 comment property 已在 S3 實際走過（D61）。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。

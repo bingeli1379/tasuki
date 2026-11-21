@@ -101,6 +101,7 @@ Claude Code 與 Codex 不會填登入表單，也不適合放一個 24 小時就
 
 - config 不放明文，使用 `${ENV_VAR}`。本機開發可以放在 config 旁邊的 `.env`，它不進 git（D49）。
 - `agents.<name>.env` 只傳給被 spawn 的那個 CLI，engine 自己不用。
+- 反過來，engine 自己的環境不傳給 agent。`.env` 會載入 engine 的 process，裡面有 tracker 的 token，所以 runner 只放行找得到 CLI、登入與 shell 需要的幾個變數，其他要給 agent 的寫進 `options.env`（D76）。
 - engine 不把 secret 寫進 log、`system` comment 或 API 回應。
 
 ## Agent 的權限
