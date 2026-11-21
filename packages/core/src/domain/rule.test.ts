@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { exitFor, outcomeOf, type Evidence, type Rule, type RuleMode } from './rule'
+import { exitFor, outcomeOf, verdictsOf, type Evidence, type Rule, type RuleMode } from './rule'
 import type { Verdict } from './run'
 import type { TaskNode } from './task'
 
@@ -12,7 +12,7 @@ const split: Rule = {
   maxAttempts: 3,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+  outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
 }
 
 describe('exitFor', () => {
@@ -23,6 +23,15 @@ describe('exitFor', () => {
 
   it('has nothing for an outcome the rule does not cover', () => {
     expect(exitFor(split, 'blocked_manual')).toBeUndefined()
+    expect(exitFor(split, 'constructor')).toBeUndefined()
+  })
+})
+
+describe('verdictsOf', () => {
+  it('is every outcome of the rule but max_attempts, which only the engine reaches', () => {
+    expect(
+      verdictsOf({ ...split, outcomes: { ...split.outcomes, failed: 'x', max_attempts: 'x' } }),
+    ).toEqual(['succeeded', 'needs_input', 'failed'])
   })
 })
 
@@ -107,6 +116,12 @@ describe('outcomeOf', () => {
       'the agent reported blocked_manual but T-3 can still run',
     ],
     ['execute', 'failed', none, undefined],
+    // What a rule declares on top of its mode's own is moved on unchecked.
+    ['execute', 'needs_design', none, undefined],
+    ['review', 'approve', none, undefined],
+    // review has no succeeded of its own, so one a rule declares means only what it says.
+    ['review', 'succeeded', none, undefined],
+    ['review', 'needs_input', none, 'the agent reported needs_input but asked no question'],
   ])('%s %s: %j is %s', (mode, verdict, evidence, reason) => {
     expect(outcomeOf(mode, verdict, clean, evidence)).toEqual(
       reason === undefined ? { outcome: verdict } : { outcome: 'failed', reason },

@@ -73,7 +73,8 @@ if (
   await emptyJiraProject()
 }
 
-// Rules split, execute and rework on the fake runner (S4, S6, S7b). Polling every 2 seconds keeps the Jira
+// Rules split, execute and rework on the fake runner (S4, S6, S7b), and an AI review station
+// whose rule sends the item one of two ways (W2). Polling every 2 seconds keeps the Jira
 // run short; the agent takes 10, longer than the board needs to read itself again and show
 // it Running.
 const engineRules = {
@@ -86,14 +87,14 @@ const engineRules = {
       claim: 'splitting',
       agent: 'fake',
       mode: 'split',
-      on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+      outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
     },
     {
       id: 'execute',
       watch: 'in-progress',
       agent: 'fake',
       mode: 'execute',
-      on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
+      outcomes: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
     },
     {
       id: 'rework',
@@ -101,7 +102,14 @@ const engineRules = {
       claim: 'splitting',
       agent: 'fake',
       mode: 'rework',
-      on: { succeeded: 'split-review', needs_input: 'blocked' },
+      outcomes: { succeeded: 'split-review', needs_input: 'blocked' },
+    },
+    {
+      id: 'ai-review',
+      watch: 'ai-review',
+      agent: 'fake',
+      mode: 'review',
+      outcomes: { approve: 'in-review', changes: 'ready-to-rework' },
     },
   ],
 }
@@ -115,11 +123,12 @@ function engine(name: string, port: number, config: object): string {
   return file
 }
 
-// One status of its own on top of the default ten, after Done so no drag in the other
-// tests has further to go.
+// Statuses of its own on top of the default ten, after Done so no drag in the other tests
+// has further to go.
 const stations = [
   ...DEFAULT_WORKFLOW.statuses,
   { id: 'triage', handledBy: 'person', outcomes: { '→ Ready to Split': 'ready-to-split' } },
+  { id: 'ai-review', name: 'AI Review' },
 ]
 
 // Keyed by the KAN status ids the env maps each logical name to.

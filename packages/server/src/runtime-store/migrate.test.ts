@@ -59,4 +59,27 @@ describe('migrate', () => {
       .map((r) => String(r['name']))
     expect(indexes).toEqual(expect.arrayContaining(['one_live_run', 'run_by_target']))
   })
+
+  it('rebuilding the run table for W2 keeps every column and takes an outcome a rule named', () => {
+    const db = openDatabase(':memory:')
+    migrate(db, RUNTIME_MIGRATIONS.slice(0, 6))
+    db.exec(`INSERT INTO run (id, target, rule, agent, attempt, workspace, state, outcome,
+      verdict, lease_until, started_at, last_activity_at, log_path, session_id, from_status,
+      to_status) VALUES ('r1', 'T-1', 'split', 'fake', 1, '/w', 'finished', 'succeeded',
+      'succeeded', 'x', 'y', 'z', '/l', 's1', 'ready-to-split', 'split-review')`)
+    migrate(db, RUNTIME_MIGRATIONS)
+    expect(db.prepare('SELECT * FROM run').get()).toMatchObject({
+      outcome: 'succeeded',
+      session_id: 's1',
+      from_status: 'ready-to-split',
+      to_status: 'split-review',
+    })
+    db.exec(`UPDATE run SET outcome = 'approve', verdict = 'approve'`)
+    expect(db.prepare('SELECT outcome FROM run').get()).toEqual({ outcome: 'approve' })
+    const indexes = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'run'")
+      .all()
+      .map((r) => String(r['name']))
+    expect(indexes).toEqual(expect.arrayContaining(['one_live_run', 'run_by_target']))
+  })
 })

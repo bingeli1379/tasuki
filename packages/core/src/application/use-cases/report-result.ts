@@ -1,4 +1,4 @@
-import { VERDICTS, type Verdict } from '../../domain/run'
+import { verdictsOf, type Rule } from '../../domain/rule'
 import { InvalidInput } from '../invalid-input'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 
@@ -12,12 +12,15 @@ export interface ReportResultInput {
 export async function reportResult(
   runtime: RuntimeStorePort,
   runId: string,
+  rule: Rule,
   input: ReportResultInput,
 ): Promise<void> {
-  if (!VERDICTS.includes(input.verdict as Verdict))
-    throw new InvalidInput(`verdict must be one of ${VERDICTS.join(', ')}`)
+  // Only what the rule declared: a verdict names an outcome, never a status (agent-contract.md).
+  const verdicts = verdictsOf(rule)
+  if (!verdicts.includes(input.verdict))
+    throw new InvalidInput(`verdict must be one of ${verdicts.join(', ')}`)
   // The summary is the reason the item moves; every move the engine makes for an agent
   // carries one (D67).
   if (input.summary.trim() === '') throw new InvalidInput('summary is empty')
-  await runtime.report(runId, input.verdict as Verdict, input.summary.trim())
+  await runtime.report(runId, input.verdict, input.summary.trim())
 }

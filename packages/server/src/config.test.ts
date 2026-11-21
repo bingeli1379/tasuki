@@ -34,7 +34,7 @@ describe('loadConfig', () => {
             claim: 'splitting',
             agent: 'fake',
             mode: 'split',
-            on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+            outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
           },
         ],
       }),
@@ -197,7 +197,7 @@ describe('loadConfig', () => {
     claim: 'splitting',
     agent: 'fake',
     mode: 'split',
-    on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+    outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
   }
 
   it('reads agents and rules, filling maxAttempts and the limits from the defaults', () => {
@@ -209,7 +209,7 @@ describe('loadConfig', () => {
       {
         ...split,
         // From the failure role.
-        on: { ...split.on, failed: 'blocked', max_attempts: 'blocked' },
+        outcomes: { ...split.outcomes, failed: 'blocked', max_attempts: 'blocked' },
         maxAttempts: 3,
         prompt: defaultPrompt('split'),
         session: 'fresh',
@@ -243,6 +243,25 @@ describe('loadConfig', () => {
     )
   })
 
+  it('reads a review rule: its own outcomes as declared, then the ones every rule has', () => {
+    const review = {
+      id: 'ai-review',
+      watch: 'in-review',
+      agent: 'fake',
+      mode: 'review',
+      outcomes: { approve: 'done', changes: 'ready-to-rework' },
+    }
+    const [rule] = loadConfig(withRules([review])).rules
+    expect(Object.entries(rule?.outcomes ?? {})).toEqual([
+      ['approve', 'done'],
+      ['changes', 'ready-to-rework'],
+      ['needs_input', 'blocked'],
+      ['failed', 'blocked'],
+      ['max_attempts', 'blocked'],
+    ])
+    expect(rule?.prompt).toBe(defaultPrompt('review'))
+  })
+
   it('has no rules when it lists none, so the engine leaves every item alone', () => {
     expect(loadConfig(write('{}')).rules).toEqual([])
   })
@@ -254,14 +273,37 @@ describe('loadConfig', () => {
     ],
     [{ ...split, claim: 'ready-to-split' }, 'rules[0] (split).claim must differ from watch'],
     [{ ...split, agent: 'claude' }, 'rules[0] (split).agent: no agent "claude" in agents'],
-    [{ ...split, mode: 'review' }, 'rules[0] (split).mode must be one of split, execute, rework'],
     [
-      { ...split, on: { succeeded: 'split-review' } },
-      'rules[0] (split).on.needs_input is required',
+      { ...split, mode: 'judge' },
+      'rules[0] (split).mode must be one of split, execute, rework, review',
     ],
     [
-      { ...split, on: { ...split.on, cancelled: 'done' } },
-      'rules[0] (split).on.cancelled: not an outcome',
+      { ...split, outcomes: { needs_input: 'needs-answers' } },
+      'rules[0] (split).outcomes.succeeded is required in split mode',
+    ],
+    [
+      { ...split, mode: 'execute', outcomes: { succeeded: 'in-review' } },
+      'rules[0] (split).outcomes.blocked_manual is required in execute mode',
+    ],
+    [
+      { ...split, mode: 'review', outcomes: { needs_input: 'blocked' } },
+      'rules[0] (split).outcomes must name at least one way for the agent to finish',
+    ],
+    [
+      { ...split, outcomes: { ...split.outcomes, cancelled: 'done' } },
+      'rules[0] (split).outcomes.cancelled: the item does not move on it',
+    ],
+    [
+      { ...split, outcomes: { ...split.outcomes, 'Looks good': 'done' } },
+      'rules[0] (split).outcomes.Looks good: a name such as needs_design',
+    ],
+    [
+      { ...split, outcomes: { ...split.outcomes, approve: 'approved' } },
+      'rules[0] (split).outcomes.approve: status "approved" is not in workflow.statuses',
+    ],
+    [
+      { ...split, outcomes: undefined, on: split.outcomes },
+      'rules[0] (split).on moved into outcomes',
     ],
     [
       { ...split, maxAttempts: 0 },
@@ -294,7 +336,7 @@ describe('loadConfig', () => {
             id: 'rework',
             watch: 'ready-to-rework',
             mode: 'rework',
-            on: { succeeded: 'split-review', needs_input: 'blocked' },
+            outcomes: { succeeded: 'split-review', needs_input: 'blocked' },
           },
         ],
       }),
@@ -341,7 +383,7 @@ describe('loadConfig', () => {
             watch: 'in-progress',
             agent: 'fake',
             mode: 'execute',
-            on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
+            outcomes: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
           },
         ],
       }),
@@ -359,7 +401,7 @@ describe('loadConfig', () => {
 
   const splitStations = ['refining', 'ready-to-split', 'splitting', 'split-review', 'needs-answers']
 
-  it('sends failed and max_attempts to the failure station unless the rule says otherwise', () => {
+  it('sends needs_input, failed and max_attempts to the failure station unless the rule says otherwise', () => {
     const path = write(
       JSON.stringify({
         workflow: flow(splitStations, {
@@ -373,13 +415,26 @@ describe('loadConfig', () => {
         agents: { fake: { plugin: 'x' } },
         rules: [
           split,
-          { ...split, id: 'own', watch: 'refining', on: { ...split.on, failed: 'needs-answers' } },
+          {
+            ...split,
+            id: 'own',
+            watch: 'refining',
+            outcomes: { ...split.outcomes, failed: 'needs-answers' },
+          },
+          { ...split, id: 'bare', watch: 'needs-answers', outcomes: { succeeded: 'split-review' } },
         ],
       }),
     )
-    expect(loadConfig(path).rules.map((r) => [r.on.failed, r.on.max_attempts])).toEqual([
-      ['refining', 'refining'],
-      ['needs-answers', 'refining'],
+    expect(
+      loadConfig(path).rules.map((r) => [
+        r.outcomes.needs_input,
+        r.outcomes.failed,
+        r.outcomes.max_attempts,
+      ]),
+    ).toEqual([
+      ['needs-answers', 'refining', 'refining'],
+      ['needs-answers', 'needs-answers', 'refining'],
+      ['refining', 'refining', 'refining'],
     ])
   })
 

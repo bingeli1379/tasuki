@@ -1,10 +1,11 @@
 import {
   DEFAULT_WORKFLOW,
+  ENGINE_OUTCOMES,
+  MODE_OUTCOMES,
   TASK_STATUS_DISPLAY,
   TASK_STATUSES,
   type Roles,
   type Rule,
-  type RuleExit,
   type RuleMode,
   type RuleSession,
   type Station,
@@ -48,15 +49,8 @@ export interface Config {
 
 type Raw = Record<string, unknown>
 
-const MODES: readonly RuleMode[] = ['split', 'execute', 'rework']
+const MODES = Object.keys(MODE_OUTCOMES) as RuleMode[]
 const SESSIONS: readonly RuleSession[] = ['fresh', 'per-item']
-const EXITS: readonly RuleExit[] = [
-  'succeeded',
-  'needs_input',
-  'blocked_manual',
-  'failed',
-  'max_attempts',
-]
 
 const ROLES: readonly (keyof Roles)[] = ['entry', 'done', 'failure', 'taskReview', 'rework']
 const REQUIRED_ROLES: readonly (keyof Roles)[] = ['entry', 'done', 'failure']
@@ -218,22 +212,27 @@ function parseRules(
     const mode = text('mode') as RuleMode
     if (!MODES.includes(mode))
       throw new Error(`config ${path}.mode must be one of ${MODES.join(', ')}`)
-    const on: Rule['on'] = {}
-    for (const [key, target] of Object.entries(isObject(raw['on']) ? raw['on'] : {})) {
-      if (!EXITS.includes(key as RuleExit))
-        throw new Error(`config ${path}.on.${key}: not an outcome a rule can move on`)
-      if (typeof target !== 'string') throw new Error(`config ${path}.on.${key} must be a status`)
-      on[key as RuleExit] = status(`on.${key}`, target)
+    if (raw['on'] !== undefined) throw new Error(`config ${path}.on moved into outcomes`)
+    const rawOutcomes = raw['outcomes'] ?? {}
+    if (!isObject(rawOutcomes)) throw new Error(`config ${path}.outcomes must be an object`)
+    const outcomes: Rule['outcomes'] = {}
+    for (const [name, target] of Object.entries(rawOutcomes)) {
+      // The agent reports these names, so they read like the built-in ones.
+      if (!/^[a-z][a-z0-9]*(_[a-z0-9]+)*$/.test(name))
+        throw new Error(`config ${path}.outcomes.${name}: a name such as needs_design`)
+      if (name === 'cancelled' || name === 'abandoned')
+        throw new Error(`config ${path}.outcomes.${name}: the item does not move on it`)
+      if (typeof target !== 'string')
+        throw new Error(`config ${path}.outcomes.${name} must be a status`)
+      outcomes[name] = status(`outcomes.${name}`, target)
     }
-    // blocked_manual cannot come from a split.
-    const needed: RuleExit[] =
-      mode === 'execute'
-        ? ['succeeded', 'needs_input', 'blocked_manual']
-        : ['succeeded', 'needs_input']
-    for (const key of needed)
-      if (on[key] === undefined) throw new Error(`config ${path}.on.${key} is required`)
-    // failed and max_attempts go to the failure station unless the rule says otherwise.
-    for (const key of ['failed', 'max_attempts'] as const) on[key] ??= failure
+    for (const name of MODE_OUTCOMES[mode])
+      if (outcomes[name] === undefined)
+        throw new Error(`config ${path}.outcomes.${name} is required in ${mode} mode`)
+    if (Object.keys(outcomes).every((name) => ENGINE_OUTCOMES.includes(name)))
+      throw new Error(`config ${path}.outcomes must name at least one way for the agent to finish`)
+    // Every rule can end on these; they go to the failure station unless it says otherwise.
+    for (const name of ENGINE_OUTCOMES) outcomes[name] ??= failure
     if (raw['prompt'] !== undefined && raw['promptFile'] !== undefined)
       throw new Error(`config ${path}: set prompt or promptFile, not both`)
     let prompt = defaultPrompt(mode)
@@ -253,7 +252,7 @@ function parseRules(
       agent,
       mode,
       maxAttempts: positive(raw, 'maxAttempts', defaultMaxAttempts, path),
-      on,
+      outcomes,
       prompt,
       session,
     }

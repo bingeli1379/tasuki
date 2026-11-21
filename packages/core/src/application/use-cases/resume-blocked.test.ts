@@ -16,7 +16,7 @@ const execute: Rule = {
   maxAttempts: 3,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
+  outcomes: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
 }
 
 const unit = (ref: string, over: Partial<WorkUnit> = {}): WorkUnit => ({
@@ -129,7 +129,7 @@ describe('resumeBlocked', () => {
       ...execute,
       id: 'split',
       mode: 'split',
-      on: { succeeded: 'split-review' },
+      outcomes: { succeeded: 'split-review' },
     }
     expect(
       await resumeBlocked(

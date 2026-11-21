@@ -1,4 +1,4 @@
-import type { Rule } from '../../domain/rule'
+import { exitFor, type Rule } from '../../domain/rule'
 import type { StatusNames } from '../../domain/workflow'
 import type { Ref } from '../../domain/work-unit'
 import { NotFound } from '../not-found'
@@ -22,11 +22,7 @@ export async function resumeBlocked(
   rules: readonly Rule[],
   holdLabel: string,
 ): Promise<Ref[]> {
-  const parked = [
-    ...new Set(
-      rules.flatMap((r) => (r.on.blocked_manual === undefined ? [] : [r.on.blocked_manual])),
-    ),
-  ]
+  const parked = [...new Set(rules.flatMap((r) => exitFor(r, 'blocked_manual') ?? []))]
   if (parked.length === 0) return []
   // The local store first: with no candidate, this round costs the tracker nothing (Jira
   // rate-limits per call, D64).
@@ -38,7 +34,7 @@ export async function resumeBlocked(
     const latest = candidates.find((r) => r.target === item.ref)
     if (latest === undefined) continue
     const rule = rules.find((r) => r.id === latest.rule)
-    if (rule === undefined || rule.on.blocked_manual !== item.status) continue
+    if (rule === undefined || exitFor(rule, 'blocked_manual') !== item.status) continue
     try {
       if ((await storage.children(item.ref)).some((t) => t.status === 'manual')) continue
       await storage.transition(item.ref, item.status, rule.watch)

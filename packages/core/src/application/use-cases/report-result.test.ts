@@ -1,7 +1,25 @@
 import { describe, expect, it } from 'vite-plus/test'
+import type { Rule } from '../../domain/rule'
 import { runtimeStub } from '../../testing/runtime-stub'
 import { InvalidInput } from '../invalid-input'
 import { reportResult } from './report-result'
+
+const review: Rule = {
+  id: 'ai-review',
+  watch: 'ai-review',
+  agent: 'a',
+  mode: 'review',
+  maxAttempts: 3,
+  prompt: '',
+  session: 'fresh',
+  outcomes: {
+    approve: 'in-review',
+    changes: 'ready-to-rework',
+    needs_input: 'blocked',
+    failed: 'blocked',
+    max_attempts: 'blocked',
+  },
+}
 
 describe('reportResult', () => {
   it('records the verdict with the summary trimmed', async () => {
@@ -9,13 +27,22 @@ describe('reportResult', () => {
     const runtime = runtimeStub({
       report: (...args) => (reported.push(args), Promise.resolve()),
     })
-    await reportResult(runtime, 'r1', { verdict: 'failed', summary: ' Tests do not build. ' })
-    expect(reported).toEqual([['r1', 'failed', 'Tests do not build.']])
+    await reportResult(runtime, 'r1', review, { verdict: 'approve', summary: ' Reads well. ' })
+    expect(reported).toEqual([['r1', 'approve', 'Reads well.']])
   })
+
+  it.each(['succeeded', 'in-review', 'max_attempts', 'cancelled'])(
+    'refuses %s, which is not an outcome the agent of this rule can report',
+    async (verdict) => {
+      await expect(
+        reportResult(runtimeStub({}), 'r1', review, { verdict, summary: 'Done.' }),
+      ).rejects.toThrow('verdict must be one of approve, changes, needs_input, failed')
+    },
+  )
 
   it('refuses a blank summary, since it is the reason the item moves', async () => {
     await expect(
-      reportResult(runtimeStub({}), 'r1', { verdict: 'failed', summary: ' ' }),
+      reportResult(runtimeStub({}), 'r1', review, { verdict: 'failed', summary: ' ' }),
     ).rejects.toBeInstanceOf(InvalidInput)
   })
 })

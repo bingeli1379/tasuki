@@ -194,7 +194,7 @@ describe('listBoard', () => {
       maxAttempts: 3,
       prompt: '',
       session: 'fresh',
-      on: {},
+      outcomes: {},
     })
     const board = await listBoard(
       storageStub({ list: () => Promise.resolve([]) }),

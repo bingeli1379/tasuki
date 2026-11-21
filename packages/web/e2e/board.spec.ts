@@ -161,6 +161,58 @@ test('a status added in the config is a column, marked by who handles it, with i
   expect(['ready-to-split', 'splitting', 'split-review']).toContain(stored.item.status)
 })
 
+test('an AI review station sends the item where the outcome the agent picked goes', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(180_000)
+  const approved = `e2e ai review ${Date.now()}`
+  // The fake runner reports the rule's first outcome unless the title names another.
+  const changes = `${approved} [fake:changes]`
+  const refs = [await createThroughApi(request, approved), await createThroughApi(request, changes)]
+  for (const ref of refs) {
+    const moved = await request.post(`/api/items/${ref}/transition`, {
+      data: { from: 'refining', to: 'ai-review' },
+    })
+    expect(moved.ok()).toBe(true)
+  }
+
+  await page.goto('/')
+  await expect(
+    page
+      .getByRole('region', { name: /^AI Review/ })
+      .getByRole('img', { name: 'An agent picks items up from here on its own' }),
+  ).toBeVisible()
+  const inReview = page.getByRole('region', { name: /^In Review/ })
+  await expect(inReview.getByRole('article', { name: approved, exact: true })).toBeVisible({
+    timeout: 90_000,
+  })
+  await inReview.getByRole('button', { name: approved, exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  const run = dialog.getByRole('listitem', { name: 'Run ai-review attempt 1' })
+  await expect(run).toContainText('approve')
+  await expect(run).toContainText(/AI Review\s*→\s*to\s*In Review/)
+  await expect(dialog.getByRole('article', { name: 'Comment by Agent' })).toContainText(
+    'The fake runner reviewed this and says approve.',
+  )
+  await expect(dialog.getByRole('article', { name: 'Comment by Engine' })).toContainText(
+    'Rule ai-review, attempt 1: approve. AI Review → In Review.',
+  )
+
+  // The other one went the other way. Rule rework picks it up from there and, with no
+  // feedback from a person, sends it on (D74), so the Run is what says where it went.
+  await expect(async () => {
+    const detail = (await (await request.get(`/api/items/${refs[1]}`)).json()) as {
+      runs: { rule: string; outcome?: string; from?: string; to?: string }[]
+    }
+    expect(detail.runs.find((r) => r.rule === 'ai-review')).toMatchObject({
+      outcome: 'changes',
+      from: 'ai-review',
+      to: 'ready-to-rework',
+    })
+  }).toPass({ timeout: 90_000 })
+})
+
 // The board is too wide to drag from Refining to Ready to Rework in one viewport, so this
 // takes the item's More menu; a drop asks with the same words from the board.
 test('moving to Ready to Rework asks what to rework, and cancelling leaves the card', async ({
