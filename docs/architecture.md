@@ -87,6 +87,7 @@ interface StoragePort {
   // children and dependencies see a task the moment it exists, unlike list: verdicts are checked against them
   createTask(item: Ref, t: NewTask): Promise<WorkUnit>   // throws InvalidInput when blockedBy is not a task of item
   deleteTask(ref: Ref): Promise<void>         // with its dependencies either way and comments; the ref is never reused (D70)
+  deleteItem(ref: Ref): Promise<void>         // with all its tasks, comments and attachments (D74)
   addLabel(ref: Ref, label: string): Promise<WorkUnit>     // one label only, leaves the version alone (hold, D72)
   removeLabel(ref: Ref, label: string): Promise<WorkUnit>
   updateTask(ref: Ref, patch: TaskPatch): Promise<void>
@@ -109,8 +110,9 @@ interface RuntimeStorePort {
   liveRuns(): Promise<Run[]>
   runsFor(target: Ref): Promise<Run[]>        // newest first
   latestRunsEndedIn(outcome: Outcome): Promise<Run[]>   // newest Run per target, if it ended so (auto-resume, D71)
-  requestCancel(id: string, mode: CancelMode, by: CancelReason): Promise<void>  // first time and reason stay; hard upgrades soft (D72)
-  // getState / setState ('paused')
+  requestCancel(id: string, mode: CancelMode, by: CancelReason): Promise<void>  // first time stays; a hard one upgrades soft and its reason wins (D73)
+  isPaused(): Promise<boolean>                // the global pause, kept in engine_state (D73)
+  setPaused(paused: boolean): Promise<void>
 }
 
 interface RunnerPort {

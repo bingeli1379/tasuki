@@ -141,7 +141,7 @@ my-instance/
 |---|---|
 | `id` | 規則名稱，Run 與 log 會引用 |
 | `watch` | 監看的 item status 邏輯名。規則只作用在 item，所以沒有 `kind` 欄位 |
-| `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複 |
+| `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複，item 留在 watch status，卡片掛 Running。預設規則都不設（D74）。沒寫 `statuses` 時，`splitting` 只在有規則 claim 它時才對照，不然看板會多一欄永遠是空的 |
 | `agent` | 用哪個 agent（agents 裡的 key） |
 | `mode` | `split` / `execute` / `rework`，以 `TASUKI_MODE` 傳給 agent |
 | `prompt` / `promptFile` | 給 agent 的指令範本，省略時用引擎內建、對應 `mode` 的預設 prompt。兩個不能同時設 |
@@ -163,7 +163,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
   {
     "id": "split",
     "watch": "ready-to-split",
-    "claim": "splitting",
     "agent": "claude-main",
     "mode": "split",
     "session": "per-item",
@@ -177,7 +176,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
   {
     "id": "execute",
     "watch": "in-progress",
-    // no claim status: dedupe by lease
     "agent": "claude-main",
     "mode": "execute",
     "timeoutMinutes": 480,
@@ -193,7 +191,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
   {
     "id": "rework",
     "watch": "ready-to-rework",
-    "claim": "splitting",
     "agent": "claude-main",
     "mode": "rework",
     "session": "per-item",

@@ -567,7 +567,7 @@
 - 決定：
   - 按 Stop 時順手貼上 `hold`。文件原本只說 `cancelled` 不動 status，沒寫 Stop 之後怎麼辦。照字面做，item 停在 `in-progress` 下一輪就再起一個 Run，停在 `splitting` 復原就把它送回 `ready-to-split` 重跑，按了等於沒按。貼上 hold，卡片掛 On hold，人拿掉才繼續，接回的路照 stop-and-recovery.md 原本寫的走。不變量 6 不用破例。
   - `StoragePort` 加 `addLabel` 與 `removeLabel`，一次只寫一個 label，不動 version（version 只跟 title、body、status 走）。sqlite 在同一個 process 裡同步讀改寫；Jira 用 `update.labels` 的 add / remove，不會蓋掉別人同時貼的 label。契約測試兩邊跑同一條。hold 一直都是 `labels` 裡的一個字串，兩邊都不用另外開欄位。
-  - Run 加 `cancelRequestedAt`、`cancelMode`、`cancelRequestedBy`（`stop`、`hold`、`moved`），runtime store 的 migration 加三欄。`requestCancel` 只記第一次的時間與原因，hard 會把 soft 升級，反過來不會。原本文件寫 `by = 'human-override'`，改成分開記三種，結束時的 comment 才說得出是誰停的。
+  - Run 加 `cancelRequestedAt`、`cancelMode`、`cancelRequestedBy`（`stop`、`hold`、`moved`），runtime store 的 migration 加三欄。`requestCancel` 只記第一次的時間與原因，hard 會把 soft 升級，反過來不會（原因的部分 D73 改成 hard 的優先）。原本文件寫 `by = 'human-override'`，改成分開記三種，結束時的 comment 才說得出是誰停的。
   - 偵測（core 的 `detectOverrides`）每輪在復原之後跑，每個存活的 Run 讀一次 item，沒有 Run 就不讀。原本寫 tick 與 lease 續約時都查，續約時再查等於 Jira 的呼叫多一倍，換不到什麼：tick 本來就比續約頻繁。看板與使用者 MCP 貼 hold 時有 Run 就當場 soft cancel，只有在 Jira 直接動的才等偵測。
   - 砍 process 不走 Poller：engine 多一個 `enforce()`，server 每秒跑一次，只讀本機 runtime store。hard 送 SIGTERM，soft 超過 `softGraceSeconds`（300）升級，SIGTERM 之後超過 `hardGraceSeconds`（10）送 SIGKILL。寬限由 engine 計時，所以 `RunHandle` 只要 `terminate(signal)`，不是原本寫的 `terminate(grace)`。現在只有假 runner，它在同一個 process 裡，兩種訊號都立刻結束；真的 process tree 留給 S8 的 claude runner。
   - `finishRun` 先看有沒有取消請求：有就記 `cancelled`，不轉移、不送回 task（不變量 6），留一則 system comment 寫原因與 agent 的 summary。agent facade 的寫入類 tool 在取消後丟 `RUN_CANCELLED` 開頭的錯誤，`report_result` 回 ok 但不記。
@@ -577,3 +577,38 @@
 - 理由：Stop 不貼 hold 就沒有意義，貼了之後所有「接著怎麼辦」都落在已經寫好的 hold 規則裡，後台不多一個 status，前台一個 On hold 就說清楚是人叫它停的。
 - 沒選的做法：Run 被取消後把 claim status 的 item 直接送回 watch status，卡片會在 Ready to Split 掛 On hold，看起來也清楚。但要破不變量 6，被人移走而取消的又不能送，例外比現在多。
 - 重新檢視：被 Stop 或 hold 停下的 item 之後被人直接移走、一直沒再跑，最近一次 Run 會一直是取消的，`resumeReleased` 的閘門每輪都打開（每輪對 tracker 多一次搜尋），這種多到常態時，跟 D71 一起改成記住處理過的；S8 的真 runner 要驗證 SIGTERM 真的送到整個 process tree。
+
+## D73 S7d：全域 pause
+- 決定：
+  - 旗標放 runtime store 的 `engine_state`（`key = 'paused'`），server 重開還在。port 是 `isPaused` 與 `setPaused`，不是原本草稿的通用 `getState` / `setState`：目前只有這一個狀態，通用的 key-value 換不到什麼。
+  - 暫停只擋 `claimItems`。lease 復原、偵測、自動接回、`resumeReleased` 與 `enforce` 照跑，它們都不會開新的 Run。全部停掉的話，lease 過期的 Run 不會被收、被 Stop 的 agent 不會收到訊號。
+  - `pause --kill` 對每個存活的 Run 送 hard cancel，原因記成新的 `pause`，不貼 hold。恢復之後自己接著跑：watch status 的直接被認領，claim status 的由 `resumeReleased` 送回 watch status，留一則寫明是暫停停掉的 comment。另一種是每張都貼 hold，恢復後要一張一張 Release，那就變成 Stop 了；pause 的意思是整台先停、等等一起繼續。
+  - `cancel_requested_by` 的 CHECK 是 S7c 用 `ALTER TABLE ADD COLUMN` 加的，SQLite 不能就地改 CHECK，作者本機的 runtime.db 也已經跑過那支 migration，不能回頭改。所以 S7d 的 migration 照 SQLite 文件的做法重建 `run`：建新表、搬資料、刪舊表、改名，再建回兩個 index。每支 migration 包在 transaction 裡，中途失敗整支 rollback。測試從第 3 版帶一筆 Run 升上來，確認資料與 index 都在。
+  - REST 是 `POST /api/engine/pause`（`{ kill }`）與 `POST /api/engine/resume`，看板的回應多一個 `paused`。使用者 MCP 加 `pause_engine` 與 `resume_engine`（D57）。CLI 的 `pause` / `pause --kill` 要等 S12 有 CLI，到時呼叫同一個 use case。
+  - 修正 D72 的「只記第一次的原因」：hard 把 soft 升級時，原因換成 hard 的那個。整包 E2E 在 Jira 抓到的 race：Stop 先貼 hold（Jira 要好幾秒），這段時間 engine 剛好跑一輪，偵測看到 hold 先記了 soft 的 `hold`，Stop 的 hard 到了原因卻被丟掉，comment 寫成「被貼了 hold」。順序不能反過來，先 cancel 的話 Run 一秒內就死，hold 還沒貼上，下一輪會被重新認領。engine 測試多一條，在舊規則下會紅。
+  - E2E 的 pause 測試放在最後一條，`afterEach` 每條都 resume 一次。第一次跑時那條逾時，逾時之後 `finally` 拿到的 `request` 已經被收掉，resume 沒送出去，engine 停在暫停，重試全部跟著失敗，拖了 15 分鐘。那次逾時的原因沒查到（trace 被後面的重試蓋掉），之後單跑 4 次都在 40 秒內過。
+- 理由：暫停是給維護、換 agent 設定、沒 token 時用的，人要的是「先別動，等等照原樣繼續」。後台只多一個旗標、一個 cancel 原因與一張表的重建，前台一顆按鈕一條提示。
+- 重新檢視：多了別的 engine 狀態要存時（再考慮通用的 key-value）；pause 那條 E2E 再逾時一次，先開 `--trace=retain-on-failure` 找原因。
+
+## D74 S7e：作者試用 S7 之後的回饋
+- 決定：
+  - 預設規則（split、execute、rework）都不設 `claim`。卡片已經有 Running，claim status 只是讓同一件事多一欄，而且 rework 借用 `splitting` 時，item 會跳進一個名字不對的欄位。claim 功能保留（E2E 的 config 還在用），D33 的備案「規則 C 省略 claim」就是這個，當初否決的理由「畫面看不出處理中」已經不成立。`splitting` 是唯一只有 claim 才會用到的 status（core 的 `CLAIM_ONLY`），沒寫 `statuses` 時只在有規則 claim 它才對照，不然看板多一欄永遠是空的。rework 不合進 `ready-to-split`：一個 status 只能有一條規則 watch，兩種工作的驗收也不同（rework 一定要開新 task），欄名也會分不出新的還是打回來的（D32）。
+  - 刪除 item：`StoragePort.deleteItem` 連 task、comment、附件一起刪，sqlite 包在一個 transaction，Jira 用 `DELETE /issue/{key}?deleteSubtasks=true`。有存活的 Run 時拒絕，要先 Stop。runtime store 的 Run 留著當歷史。詳情的 More 選單裡，要確認一次。使用者 MCP 加 `delete_item`。
+  - 改 D70：人可以把 `done` 的 task 改回 `to-do` 或 `manual`，修正按錯。只在 item 沒有存活的 Run 時可以，agent 可能正依賴它是 done。engine 與 agent 照舊不重開（不變量 4 改寫成只約束它們）。不開放任意拖拉，task 的狀態大多是 agent 在推。
+  - 人在看板或使用者 MCP 的操作（移動 item 或 task、hold、release、Stop）都留一則固定格式的 comment，author 是人、kind 是 `system`，例如「Moved from manual to done.」，誰與什麼時候由 comment 本身記著。不用 `note`：rework 的 agent 拿人最新的 note 當回饋，假 runner 與 engine 測試都曾經因此讀到「Moved from in-review to ready-to-rework.」。Jira 原本只在 agent 與 engine 的 comment 上掛 property，人的 `system` 讀回來會變成 `note`，所以人的 `system` 也掛 property，不加看得見的標記。契約測試多一則人的 `system`。
+  - 卡片上的 Move 下拉搬進詳情的 More 選單，它是不能拖拉時的替代方案，不能整個刪。移動仍由看板做，衝突的 toast 與樂觀更新是同一套。
+  - 看板：第一次載入顯示 loading；agent 被要求停下時卡片顯示 Stopping，不再寫 Running（看板回應多一個 `stopping`）；拖到左右邊緣自動捲動。剛建立或移動的卡片記住「寫入前看板上的樣子」，重讀時搜尋還是那個樣子（或還沒列出）就保留我們的版本，列出別的東西就代表搜尋已經比我們新，交給它，engine 接著做的移動也不會被蓋掉（D54）。
+  - 詳情：用看板上已有的卡片秒開標題、內文、狀態，task、Run、comment 讀到之前顯示 loading，不另外快取。看板重讀時這張的 status、version、label 或 Run 變了，詳情就重讀，編輯中不讀；不另外輪詢，Jira 上一張詳情要四、五支 API。看板觸發的重讀會跟人的操作重疊，所以兩條規則：本地有寫入時，比它早開始的讀取丟掉重讀；await 回來之後寫進當下顯示的那份詳情，不寫進送出前抓住的那份。Jira E2E 抓到過後者：送 comment 的途中重讀先回來換掉了詳情，comment 被塞進已經不顯示的舊物件，畫面上就消失了。當時懷疑是 Jira 剛 POST 的 comment 讀不到，實測連續 8 次 POST 完馬上 GET 都讀得到，不是這個原因。每次打開都清掉上次的草稿（rework 回饋、comment、編輯、刪除確認）。task 整列可點，狀態對齊成一欄並依狀態上色；Delete task 移到檢視模式；按鈕統一成框線樣式；決定類按鈕寫出去處（Approve and start、Accept as done、Send back to Refining）。
+- 理由：都是作者實際操作時卡住的地方，多數只動前端，後台多的是一個 port 方法（`deleteItem`）、一條放寬的狀態邊與一種 comment。
+- 重新檢視：人的操作紀錄讓 Jira 的 comment 太吵時（改成只在 sqlite 留，Jira 靠它自己的 history）；看板重讀觸發的詳情重讀在 Jira 上太慢或太常時。
+
+## D75 沒有回饋的 rework 不開跑
+- 決定：
+  - 兩層。畫面能擋就擋：卡片拖進 `ready-to-rework`，或從詳情的 Move to 選它，都先要一段回饋，沒寫送不出去，取消就留在原地；使用者 MCP 的 `request_rework` 本來就強制要寫。擋不到的交給 engine：在 Jira 直接拖過去的，或任何沒經過 tasuki 的移動。
+  - engine 認領 rework 規則之前，先看上一個 Run（這張 item 的任何規則）結束之後，有沒有一則人寫的 note。有就照常開跑，agent 拿最新那則當回饋。沒有就不派 agent，item 走這條規則的 `needs_input` 出口（預設的 rework 規則是 `blocked`），留一則 system comment 請人寫好再移回來。同事在 Jira 先寫 comment 再拖，Jira 上人寫的 comment 讀回來就是 note，會照常開跑。
+  - 去 `blocked` 不去 `in-review`：卡片可能從 `blocked`、`done` 或任何一欄拖過去，`in-review` 的意思是做完了等驗收，不一定成立；而且那等於 engine 沒有 outcome 就自己移 item，狀態機沒有這條路。`blocked` 本來就是卡住了要人處理，而 `needs_input` 正是 rework 的 agent 自己要回饋時會走的出口。
+  - 時間比的是 engine 的時鐘（Run 的 `finishedAt`）與 tracker 的時鐘（comment 的 `createdAt`），兩邊差幾秒內不影響。
+  - 詳情裡的回饋表單搬到標題下面，Rework 按鈕與 Move to 共用。看板自己的回饋框只給拖拉用：reka-ui 的 dialog 開著時會擋掉它外面的所有點擊，從詳情叫出看板的框會點不到，E2E 抓到的。
+  - 三種用法都要顧：自己在本機用 sqlite、架在 VM 上大家用、大家在 Jira 上協作而作者在本機接 Jira。前兩種所有操作都經過 tasuki 的畫面或 MCP，第一層就擋住；第三種靠第二層。
+- 理由：沒有回饋的 rework，agent 開不出有意義的 task，最好的情況是被驗收判成 `failed` 掉進 `blocked`，等於白跑一輪還看不出原因。認領前多讀一次 comment（Jira 上一支 API），換到的是不白跑、而且留言直接說要補什麼。
+- 重新檢視：有人希望沒寫回饋也能重跑（例如只想換個 agent 再試一次）時，改成規則上的選項。

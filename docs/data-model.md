@@ -105,7 +105,7 @@ type Outcome =
 | Comment | `comment` 表 | comment |
 | labels | JSON 欄位 | labels |
 | assignee | 欄位 | assignee |
-| comment 的 author / kind | 欄位 | agent 與 engine 的 comment 帶 comment property `tasuki`（`{ author, kind }`），內文第一行是看得見的「tasuki · agent」之類的標記；沒有 property 的是人寫的（D61） |
+| comment 的 author / kind | 欄位 | agent 與 engine 的 comment 帶 comment property `tasuki`（`{ author, kind }`），內文第一行是看得見的「tasuki · agent」之類的標記；人按按鈕留的 `system` 紀錄也帶 property，但沒有標記（D74）；沒有 property 的是人寫的 note（D61） |
 | body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉（D61） |
 | Attachment | `attachment` 表，內容是 BLOB | issue 的附件 |
 | body 裡的圖 | `![x](attachment:<id>)` 原樣存 | ADF 的 media 節點，用附件的 media id（D61） |
@@ -172,7 +172,7 @@ CREATE INDEX attachment_by_target ON attachment(target, id);
 CREATE TABLE ref_counter (last INTEGER NOT NULL);
 ```
 
-runtime store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，見 `packages/server/src/runtime-store/migrations.ts`；session、usage 的欄位與 `engine_state` 等用到的切片再加）：
+runtime store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，S7d 建了 `engine_state` 並重建 `run` 讓 `cancel_requested_by` 多收 `pause`，見 `packages/server/src/runtime-store/migrations.ts`；session、usage 的欄位等用到的切片再加）：
 
 ```sql
 CREATE TABLE run (
@@ -194,7 +194,7 @@ CREATE TABLE run (
   finished_at         TEXT,
   cancel_requested_at TEXT,
   cancel_mode         TEXT CHECK (cancel_mode IN ('soft','hard')),
-  cancel_requested_by TEXT CHECK (cancel_requested_by IN ('stop','hold','moved')),
+  cancel_requested_by TEXT CHECK (cancel_requested_by IN ('stop','hold','moved','pause')),
   produced_questions  INTEGER NOT NULL DEFAULT 0,
   produced_tasks      INTEGER NOT NULL DEFAULT 0,
   tokens              INTEGER,

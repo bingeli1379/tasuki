@@ -21,7 +21,7 @@
 - item 帶有 `hold`，或
 - item 目前的 status 不是這個 Run 預期的（有 claim status 時是 claim status，沒有時是 watch status）
 
-符合任一個就 `requestCancel(soft, by)`，`by` 是 `hold` 或 `moved`。Stop 是 `requestCancel(hard, by = 'stop')`。一個 Run 只記第一次的時間與原因，之後的 hard 會把 soft 升級，反過來不會。
+符合任一個就 `requestCancel(soft, by)`，`by` 是 `hold` 或 `moved`。Stop 是 `requestCancel(hard, by = 'stop')`。一個 Run 只記第一次的時間。之後的 hard 會把 soft 升級，原因也換成 hard 的那個，因為是它把 Run 停掉的；反過來不會（D73）。
 
 另外有一個全域的 pause，見下。
 
@@ -55,7 +55,9 @@ engine 只看得到 orchestrator 這一個 process，看不到裡面的 subagent
 `engine_state.paused` 為真時，Poller 不會開新的 Run。沒 token、要換 agent 設定、要維護時用。
 
 - `pause`（預設）：讓執行中的 Run 自然跑完。
-- `pause --kill`：對所有存活的 Run 送 hard cancel。
+- `pause --kill`：對所有存活的 Run 送 hard cancel（`by = 'pause'`）。不貼 `hold`，恢復之後自己接著跑：停在 watch status 的直接被撿起，停在 claim status 的由 `resumeReleased` 送回 watch status（暫停中就先送回去等著）。
+
+暫停只擋認領。lease 復原、偵測 hold 與移走、自動接回、取消與寬限都照跑，它們不會開新的 Run，停掉反而讓 item 卡在半路。旗標存在 runtime store，server 重開還是暫停的。看板上方有 Pause（含 Pause and stop all agents）與 Resume，暫停中顯示一條提示；使用者 MCP 是 `pause_engine`（`kill` 可選）與 `resume_engine`。CLI 的 `pause` 指令跟 S12 的 CLI 一起做，呼叫同一個 use case（D73）。
 
 ## Lease 與當機復原
 
