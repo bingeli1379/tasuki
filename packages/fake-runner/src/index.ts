@@ -67,8 +67,10 @@ const plugin: Plugin = definePlugin({
               }
               if (tasks.some((t) => t.status === 'manual')) verdict = 'blocked_manual'
             } else if (verdict === 'succeeded' && spec.mode === 'rework') {
-              const comments = await call<{ author: string; body: string }[]>('list_comments')
-              const feedback = comments.findLast((c) => c.author === 'human')?.body ?? ''
+              const comments =
+                await call<{ author: string; kind: string; body: string }[]>('list_comments')
+              const feedback =
+                comments.findLast((c) => c.author === 'human' && c.kind === 'note')?.body ?? ''
               await call('create_task', {
                 title: 'Rework',
                 body: feedback === '' ? 'Made by the fake runner.' : feedback,
