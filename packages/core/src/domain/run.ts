@@ -19,6 +19,8 @@ export interface Run {
   rule: string
   agent: string
   attempt: number
+  // The agent session this Run ran in, once the runner knows it.
+  sessionId?: string
   workspace: string
   state: 'running' | 'finished'
   outcome?: Outcome

@@ -18,6 +18,9 @@ export interface RuntimeStorePort {
   // Throws NotFound for an unknown id.
   getRun(id: string): Promise<Run>
   renewLease(id: string, leaseSeconds: number): Promise<void>
+  // The agent did something: lastActivityAt becomes now.
+  touch(id: string): Promise<void>
+  recordSession(id: string, sessionId: string): Promise<void>
   // Keeps the first report; throws InvalidInput on a second one or once the Run is over.
   report(id: string, verdict: Verdict, summary: string): Promise<void>
   // Counts what the agent made, for checking its verdict later.

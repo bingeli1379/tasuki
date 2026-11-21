@@ -19,11 +19,13 @@ const WHY: Record<CancelReason, string> = {
 }
 
 // The agent process is gone: turn what it reported into an outcome and move the item.
+// logTail is the end of what the agent printed, shown when it died or never reported.
 export async function finishRun(
   { storage, runtime }: FinishDeps,
   rule: Rule,
   runId: string,
   exit: RunExit,
+  logTail = '',
 ): Promise<Outcome> {
   const run = await runtime.getRun(runId)
   // Recovery already gave up on it, and the item may be on its next attempt by now.
@@ -69,6 +71,8 @@ export async function finishRun(
   const lines = [`Rule ${rule.id}, attempt ${run.attempt}: ${outcome}, moved to ${to}.`]
   if (reason !== undefined) lines.push(`Why: ${reason}.`)
   if (run.summary !== undefined && run.summary !== '') lines.push('', run.summary)
+  if ((exit.code !== 0 || run.verdict === undefined) && logTail.trim() !== '')
+    lines.push('', 'The end of the log:', '', '```', logTail.trimEnd(), '```')
   await storage.addComment({
     target: run.target,
     author: 'engine',

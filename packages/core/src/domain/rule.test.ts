@@ -10,6 +10,8 @@ const split: Rule = {
   agent: 'a',
   mode: 'split',
   maxAttempts: 3,
+  prompt: '',
+  session: 'fresh',
   on: { succeeded: 'split-review', needs_input: 'needs-answers' },
 }
 

@@ -36,6 +36,7 @@ if (configured) {
     const jira = createClient(jiraFetch)
     const ctx = {
       clock: { now: () => new Date() },
+      configDir: '',
       dataDir: '',
       // Logical status -> Jira status id, as JSON.
       statuses: createStatusMap({

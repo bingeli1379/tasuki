@@ -19,7 +19,11 @@ const statuses = createStatusMap({
 const memoryStorage = (): ReturnType<typeof createSqliteTracker> => {
   const db = openDatabase(':memory:')
   migrateTracker(db, TRACKER_MIGRATIONS)
-  return createSqliteTracker({ clock: { now: () => new Date() }, dataDir: '', statuses }, db, 'M')
+  return createSqliteTracker(
+    { clock: { now: () => new Date() }, configDir: '', dataDir: '', statuses },
+    db,
+    'M',
+  )
 }
 
 const memoryRuntime = (): ReturnType<typeof createRuntimeStore> => {
@@ -250,7 +254,7 @@ describe('tasks', () => {
     const db = openDatabase(':memory:')
     migrateTracker(db, TRACKER_MIGRATIONS)
     const storage = createSqliteTracker(
-      { clock: { now: () => new Date() }, dataDir: '', statuses: taskStatuses },
+      { clock: { now: () => new Date() }, configDir: '', dataDir: '', statuses: taskStatuses },
       db,
       'M',
     )

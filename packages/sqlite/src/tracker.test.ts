@@ -17,6 +17,7 @@ import { TRACKER_MIGRATIONS } from './tracker-migrations'
 
 const ctx = (dataDir = ':memory:'): PluginContext => ({
   clock: { now: () => new Date('2026-11-16T12:00:00Z') },
+  configDir: '',
   dataDir,
   statuses: createStatusMap({ item: ITEM_STATUS_DISPLAY, task: TASK_STATUS_DISPLAY }),
 })

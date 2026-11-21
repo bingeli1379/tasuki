@@ -1,6 +1,7 @@
 import {
   claimItems,
   detectOverrides,
+  expandPrompt,
   finishRun,
   recoverRuns,
   resumeBlocked,
@@ -14,9 +15,14 @@ import {
   type RuntimeStorePort,
   type StoragePort,
 } from '@tasuki/core'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, readFile } from 'node:fs/promises'
+import { dirname } from 'node:path'
 import type { Limits } from './config'
+import { CONTRACT } from './prompts'
 import type { RunTokens } from './run-tokens'
+
+const TAIL_LINES = 20
+const TAIL_CHARS = 2000
 
 export interface EngineDeps {
   storage: StoragePort
@@ -55,6 +61,13 @@ export function createEngine(deps: EngineDeps): Engine {
 
   // Returns once the agent is running. `done` is the rest of its life, settling when its Run
   // is finished; it sits in an object because an async function would flatten it.
+  // The last lines the agent printed, for the comment on a Run that died. Empty when it
+  // wrote no log.
+  async function logTail(path: string): Promise<string> {
+    const text = await readFile(path, 'utf8').catch(() => '')
+    return text.trimEnd().split('\n').slice(-TAIL_LINES).join('\n').slice(-TAIL_CHARS)
+  }
+
   async function start({ run, rule }: Claimed): Promise<{ done: Promise<void> }> {
     const runner = deps.runners[rule.agent]
     const token = tokens.issue(run.id)
@@ -68,12 +81,38 @@ export function createEngine(deps: EngineDeps): Engine {
     try {
       if (runner === undefined) throw new Error(`no runner for agent ${rule.agent}`)
       await mkdir(run.workspace, { recursive: true })
+      await mkdir(dirname(run.logPath), { recursive: true })
+      const resume =
+        rule.session === 'per-item'
+          ? (await runtime.runsFor(run.target)).find(
+              (r) => r.agent === rule.agent && r.sessionId !== undefined,
+            )?.sessionId
+          : undefined
+      // At most one write a second, however much the agent prints.
+      let touched = 0
       const handle = runner.start({
         runId: run.id,
         target: run.target,
         mode: rule.mode,
         workspace: run.workspace,
         mcp: { url: deps.mcpUrl, token },
+        prompt: expandPrompt(`${CONTRACT}\n\n${rule.prompt}`, {
+          ref: run.target,
+          runId: run.id,
+          workspace: run.workspace,
+          mode: rule.mode,
+        }),
+        ...(resume === undefined ? {} : { resume }),
+        logPath: run.logPath,
+        onActivity() {
+          const now = clock.now().getTime()
+          if (now - touched < 1000) return
+          touched = now
+          runtime.touch(run.id).catch((e: unknown) => log(String(e)))
+        },
+        onSession(id) {
+          runtime.recordSession(run.id, id).catch((e: unknown) => log(String(e)))
+        },
       })
       agents.set(run.id, { handle })
       exit = handle.exit
@@ -86,7 +125,7 @@ export function createEngine(deps: EngineDeps): Engine {
         agents.delete(run.id)
         clearInterval(renew)
         tokens.revoke(run.id)
-        await finishRun({ storage, runtime }, rule, run.id, result)
+        await finishRun({ storage, runtime }, rule, run.id, result, await logTail(run.logPath))
       }),
     }
   }

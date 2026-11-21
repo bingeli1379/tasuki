@@ -41,13 +41,26 @@
   // A split rule needs task to-do and manual mapped; an execute rule needs all five.
   // "statuses": { "item": { "refining": "10003" }, "task": { "to-do": "10003", "manual": "10012" } },
 
-  // Agents are runner plugins, given the same way as the tracker. Only the fake runner
-  // exists so far: it stands in for an agent so the engine can be tried without an LLM.
-  // A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or
+  // Agents are runner plugins, given the same way as the tracker. The fake runner stands in
+  // for an agent so the engine can be tried without an LLM. A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or
   // [fake:no_tasks] picks what it does; anything else makes two tasks and succeeds after
   // `seconds`, [fake:manual] making the second one manual. Executing, it walks every task it
   // can to done and reports blocked_manual when only manual ones are left.
-  "agents": { "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } } },
+  //
+  // Point a rule's agent at "claude" to run the real CLI with this machine's login. It may
+  // use the tasuki tools and allowedTools only; nobody is there to approve anything else.
+  // It loads none of this machine's Claude settings: give it what it needs with "plugins",
+  // "mcpServers" and "appendSystemPromptFile" (its standing instructions). A stage that needs
+  // different ones gets an agent of its own.
+  "agents": {
+    "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } },
+    "claude": {
+      "plugin": "@tasuki/claude-cli",
+      "options": {
+        "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git:*)", "Bash(node:*)"],
+      },
+    },
+  },
 
   // Without rules the engine leaves every item alone. See docs/config-and-rules.md.
   "rules": [

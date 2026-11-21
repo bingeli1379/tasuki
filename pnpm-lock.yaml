@@ -170,6 +170,9 @@ importers:
 
   .:
     devDependencies:
+      '@tasuki/claude-cli':
+        specifier: workspace:*
+        version: link:packages/claude-cli
       '@tasuki/fake-runner':
         specifier: workspace:*
         version: link:packages/fake-runner
@@ -188,6 +191,12 @@ importers:
       vite-plus:
         specifier: 1.6.0
         version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(@vue/language-core@3.3.14)(esbuild@0.27.7)(jiti@2.7.0)(playwright@1.65.1)(typescript@7.0.2)(vue-tsc@3.3.14(typescript@7.0.2))
+
+  packages/claude-cli:
+    dependencies:
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core: {}
 

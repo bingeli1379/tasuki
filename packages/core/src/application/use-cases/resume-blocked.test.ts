@@ -14,6 +14,8 @@ const execute: Rule = {
   agent: 'a',
   mode: 'execute',
   maxAttempts: 3,
+  prompt: '',
+  session: 'fresh',
   on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
 }
 
