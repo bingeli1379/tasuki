@@ -24,6 +24,7 @@ const TURN = {
 const columns = ref<Column[]>([])
 // Refs an agent is working on right now.
 const running = ref<string[]>([])
+const holdLabel = ref('hold')
 const tasks = ref<Record<string, { done: number; total: number }>>({})
 const error = ref('')
 const open = ref(false)
@@ -75,9 +76,11 @@ async function load(): Promise<void> {
       columns: Column[]
       running: string[]
       tasks: Record<string, { done: number; total: number }>
+      holdLabel: string
     }>('/api/board')
     columns.value = board.columns
     running.value = board.running
+    holdLabel.value = board.holdLabel
     tasks.value = board.tasks
     error.value = ''
   } catch (e) {
@@ -281,6 +284,13 @@ onMounted(load)
                       size="sm"
                     />
                     <UBadge
+                      v-if="item.labels.includes(holdLabel)"
+                      label="On hold"
+                      color="warning"
+                      variant="subtle"
+                      size="sm"
+                    />
+                    <UBadge
                       v-if="tasks[item.ref]"
                       :label="`${tasks[item.ref]?.done}/${tasks[item.ref]?.total} tasks`"
                       color="neutral"
@@ -339,6 +349,7 @@ onMounted(load)
       v-model:open="detailOpen"
       :item-ref="detailRef"
       :status-name="statusName"
+      :hold-label="holdLabel"
       @updated="(item) => (place(item), wrote())"
     />
   </UApp>

@@ -370,3 +370,56 @@ test('a blocked item carries on once its manual task is done, and finished work 
   await expect(dialog).toBeHidden()
   await expect(card(/^In Review/)).toContainText('3/3 tasks', { timeout: 90_000 })
 })
+
+test('Stop ends a running agent and holds the item; released, it starts over', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(180_000)
+  const title = `e2e stop ${Date.now()} [fake:hang]`
+  const ref = await createThroughApi(request, title)
+  const moved = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'refining', to: 'ready-to-split' },
+  })
+  expect(moved.ok()).toBe(true)
+  await page.goto('/')
+  const splitting = page.getByRole('region', { name: /^Splitting/ })
+  const card = splitting.getByRole('article', { name: title })
+  await expect(card.getByText('Running')).toBeVisible({ timeout: 60_000 })
+
+  await splitting.getByRole('button', { name: title, exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'Stop' }).click()
+  await expect(dialog.getByText('On hold')).toBeVisible()
+  // The detail follows the Run until the engine has ended it.
+  await expect(dialog.getByRole('listitem', { name: 'Run split attempt 1' })).toContainText(
+    'cancelled',
+    { timeout: 30_000 },
+  )
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  // While a dialog is open the board is hidden from the accessibility tree, and any check on
+  // a card would pass on finding no card at all.
+  await expect(dialog).toBeHidden()
+
+  // Nothing moved: the card stays in Splitting, on hold, with no agent on it.
+  await expect(card.getByText('Running')).toHaveCount(0, { timeout: 30_000 })
+  await expect(card.getByText('On hold')).toBeVisible()
+  await splitting.getByRole('button', { name: title, exact: true }).click()
+  await expect(dialog.getByRole('listitem', { name: 'Run split attempt 1' })).toContainText(
+    'cancelled',
+  )
+  await expect(dialog.getByRole('article', { name: 'Comment by Engine' }).last()).toContainText(
+    'Rule split, attempt 1: cancelled, a person pressed Stop. The engine moved nothing.',
+  )
+
+  await dialog.getByRole('button', { name: 'Release' }).click()
+  await expect(dialog.getByRole('button', { name: 'Hold' })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+  // Back to Ready to Split and claimed again: a fresh Run hangs like the first.
+  await expect(card.getByText('On hold')).toHaveCount(0, { timeout: 30_000 })
+  await expect(card.getByText('Running')).toBeVisible({ timeout: 60_000 })
+
+  // Leaves no hanging agent behind for the tests after this one.
+  expect((await request.post(`/api/items/${ref}/stop`)).ok()).toBe(true)
+})

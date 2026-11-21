@@ -24,7 +24,11 @@ import {
 import { renderMarkdown } from '../markdown'
 import TaskDetail from './TaskDetail.vue'
 
-const props = defineProps<{ itemRef: string; statusName: (status: string) => string }>()
+const props = defineProps<{
+  itemRef: string
+  statusName: (status: string) => string
+  holdLabel: string
+}>()
 const emit = defineEmits<{ updated: [item: Item] }>()
 const open = defineModel<boolean>('open', { required: true })
 
@@ -38,6 +42,7 @@ const commentDraft = ref('')
 const commenting = ref(false)
 const uploading = ref(false)
 const moving = ref(false)
+const controlling = ref(false)
 const reworking = ref(false)
 const reworkDraft = ref('')
 const openTask = ref<string>()
@@ -58,6 +63,13 @@ const extensions = [Embed, AttachmentImage.configure({ itemRef: props.itemRef })
 const editorUi = {
   content: 'markdown [&_.ProseMirror]:min-h-[60vh] [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2',
 }
+
+const held = computed(() => detail.value?.item.labels.includes(props.holdLabel) ?? false)
+// Runs come newest first; once Stop was pressed on it there is nothing more to press.
+const stoppable = computed(() => {
+  const run = detail.value?.runs[0]
+  return run?.state === 'running' && run.cancelMode !== 'hard'
+})
 
 const body = computed(() =>
   detail.value ? renderMarkdown(detail.value.item.body, detail.value.item.ref) : '',
@@ -188,6 +200,34 @@ function insert(attachment: Attachment): void {
     .run()
 }
 
+// Stop and hold leave the status alone; reading again shows the Run winding down.
+async function control(action: 'stop' | 'hold' | 'release'): Promise<void> {
+  const current = detail.value
+  if (!current) return
+  controlling.value = true
+  try {
+    const ref = encodeURIComponent(current.item.ref)
+    const item = await call<Item>(
+      action === 'stop' ? `/api/items/${ref}/stop` : `/api/items/${ref}/hold`,
+      { method: action === 'stop' ? 'POST' : action === 'hold' ? 'PUT' : 'DELETE' },
+    )
+    emit('updated', item)
+    await load()
+  } catch (e) {
+    error.value = messageOf(e)
+  } finally {
+    controlling.value = false
+  }
+  // The engine ends a stopped agent within seconds: show it happen rather than leave
+  // "stopping" up until the next opening.
+  for (let i = 0; i < 30 && open.value; i++) {
+    const run = detail.value?.runs[0]
+    if (run?.state !== 'running' || run.cancelMode !== 'hard') break
+    await new Promise((resolve) => setTimeout(resolve, 1000))
+    await load()
+  }
+}
+
 // split-review is where a person checks the tasks before any of them runs, in-review where
 // they accept the finished work or send it back with what to fix.
 async function decide(to: string): Promise<void> {
@@ -260,14 +300,36 @@ const authorOf = (c: Comment): string =>
         <template v-if="detail">
           <section v-if="!editing" class="flex flex-col gap-3">
             <div class="flex items-start justify-between gap-4">
-              <h2 class="text-xl font-semibold">{{ detail.item.title }}</h2>
-              <UButton
-                label="Edit"
-                color="neutral"
-                variant="outline"
-                size="sm"
-                @click="startEdit"
-              />
+              <h2 class="flex items-center gap-2 text-xl font-semibold">
+                {{ detail.item.title }}
+                <UBadge v-if="held" label="On hold" color="warning" variant="subtle" size="sm" />
+              </h2>
+              <span class="flex shrink-0 gap-2">
+                <UButton
+                  v-if="stoppable"
+                  label="Stop"
+                  color="error"
+                  variant="outline"
+                  size="sm"
+                  :disabled="controlling"
+                  @click="control('stop')"
+                />
+                <UButton
+                  :label="held ? 'Release' : 'Hold'"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  :disabled="controlling"
+                  @click="control(held ? 'release' : 'hold')"
+                />
+                <UButton
+                  label="Edit"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  @click="startEdit"
+                />
+              </span>
             </div>
             <!-- eslint-disable-next-line vue/no-v-html -- markdown-it with html disabled -->
             <div v-if="detail.item.body" class="markdown" v-html="body" />
@@ -465,7 +527,7 @@ const authorOf = (c: Comment): string =>
                 <span class="flex shrink-0 items-center gap-2 text-muted">
                   <time :datetime="r.startedAt">{{ new Date(r.startedAt).toLocaleString() }}</time>
                   <UBadge
-                    :label="r.outcome ?? 'running'"
+                    :label="r.outcome ?? (r.cancelMode === undefined ? 'running' : 'stopping')"
                     :color="outcomeColor(r)"
                     variant="subtle"
                     size="sm"
