@@ -1,5 +1,6 @@
 import {
   addAttachment,
+  deleteAttachment,
   addComment,
   createItem,
   deleteItem,
@@ -320,6 +321,19 @@ export function createMcpServer({
           data: new Uint8Array(Buffer.from(base64, 'base64')),
         }),
       ),
+  )
+  server.registerTool(
+    'delete_attachment',
+    {
+      description:
+        "Delete an item's attachment. Cannot be undone. Fails while the body still shows it: " +
+        'take the ![...](attachment:<id>) out with update_item first.',
+      inputSchema: { ref: z.string(), id: z.string().describe('The attachment id') },
+    },
+    async ({ ref, id }) => {
+      await deleteAttachment(storage, ref, id)
+      return json({ deleted: id })
+    },
   )
   server.registerTool(
     'get_attachment',

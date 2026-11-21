@@ -222,6 +222,30 @@ async function addComment(): Promise<void> {
   }
 }
 
+// The attachment asking whether it should really go: deleting it cannot be undone. Its error
+// shows by the list, where the person is looking, not at the top of the dialog.
+const confirmingAttachment = ref<string>()
+const removingAttachment = ref(false)
+const attachmentError = ref('')
+async function removeAttachment(a: Attachment): Promise<void> {
+  removingAttachment.value = true
+  try {
+    await call(
+      `/api/items/${encodeURIComponent(props.itemRef)}/attachments/${encodeURIComponent(a.id)}`,
+      { method: 'DELETE' },
+    )
+    edits++
+    confirmingAttachment.value = undefined
+    attachmentError.value = ''
+    // Read again: the deletion left a line among the comments.
+    await load()
+  } catch (e) {
+    attachmentError.value = messageOf(e)
+  } finally {
+    removingAttachment.value = false
+  }
+}
+
 async function upload(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -702,18 +726,49 @@ const authorOf = (c: Comment): string =>
                       </a>
                       <span class="text-xs text-muted">{{ size(a.size) }}</span>
                     </span>
-                    <UButton
-                      v-if="editing && isImage(a)"
-                      label="Insert"
-                      :aria-label="`Insert ${a.filename}`"
-                      size="xs"
-                      color="neutral"
-                      variant="outline"
-                      class="ml-auto shrink-0"
-                      @click="insert(a)"
-                    />
+                    <span class="ml-auto flex shrink-0 items-center gap-1">
+                      <UButton
+                        v-if="editing && isImage(a)"
+                        label="Insert"
+                        :aria-label="`Insert ${a.filename}`"
+                        size="xs"
+                        color="neutral"
+                        variant="outline"
+                        @click="insert(a)"
+                      />
+                      <template v-if="confirmingAttachment === a.id">
+                        <UButton
+                          label="Keep"
+                          size="xs"
+                          color="neutral"
+                          variant="ghost"
+                          @click="confirmingAttachment = undefined"
+                        />
+                        <UButton
+                          label="Delete"
+                          :aria-label="`Delete ${a.filename} for good`"
+                          size="xs"
+                          color="error"
+                          :loading="removingAttachment"
+                          @click="removeAttachment(a)"
+                        />
+                      </template>
+                      <UButton
+                        v-else
+                        icon="i-lucide-trash-2"
+                        :aria-label="`Delete ${a.filename}`"
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        class="text-dimmed hover:text-error"
+                        @click="((confirmingAttachment = a.id), (attachmentError = ''))"
+                      />
+                    </span>
                   </li>
                 </ul>
+                <p v-if="attachmentError" role="alert" class="text-sm text-error">
+                  {{ attachmentError }}
+                </p>
               </section>
 
               <section aria-labelledby="runs-heading" class="flex flex-col gap-2">

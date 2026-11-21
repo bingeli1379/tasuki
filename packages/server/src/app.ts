@@ -1,6 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import {
   addAttachment,
+  deleteAttachment,
   addComment,
   createItem,
   deleteItem,
@@ -216,6 +217,10 @@ export function createApp({
       return c.json(attachment, 201)
     },
   )
+  app.delete('/api/items/:ref/attachments/:id', async (c) => {
+    await deleteAttachment(storage, c.req.param('ref'), c.req.param('id'))
+    return c.json({ ok: true })
+  })
   app.get('/api/items/:ref/attachments/:id', async (c) => {
     const { attachment, data } = await storage.readAttachment(c.req.param('ref'), c.req.param('id'))
     // Attachments are anyone's upload, so only raster images display in the page. Anything
