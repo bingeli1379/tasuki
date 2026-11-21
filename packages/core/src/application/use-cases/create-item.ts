@@ -7,9 +7,13 @@ export interface CreateItemInput {
   body: string
 }
 
-export async function createItem(storage: StoragePort, input: CreateItemInput): Promise<WorkUnit> {
+export async function createItem(
+  storage: StoragePort,
+  entry: string,
+  input: CreateItemInput,
+): Promise<WorkUnit> {
   const title = input.title.trim()
   if (title === '') throw new InvalidInput('title is required')
-  // Only humans create items, and every item starts in refining (state-machine.md).
-  return storage.createItem({ title, body: input.body, status: 'refining' })
+  // Only humans create items, and every item starts at the entry station (state-machine.md).
+  return storage.createItem({ title, body: input.body, status: entry })
 }

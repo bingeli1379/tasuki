@@ -1,4 +1,5 @@
 import type { Run } from '../../domain/run'
+import { taskStatusName as named } from '../../domain/workflow'
 import { agentMoveRefusal } from '../../domain/task'
 import type { Ref, WorkUnit } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
@@ -30,7 +31,7 @@ export async function setTaskStatus(
     target: task.ref,
     author: 'engine',
     kind: 'system',
-    body: `The agent moved it from ${task.status} to ${input.status}.\n\n${reason}`,
+    body: `The agent moved it ${named(task.status)} → ${named(input.status)}.\n\n${reason}`,
   })
   return moved
 }

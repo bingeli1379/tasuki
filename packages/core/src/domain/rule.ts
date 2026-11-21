@@ -40,10 +40,9 @@ export function expandPrompt(
   return template.replace(/\{\{\s*([a-z.]+)\s*\}\}/g, (all, name: string) => values[name] ?? all)
 }
 
+// Config fills in failed and max_attempts with the failure station when a rule leaves them out.
 export function exitFor(rule: Rule, outcome: RuleExit): string | undefined {
-  return (
-    rule.on[outcome] ?? (outcome === 'failed' || outcome === 'max_attempts' ? 'blocked' : undefined)
-  )
+  return rule.on[outcome]
 }
 
 // The status the item is in while its Run is alive.

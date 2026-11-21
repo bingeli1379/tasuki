@@ -1,5 +1,6 @@
 import { exitFor, outcomeOf, runningStatus, type Rule, type RunExit } from '../../domain/rule'
 import type { CancelReason, Outcome } from '../../domain/run'
+import type { StatusNames } from '../../domain/workflow'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
 import { StatusConflict } from '../status-conflict'
@@ -9,6 +10,7 @@ import { releaseTasks } from './release-tasks'
 export interface FinishDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
+  named: StatusNames
 }
 
 const WHY: Record<CancelReason, string> = {
@@ -21,7 +23,7 @@ const WHY: Record<CancelReason, string> = {
 // The agent process is gone: turn what it reported into an outcome and move the item.
 // logTail is the end of what the agent printed, shown when it died or never reported.
 export async function finishRun(
-  { storage, runtime }: FinishDeps,
+  { storage, runtime, named }: FinishDeps,
   rule: Rule,
   runId: string,
   exit: RunExit,
@@ -34,7 +36,7 @@ export async function finishRun(
   if (run.cancelRequestedAt !== undefined) {
     await runtime.finishRun(run.id, 'cancelled')
     const lines = [
-      `Rule ${rule.id}, attempt ${run.attempt}: cancelled, ${WHY[run.cancelRequestedBy ?? 'stop']}. The engine moved nothing.`,
+      `Rule \`${rule.id}\`, attempt ${run.attempt}: \`cancelled\`, ${WHY[run.cancelRequestedBy ?? 'stop']}. The engine moved nothing.`,
     ]
     if (run.summary !== undefined && run.summary !== '') lines.push('', run.summary)
     await storage.addComment({
@@ -53,10 +55,11 @@ export async function finishRun(
   // e.g. blocked_manual from a split agent: leaving the item in the claim status with no
   // Run would strand it there.
   if (exitFor(rule, outcome) === undefined) {
-    reason = `rule ${rule.id} has nowhere to go on ${outcome}`
+    reason = `rule \`${rule.id}\` has nowhere to go on \`${outcome}\``
     outcome = 'failed'
   }
-  const to = exitFor(rule, outcome) ?? 'blocked'
+  const to = exitFor(rule, outcome)
+  if (to === undefined) throw new Error(`rule ${rule.id} has no exit on failed`)
   // Moved before the Run is finished: a crash in between leaves a live Run whose lease
   // expires, never an item stuck in the claim status with nothing to bring it back.
   try {
@@ -67,8 +70,10 @@ export async function finishRun(
     await runtime.finishRun(run.id, 'cancelled')
     return 'cancelled'
   }
-  await runtime.finishRun(run.id, outcome)
-  const lines = [`Rule ${rule.id}, attempt ${run.attempt}: ${outcome}, moved to ${to}.`]
+  await runtime.finishRun(run.id, outcome, to)
+  const lines = [
+    `Rule \`${rule.id}\`, attempt ${run.attempt}: \`${outcome}\`. ${named(runningStatus(rule))} → ${named(to)}.`,
+  ]
   if (reason !== undefined) lines.push(`Why: ${reason}.`)
   if (run.summary !== undefined && run.summary !== '') lines.push('', run.summary)
   if ((exit.code !== 0 || run.verdict === undefined) && logTail.trim() !== '')
@@ -79,6 +84,6 @@ export async function finishRun(
     kind: 'system',
     body: lines.join('\n'),
   })
-  await releaseTasks(storage, tasks, `rule ${rule.id}'s run ended ${outcome}`)
+  await releaseTasks(storage, tasks, `rule \`${rule.id}\`'s run ended \`${outcome}\``)
   return outcome
 }

@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { createStatusMap, type WorkUnit } from '@tasuki/core'
+import { createStatusMap, type WorkUnit, type Workflow } from '@tasuki/core'
 import { createSqliteTracker, migrate as migrateTracker, TRACKER_MIGRATIONS } from '@tasuki/sqlite'
 import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
@@ -13,6 +13,14 @@ import { createRuntimeStore } from './runtime-store/run-store'
 const statuses = createStatusMap({
   item: { refining: 'Refining', 'ready-to-split': 'Ready to Split', done: 'Done' },
 })
+const workflow: Workflow = {
+  statuses: [
+    { id: 'refining', name: 'Refining', outcomes: {} },
+    { id: 'ready-to-split', name: 'Ready to Split', outcomes: {} },
+    { id: 'done', name: 'Done', outcomes: {} },
+  ],
+  roles: { entry: 'refining', done: 'done', failure: 'done' },
+}
 
 // The real sqlite tracker in memory: the server is tested against a tracker that keeps
 // the StoragePort contract, not a hand-written fake that drifts from it.
@@ -38,6 +46,7 @@ const appWith = (db = openDatabase(':memory:')): ReturnType<typeof createApp> =>
     storage: memoryStorage(),
     runtime: memoryRuntime(),
     statuses,
+    workflow,
     rules: [],
     holdLabel: 'hold',
     tokens: createRunTokens(),
@@ -297,6 +306,7 @@ describe('tasks', () => {
       storage,
       runtime: memoryRuntime(),
       statuses: taskStatuses,
+      workflow: { ...workflow, roles: { ...workflow.roles, taskReview: 'split-review' } },
       rules: [],
       holdLabel: 'hold',
       tokens: createRunTokens(),
@@ -331,7 +341,7 @@ describe('tasks', () => {
       task: { ref: second.ref, status: 'manual', blockedBy: [expect.any(String)] },
       comments: [
         { author: 'human', kind: 'note', body: 'mine now' },
-        { author: 'human', kind: 'system', body: 'Moved from to-do to manual.' },
+        { author: 'human', kind: 'system', body: 'Moved **To Do** → **Manual**.' },
       ],
     })
   })

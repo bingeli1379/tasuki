@@ -1,4 +1,5 @@
 import type { WorkUnit } from '../../domain/work-unit'
+import { taskStatusName as named } from '../../domain/workflow'
 import type { StoragePort } from '../ports/storage'
 import { StatusConflict } from '../status-conflict'
 
@@ -21,7 +22,7 @@ export async function releaseTasks(
       target: task.ref,
       author: 'engine',
       kind: 'system',
-      body: `Moved back to to-do: ${why}.`,
+      body: `Moved ${named('in-progress')} → ${named('to-do')}: ${why}.`,
     })
   }
 }

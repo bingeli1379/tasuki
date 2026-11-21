@@ -13,6 +13,7 @@ import {
   type RunHandle,
   type RunnerPort,
   type RuntimeStorePort,
+  type StatusNames,
   type StoragePort,
 } from '@tasuki/core'
 import { mkdir, readFile } from 'node:fs/promises'
@@ -29,6 +30,8 @@ export interface EngineDeps {
   runtime: RuntimeStorePort
   clock: Clock
   rules: readonly Rule[]
+  // How a status reads in the comments the engine writes.
+  named: StatusNames
   limits: Limits
   holdLabel: string
   workspaceRoot: string
@@ -125,7 +128,13 @@ export function createEngine(deps: EngineDeps): Engine {
         agents.delete(run.id)
         clearInterval(renew)
         tokens.revoke(run.id)
-        await finishRun({ storage, runtime }, rule, run.id, result, await logTail(run.logPath))
+        await finishRun(
+          { storage, runtime, named: deps.named },
+          rule,
+          run.id,
+          result,
+          await logTail(run.logPath),
+        )
       }),
     }
   }
@@ -135,14 +144,14 @@ export function createEngine(deps: EngineDeps): Engine {
       if (ticking) return
       ticking = true
       try {
-        await recoverRuns({ storage, runtime, clock }, rules)
+        await recoverRuns({ storage, runtime, clock, named: deps.named }, rules)
         await detectOverrides({ storage, runtime }, rules, deps.holdLabel)
         // Before claiming, so an item resumed this round is picked up in the same round.
-        await resumeBlocked({ storage, runtime }, rules, deps.holdLabel)
-        await resumeReleased({ storage, runtime }, rules, deps.holdLabel)
+        await resumeBlocked({ storage, runtime, named: deps.named }, rules, deps.holdLabel)
+        await resumeReleased({ storage, runtime, named: deps.named }, rules, deps.holdLabel)
         // Paused, the round still recovers and resumes: none of that starts a Run.
         if (await runtime.isPaused()) return
-        const claimed = await claimItems({ storage, runtime }, rules, {
+        const claimed = await claimItems({ storage, runtime, named: deps.named }, rules, {
           maxConcurrentRuns: limits.maxConcurrentRuns,
           leaseSeconds: limits.leaseSeconds,
           workspaceRoot: deps.workspaceRoot,

@@ -1,6 +1,6 @@
 import {
   createStatusMap,
-  ITEM_STATUS_DISPLAY,
+  DEFAULT_WORKFLOW,
   TASK_STATUS_DISPLAY,
   type PluginContext,
 } from '@tasuki/core'
@@ -19,7 +19,10 @@ const ctx = (dataDir = ':memory:'): PluginContext => ({
   clock: { now: () => new Date('2026-11-16T12:00:00Z') },
   configDir: '',
   dataDir,
-  statuses: createStatusMap({ item: ITEM_STATUS_DISPLAY, task: TASK_STATUS_DISPLAY }),
+  statuses: createStatusMap({
+    item: Object.fromEntries(DEFAULT_WORKFLOW.statuses.map((s) => [s.id, s.name])),
+    task: TASK_STATUS_DISPLAY,
+  }),
 })
 
 const memoryTracker = (refPrefix: string): ReturnType<typeof createSqliteTracker> => {

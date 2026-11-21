@@ -28,6 +28,9 @@ export interface Run {
   id: string
   rule: string
   attempt: number
+  // Where the item was claimed from and where the engine moved it; older Runs have neither.
+  from?: string
+  to?: string
   state: 'running' | 'finished'
   outcome?: string
   // Set once a person asked it to stop; hard ends the agent within seconds.

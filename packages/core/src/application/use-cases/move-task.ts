@@ -4,6 +4,7 @@ import { InvalidInput } from '../invalid-input'
 import { NotFound } from '../not-found'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
+import { taskStatusName as named } from '../../domain/workflow'
 import { logAction } from './log-action'
 
 export interface MoveTaskDeps {
@@ -35,6 +36,6 @@ export async function moveTask(
       `an agent is working on ${task.parent}; reopen ${input.ref} once it is done`,
     )
   const moved = await storage.transition(input.ref, input.from, input.to)
-  await logAction(storage, input.ref, `Moved from ${input.from} to ${input.to}.`)
+  await logAction(storage, input.ref, `Moved ${named(input.from)} → ${named(input.to)}.`)
   return moved
 }

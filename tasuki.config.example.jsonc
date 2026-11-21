@@ -14,14 +14,29 @@
   // refPrefix: sqlite refs become TSK-1, TSK-2... Default "TSK".
   "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
 
-  // Logical status -> the tracker's status key. Omitted, each status maps to its
-  // display name ("refining" -> "Refining"), which only suits sqlite.
-  // refining is required: new items start there. Unmapped statuses are not on the board.
-  // A split rule also needs the task statuses to-do and manual, where its tasks start.
-  // "statuses": {
-  //   "item": { "refining": "Refining", "in-progress": "In Progress" },
-  //   "task": { "to-do": "To Do", "in-progress": "In Progress", "in-review": "In Review",
-  //             "manual": "Manual", "done": "Done" }
+  // The item statuses, in board order. Omitted, it is the ten of state-machine.md.
+  // id is the logical name; name is shown (default: id in Title Case); key is the tracker's
+  // status (default: name, which only suits sqlite). handledBy: "person" puts an eye on the
+  // column; a rule watching it puts a radar there instead. outcomes are the buttons a person
+  // gets in the item detail: label -> the status it moves the item to.
+  // roles say which status code uses for what: entry (new items), done, failure (where a
+  // rule's failed and max_attempts go), taskReview (tasks can be edited there; needed by a
+  // split or rework rule), rework (moving there asks what to fix; needed by a rework rule).
+  // taskStatuses maps the five fixed task statuses. A split rule needs to-do and manual, an
+  // execute rule all five. Omitted, each maps to its display name.
+  // "workflow": {
+  //   "statuses": [
+  //     { "id": "refining" },
+  //     { "id": "ready-to-split", "name": "Ready to Split" },
+  //     { "id": "split-review", "handledBy": "person",
+  //       "outcomes": { "→ Refining": "refining", "→ In Progress": "in-progress" } },
+  //     { "id": "in-progress" },
+  //     { "id": "ai-review", "name": "AI Review" },
+  //     { "id": "blocked", "handledBy": "person" },
+  //     { "id": "done" }
+  //   ],
+  //   "roles": { "entry": "refining", "done": "done", "failure": "blocked",
+  //              "taskReview": "split-review" }
   // },
 
   // Jira Cloud instead; put JIRA_EMAIL and JIRA_API_TOKEN in .env.
@@ -37,9 +52,12 @@
   //     "dependencyLinkType": "10000"                        // the "Blocks" issue link type
   //   }
   // },
-  // Jira needs statuses: the display-name default does not match any Jira status id.
-  // A split rule needs task to-do and manual mapped; an execute rule needs all five.
-  // "statuses": { "item": { "refining": "10003" }, "task": { "to-do": "10003", "manual": "10012" } },
+  // Jira needs a workflow with a key on every status: names do not match Jira status ids.
+  // "workflow": {
+  //   "statuses": [{ "id": "refining", "key": "10003" }, { "id": "done", "key": "10005" }],
+  //   "roles": { "entry": "refining", "done": "done", "failure": "refining" },
+  //   "taskStatuses": { "to-do": "10003", "manual": "10012" }
+  // },
 
   // Agents are runner plugins, given the same way as the tracker. The fake runner stands in
   // for an agent so the engine can be tried without an LLM. A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or

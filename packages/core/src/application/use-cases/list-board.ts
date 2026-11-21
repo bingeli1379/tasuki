@@ -1,5 +1,5 @@
 import type { Rule } from '../../domain/rule'
-import { AWAITING_PERSON, ITEM_STATUS_DISPLAY, ITEM_STATUSES } from '../../domain/status'
+import type { Roles, Workflow } from '../../domain/workflow'
 import type { Ref, WorkUnit } from '../../domain/work-unit'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
@@ -7,8 +7,10 @@ import type { StoragePort } from '../ports/storage'
 export interface BoardColumn {
   status: string
   displayName: string
-  // Whose move it is: engine when a rule watches the column, person when it waits for one.
-  turn?: 'engine' | 'person'
+  // Who handles it: engine when a rule watches the column, person when it waits for one.
+  handledBy?: 'engine' | 'person'
+  // What a person can conclude here: button label -> the status the item goes to.
+  outcomes: Readonly<Record<string, string>>
   items: WorkUnit[]
 }
 
@@ -24,35 +26,41 @@ export interface Board {
   holdLabel: string
   // The engine starts no new Run while paused.
   paused: boolean
+  roles: Roles
 }
 
-// One column per item status the config maps, in board order. Tasks come from one more
+// One column per station, in the order the workflow lists them. Tasks come from one more
 // list, not one read per item.
 export async function listBoard(
   storage: StoragePort,
   runtime: RuntimeStorePort,
-  mapped: { item: readonly string[]; task: readonly string[] },
+  workflow: Workflow,
+  taskStatuses: readonly string[],
   rules: readonly Rule[],
   holdLabel: string,
 ): Promise<Board> {
-  const statuses = ITEM_STATUSES.filter((s) => mapped.item.includes(s))
   const [items, tasks] = await Promise.all([
-    storage.list('item', statuses),
-    storage.list('task', mapped.task),
+    storage.list(
+      'item',
+      workflow.statuses.map((s) => s.id),
+    ),
+    storage.list('task', taskStatuses),
   ])
   // After the tracker, which takes seconds on Jira: read alongside it, a Run that ended
   // meanwhile shows as Running on a card already in its outcome's column.
   const [live, paused] = await Promise.all([runtime.liveRuns(), runtime.isPaused()])
   const watched = new Set(rules.map((r) => r.watch))
-  const columns = statuses.map((status) => ({
-    status,
-    displayName: ITEM_STATUS_DISPLAY[status] ?? status,
-    ...(watched.has(status)
-      ? { turn: 'engine' as const }
-      : AWAITING_PERSON.includes(status)
-        ? { turn: 'person' as const }
+  // A station a person waits on and a rule watches is the engine's (D68).
+  const columns = workflow.statuses.map((station) => ({
+    status: station.id,
+    displayName: station.name,
+    ...(watched.has(station.id)
+      ? { handledBy: 'engine' as const }
+      : station.handledBy !== undefined
+        ? { handledBy: station.handledBy }
         : {}),
-    items: items.filter((i) => i.status === status),
+    outcomes: station.outcomes,
+    items: items.filter((i) => i.status === station.id),
   }))
   const counts: Board['tasks'] = {}
   for (const t of tasks) {
@@ -68,5 +76,6 @@ export async function listBoard(
     tasks: counts,
     holdLabel,
     paused,
+    roles: workflow.roles,
   }
 }

@@ -1,5 +1,6 @@
 import { exitFor, type Rule } from '../../domain/rule'
 import { nextAttempt, type Run } from '../../domain/run'
+import type { StatusNames } from '../../domain/workflow'
 import { RunConflict } from '../run-conflict'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
@@ -8,6 +9,7 @@ import { StatusConflict } from '../status-conflict'
 export interface ClaimDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
+  named: StatusNames
 }
 
 export interface ClaimLimits {
@@ -27,7 +29,7 @@ export interface Claimed {
 // One Poller round: every item sitting in a rule's watch status gets a Run, up to the
 // concurrency limit. Returns the Runs that now need an agent started.
 export async function claimItems(
-  { storage, runtime }: ClaimDeps,
+  { storage, runtime, named }: ClaimDeps,
   rules: readonly Rule[],
   limits: ClaimLimits,
 ): Promise<Claimed[]> {
@@ -45,7 +47,7 @@ export async function claimItems(
       if (busy.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
       const runs = await runtime.runsFor(item.ref)
       if (rule.mode === 'rework' && !(await hasFeedback(storage, item.ref, runs[0]))) {
-        await askForFeedback(storage, rule, item.ref)
+        await askForFeedback(storage, named, rule, item.ref)
         continue
       }
       const previous = runs.find((r) => r.rule === rule.id)
@@ -59,6 +61,7 @@ export async function claimItems(
           rule: rule.id,
           agent: rule.agent,
           attempt,
+          from: rule.watch,
           workspace: `${limits.workspaceRoot}/${item.ref}`,
           leaseSeconds: limits.leaseSeconds,
         })
@@ -68,7 +71,7 @@ export async function claimItems(
       }
       busy.add(item.ref)
       if (attempt > rule.maxAttempts) {
-        await giveUp(storage, runtime, rule, run)
+        await giveUp(storage, runtime, named, rule, run)
         continue
       }
       if (rule.claim !== undefined) {
@@ -104,8 +107,14 @@ async function hasFeedback(
 
 // Without feedback there is nothing to rework from: no agent starts, and the item takes the
 // rule's needs_input exit, as a reworking agent asking for it would.
-async function askForFeedback(storage: StoragePort, rule: Rule, ref: string): Promise<void> {
-  const to = exitFor(rule, 'needs_input') ?? 'blocked'
+async function askForFeedback(
+  storage: StoragePort,
+  named: StatusNames,
+  rule: Rule,
+  ref: string,
+): Promise<void> {
+  const to = exitFor(rule, 'needs_input')
+  if (to === undefined) throw new Error(`rule ${rule.id} has no exit on needs_input`)
   try {
     await storage.transition(ref, rule.watch, to)
   } catch (e) {
@@ -116,7 +125,7 @@ async function askForFeedback(storage: StoragePort, rule: Rule, ref: string): Pr
     target: ref,
     author: 'engine',
     kind: 'system',
-    body: `Rule ${rule.id} needs a comment saying what to rework, and none was left since the last run. Moved to ${to}: write one, then move it back to ${rule.watch}.`,
+    body: `Rule \`${rule.id}\` needs a comment saying what to rework, and none was left since the last run. Moved ${named(rule.watch)} → ${named(to)}: write one, then move it back to ${named(rule.watch)}.`,
   })
 }
 
@@ -125,6 +134,7 @@ async function askForFeedback(storage: StoragePort, rule: Rule, ref: string): Pr
 async function giveUp(
   storage: StoragePort,
   runtime: RuntimeStorePort,
+  named: StatusNames,
   rule: Rule,
   run: Run,
 ): Promise<void> {
@@ -136,11 +146,11 @@ async function giveUp(
     await runtime.finishRun(run.id, 'cancelled')
     return
   }
-  await runtime.finishRun(run.id, 'max_attempts')
+  await runtime.finishRun(run.id, 'max_attempts', to)
   await storage.addComment({
     target: run.target,
     author: 'engine',
     kind: 'system',
-    body: `Rule ${rule.id} gave up after ${rule.maxAttempts} attempts that never finished. Moved to ${to}.`,
+    body: `Rule \`${rule.id}\` gave up after ${rule.maxAttempts} attempts that never finished. ${to === undefined ? 'Left where it is.' : `Moved ${named(rule.watch)} → ${named(to)}.`}`,
   })
 }

@@ -1,4 +1,5 @@
 import type { Ref, WorkUnit } from '../../domain/work-unit'
+import type { Workflow } from '../../domain/workflow'
 import { InvalidInput } from '../invalid-input'
 import type { StoragePort } from '../ports/storage'
 import { StatusConflict } from '../status-conflict'
@@ -12,16 +13,16 @@ export interface RequestReworkInput {
   feedback: string
 }
 
-// A person sends finished work back with what to fix (state-machine.md, in-review to
-// ready-to-rework).
+// A person sends finished work back with what to fix, to the station with the rework role
+// (state-machine.md, in-review to ready-to-rework).
 export async function requestRework(
   storage: StoragePort,
-  mapped: readonly string[],
+  workflow: Workflow,
   input: RequestReworkInput,
 ): Promise<WorkUnit> {
+  const { rework } = workflow.roles
   if (input.feedback.trim() === '') throw new InvalidInput('say what to rework: feedback is empty')
-  if (!mapped.includes('ready-to-rework'))
-    throw new InvalidInput('status "ready-to-rework" is not on the board')
+  if (rework === undefined) throw new InvalidInput('no status has the rework role')
   const item = await storage.get(input.ref)
   if (item.status !== input.from) throw new StatusConflict(input.from, item)
   // The comment goes first: a rework rule may claim the item the moment it moves, and its
@@ -32,5 +33,5 @@ export async function requestRework(
     kind: 'note',
     body: input.feedback,
   })
-  return moveItem(storage, mapped, { ref: input.ref, from: input.from, to: 'ready-to-rework' })
+  return moveItem(storage, workflow, { ref: input.ref, from: input.from, to: rework })
 }

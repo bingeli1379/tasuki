@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vite-plus/test'
 import type { Rule } from '../../domain/rule'
 import type { Run } from '../../domain/run'
 import type { WorkUnit } from '../../domain/work-unit'
+import type { Station, Workflow } from '../../domain/workflow'
 import { runtimeStub } from '../../testing/runtime-stub'
 import { storageStub } from '../../testing/storage-stub'
 import { InvalidInput } from '../invalid-input'
@@ -28,6 +29,11 @@ const run: Run = {
   lastActivityAt: '',
   logPath: '',
 }
+
+const workflow = (...stations: (Partial<Station> & { id: string })[]): Workflow => ({
+  statuses: stations.map((s) => ({ name: s.id, outcomes: {}, ...s })),
+  roles: { entry: 'refining', done: 'done', failure: 'blocked' },
+})
 
 const unit = (ref: string, over: Partial<WorkUnit> = {}): WorkUnit => ({
   ref,
@@ -142,7 +148,8 @@ describe('listBoard', () => {
           ),
       }),
       runtimeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
-      { item: ['split-review'], task: ['to-do', 'done'] },
+      workflow({ id: 'split-review' }),
+      ['to-do', 'done'],
       [],
       'hold',
     )
@@ -170,7 +177,8 @@ describe('listBoard', () => {
         liveRuns: () =>
           Promise.resolve(running ? [{ ...run, target: 'X-1', state: 'running' as const }] : []),
       }),
-      { item: ['split-review'], task: ['to-do'] },
+      workflow({ id: 'split-review' }),
+      ['to-do'],
       [],
       'hold',
     )
@@ -191,12 +199,18 @@ describe('listBoard', () => {
     const board = await listBoard(
       storageStub({ list: () => Promise.resolve([]) }),
       runtimeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
-      { item: ['refining', 'ready-to-split', 'split-review', 'blocked'], task: [] },
-      // A rule on a status that would wait for a person: the engine picks it up, so it wins.
+      workflow(
+        { id: 'refining' },
+        { id: 'ready-to-split' },
+        { id: 'split-review', handledBy: 'person' },
+        { id: 'blocked', handledBy: 'person' },
+      ),
+      [],
+      // A rule on a status that waits for a person: the engine picks it up, so it wins.
       [watch('ready-to-split'), watch('blocked')],
       'hold',
     )
-    expect(board.columns.map((c) => [c.status, c.turn])).toEqual([
+    expect(board.columns.map((c) => [c.status, c.handledBy])).toEqual([
       ['refining', undefined],
       ['ready-to-split', 'engine'],
       ['split-review', 'person'],
@@ -266,12 +280,12 @@ describe('a person on a task', () => {
     ).rejects.toBeInstanceOf(NotFound)
     expect(moves).toEqual(['X-2 manual>done', 'X-3 done>to-do'])
     expect(logged).toEqual([
-      'X-2 human system: Moved from manual to done.',
-      'X-3 human system: Moved from done to to-do.',
+      'X-2 human system: Moved **Manual** → **Done**.',
+      'X-3 human system: Moved **Done** → **To Do**.',
     ])
   })
 
-  it('edits and deletes tasks only while the item is in split-review', async () => {
+  it('edits and deletes tasks only while the item is at the taskReview station', async () => {
     const deleted: string[] = []
     const storageIn = (status: string) =>
       storageStub({
@@ -280,14 +294,25 @@ describe('a person on a task', () => {
         deleteTask: (ref) => (deleted.push(ref), Promise.resolve()),
       })
     const edit = { ref: 'X-3', expectedVersion: '1', title: 'Renamed' }
-    expect((await updateTask(storageIn('split-review'), edit)).title).toBe('Renamed')
-    await deleteTask(storageIn('split-review'), 'X-3')
+    expect((await updateTask(storageIn('split-review'), 'split-review', edit)).title).toBe(
+      'Renamed',
+    )
+    await deleteTask(storageIn('split-review'), 'split-review', 'X-3')
     expect(deleted).toEqual(['X-3'])
 
     const refused = 'X-3 can only be changed while X-1 is in split-review; it is in in-progress'
-    await expect(updateTask(storageIn('in-progress'), edit)).rejects.toThrow(refused)
-    await expect(deleteTask(storageIn('in-progress'), 'X-3')).rejects.toThrow(refused)
-    await expect(deleteTask(storageIn('split-review'), 'X-1')).rejects.toBeInstanceOf(NotFound)
+    await expect(updateTask(storageIn('in-progress'), 'split-review', edit)).rejects.toThrow(
+      refused,
+    )
+    await expect(deleteTask(storageIn('in-progress'), 'split-review', 'X-3')).rejects.toThrow(
+      refused,
+    )
+    await expect(
+      deleteTask(storageIn('split-review'), 'split-review', 'X-1'),
+    ).rejects.toBeInstanceOf(NotFound)
+    await expect(deleteTask(storageIn('split-review'), undefined, 'X-3')).rejects.toThrow(
+      'no status has the taskReview role',
+    )
     expect(deleted).toEqual(['X-3'])
   })
 })

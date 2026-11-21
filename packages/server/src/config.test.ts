@@ -59,13 +59,129 @@ describe('loadConfig', () => {
     )
   })
 
-  it('refuses a mapping without refining, or with a status that does not exist', () => {
-    expect(() => loadConfig(write('{ "statuses": { "item": { "done": "Done" } } }'))).toThrow(
-      'must map refining',
+  it('defaults to the ten stations and their roles, keyed by display name', () => {
+    const { workflow } = loadConfig(write('{}'))
+    expect(workflow.roles).toEqual({
+      entry: 'refining',
+      done: 'done',
+      failure: 'blocked',
+      taskReview: 'split-review',
+      rework: 'ready-to-rework',
+    })
+    expect(workflow.statuses.find((s) => s.id === 'in-review')).toEqual({
+      id: 'in-review',
+      name: 'In Review',
+      handledBy: 'person',
+      outcomes: { '→ Ready to Rework': 'ready-to-rework', '→ Done': 'done' },
+    })
+  })
+
+  // A workflow whose first station is the entry and last is done and failure.
+  const flow = (ids: string[], over: Record<string, unknown> = {}): Record<string, unknown> => ({
+    statuses: ids.map((id) => ({ id })),
+    roles: { entry: ids[0], done: ids.at(-1), failure: ids.at(-1) },
+    ...over,
+  })
+
+  it('reads the stations in the order listed, with names, keys and outcomes', () => {
+    const config = loadConfig(
+      write(
+        JSON.stringify({
+          workflow: {
+            statuses: [
+              { id: 'triage', key: '10001' },
+              {
+                id: 'ai-review',
+                name: 'AI Review',
+                handledBy: 'person',
+                outcomes: { Ship: 'shipped' },
+              },
+              { id: 'shipped' },
+            ],
+            roles: { entry: 'triage', done: 'shipped', failure: 'triage' },
+            taskStatuses: { 'to-do': '10002' },
+          },
+        }),
+      ),
     )
-    expect(() =>
-      loadConfig(write('{ "statuses": { "item": { "refining": "R", "doing": "D" } } }')),
-    ).toThrow('unknown status doing')
+    expect(config.workflow).toEqual({
+      statuses: [
+        { id: 'triage', name: 'Triage', outcomes: {} },
+        { id: 'ai-review', name: 'AI Review', handledBy: 'person', outcomes: { Ship: 'shipped' } },
+        { id: 'shipped', name: 'Shipped', outcomes: {} },
+      ],
+      roles: { entry: 'triage', done: 'shipped', failure: 'triage' },
+    })
+    // Without a key, the tracker stores the name, as sqlite does.
+    expect(config.statuses).toEqual({
+      item: { triage: '10001', 'ai-review': 'AI Review', shipped: 'Shipped' },
+      task: { 'to-do': '10002' },
+    })
+  })
+
+  it.each([
+    [{ statuses: { item: {} } }, 'config statuses moved into workflow'],
+    [{ workflow: { statuses: [] } }, 'config workflow.statuses must list at least one status'],
+    [{ workflow: flow(['Triage']) }, 'workflow.statuses[0].id must be a kebab-case name'],
+    [{ workflow: flow(['a', 'a']) }, 'config workflow.statuses: a is listed twice'],
+    [
+      {
+        workflow: {
+          ...flow(['a', 'b']),
+          statuses: [
+            { id: 'a', key: 'K' },
+            { id: 'b', key: 'K' },
+          ],
+        },
+      },
+      'config workflow.statuses: a and b share the tracker key K',
+    ],
+    [
+      {
+        workflow: {
+          ...flow(['a', 'b']),
+          statuses: [{ id: 'a', handledBy: 'engine' }, { id: 'b' }],
+        },
+      },
+      'workflow.statuses[0] (a).handledBy can only be person',
+    ],
+    [
+      {
+        workflow: {
+          ...flow(['a', 'b']),
+          statuses: [{ id: 'a', outcomes: { Go: 'c' } }, { id: 'b' }],
+        },
+      },
+      'workflow.statuses (a).outcomes.Go: status "c" is not in workflow.statuses',
+    ],
+    [
+      {
+        workflow: {
+          ...flow(['a', 'b']),
+          statuses: [{ id: 'a', outcomes: { Go: 'a' } }, { id: 'b' }],
+        },
+      },
+      'workflow.statuses (a).outcomes.Go must go to another status',
+    ],
+    [{ workflow: { statuses: [{ id: 'a' }] } }, 'config workflow.roles is required'],
+    [
+      { workflow: flow(['a'], { roles: { done: 'a', failure: 'a' } }) },
+      'config workflow.roles.entry is required',
+    ],
+    [
+      { workflow: flow(['a'], { roles: { entry: 'a', done: 'a', failure: 'z' } }) },
+      'config workflow.roles.failure: status "z" is not in workflow.statuses',
+    ],
+    [
+      { workflow: flow(['a'], { roles: { entry: 'a', done: 'a', failure: 'a', start: 'a' } }) },
+      'config workflow.roles.start: not a role',
+    ],
+    [
+      { workflow: flow(['a'], { taskStatuses: { doing: 'D' } }) },
+      'config workflow.taskStatuses: unknown status doing',
+    ],
+  ])('refuses a workflow that cannot work: %j', (config, message) => {
+    expect(() => loadConfig(write(JSON.stringify(config)))).toThrow(message)
   })
 
   const withRules = (rules: unknown[]): string =>
@@ -90,7 +206,14 @@ describe('loadConfig', () => {
       fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } },
     })
     expect(config.rules).toEqual([
-      { ...split, maxAttempts: 3, prompt: defaultPrompt('split'), session: 'fresh' },
+      {
+        ...split,
+        // From the failure role.
+        on: { ...split.on, failed: 'blocked', max_attempts: 'blocked' },
+        maxAttempts: 3,
+        prompt: defaultPrompt('split'),
+        session: 'fresh',
+      },
     ])
     expect(config.limits).toEqual({
       maxConcurrentRuns: 2,
@@ -127,7 +250,7 @@ describe('loadConfig', () => {
   it.each([
     [
       { ...split, watch: 'ready' },
-      'rules[0] (split).watch: status "ready" is not in statuses.item',
+      'rules[0] (split).watch: status "ready" is not in workflow.statuses',
     ],
     [{ ...split, claim: 'ready-to-split' }, 'rules[0] (split).claim must differ from watch'],
     [{ ...split, agent: 'claude' }, 'rules[0] (split).agent: no agent "claude" in agents'],
@@ -154,15 +277,16 @@ describe('loadConfig', () => {
   it('refuses a rework rule the same way: it makes tasks too', () => {
     const path = write(
       JSON.stringify({
-        statuses: {
-          item: Object.fromEntries(
-            ['refining', 'ready-to-rework', 'splitting', 'split-review', 'blocked'].map((s) => [
-              s,
-              s,
-            ]),
-          ),
-          task: { 'to-do': 'T' },
-        },
+        workflow: flow(['refining', 'ready-to-rework', 'splitting', 'split-review', 'blocked'], {
+          roles: {
+            entry: 'refining',
+            done: 'blocked',
+            failure: 'blocked',
+            taskReview: 'split-review',
+            rework: 'ready-to-rework',
+          },
+          taskStatuses: { 'to-do': 'T' },
+        }),
         agents: { fake: { plugin: 'x' } },
         rules: [
           {
@@ -176,44 +300,40 @@ describe('loadConfig', () => {
       }),
     )
     expect(() => loadConfig(path)).toThrow(
-      'config statuses.task must map manual: rule rework makes tasks',
+      'config workflow.taskStatuses must map manual: rule rework makes tasks',
     )
   })
 
   it('refuses a split rule when the task statuses its tasks start in are not mapped', () => {
     const path = write(
       JSON.stringify({
-        statuses: {
-          item: Object.fromEntries(
-            [
-              'refining',
-              'ready-to-split',
-              'splitting',
-              'split-review',
-              'needs-answers',
-              'blocked',
-            ].map((s) => [s, s]),
-          ),
-          task: { 'to-do': 'T' },
-        },
+        workflow: flow(
+          ['refining', 'ready-to-split', 'splitting', 'split-review', 'needs-answers', 'blocked'],
+          {
+            roles: {
+              entry: 'refining',
+              done: 'blocked',
+              failure: 'blocked',
+              taskReview: 'split-review',
+            },
+            taskStatuses: { 'to-do': 'T' },
+          },
+        ),
         agents: { fake: { plugin: 'x' } },
         rules: [split],
       }),
     )
     expect(() => loadConfig(path)).toThrow(
-      'config statuses.task must map manual: rule split makes tasks',
+      'config workflow.taskStatuses must map manual: rule split makes tasks',
     )
   })
 
   it('refuses an execute rule unless every task status is mapped', () => {
     const path = write(
       JSON.stringify({
-        statuses: {
-          item: Object.fromEntries(
-            ['refining', 'in-progress', 'in-review', 'blocked'].map((s) => [s, s]),
-          ),
-          task: { 'to-do': 'T', manual: 'M', done: 'D' },
-        },
+        workflow: flow(['refining', 'in-progress', 'in-review', 'blocked'], {
+          taskStatuses: { 'to-do': 'T', manual: 'M', done: 'D' },
+        }),
         agents: { fake: { plugin: 'x' } },
         rules: [
           {
@@ -227,16 +347,8 @@ describe('loadConfig', () => {
       }),
     )
     expect(() => loadConfig(path)).toThrow(
-      'config statuses.task must map in-progress, in-review: rule execute runs tasks',
+      'config workflow.taskStatuses must map in-progress, in-review: rule execute runs tasks',
     )
-  })
-
-  it('refuses an unknown task status', () => {
-    expect(() =>
-      loadConfig(
-        write('{ "statuses": { "item": { "refining": "R" }, "task": { "doing": "D" } } }'),
-      ),
-    ).toThrow('config statuses.task: unknown status doing')
   })
 
   it('refuses two rules watching the same status', () => {
@@ -245,24 +357,59 @@ describe('loadConfig', () => {
     )
   })
 
-  it('refuses a rule whose default failed exit, blocked, is not on the board', () => {
+  const splitStations = ['refining', 'ready-to-split', 'splitting', 'split-review', 'needs-answers']
+
+  it('sends failed and max_attempts to the failure station unless the rule says otherwise', () => {
     const path = write(
       JSON.stringify({
-        statuses: {
-          item: {
-            refining: 'R',
-            'ready-to-split': 'S',
-            splitting: 'P',
-            'split-review': 'V',
-            'needs-answers': 'N',
+        workflow: flow(splitStations, {
+          roles: {
+            entry: 'refining',
+            done: 'needs-answers',
+            failure: 'refining',
+            taskReview: 'split-review',
           },
-        },
+        }),
+        agents: { fake: { plugin: 'x' } },
+        rules: [
+          split,
+          { ...split, id: 'own', watch: 'refining', on: { ...split.on, failed: 'needs-answers' } },
+        ],
+      }),
+    )
+    expect(loadConfig(path).rules.map((r) => [r.on.failed, r.on.max_attempts])).toEqual([
+      ['refining', 'refining'],
+      ['needs-answers', 'refining'],
+    ])
+  })
+
+  it('needs a taskReview station for a rule that makes tasks, and a rework one to rework', () => {
+    const noReview = write(
+      JSON.stringify({
+        workflow: flow(splitStations),
         agents: { fake: { plugin: 'x' } },
         rules: [split],
       }),
     )
-    expect(() => loadConfig(path)).toThrow(
-      'on.failed (default): status "blocked" is not in statuses.item',
+    expect(() => loadConfig(noReview)).toThrow(
+      'config workflow.roles.taskReview is required: rule split makes tasks',
+    )
+    const noRework = write(
+      JSON.stringify({
+        workflow: flow([...splitStations, 'ready-to-rework'], {
+          roles: {
+            entry: 'refining',
+            done: 'needs-answers',
+            failure: 'needs-answers',
+            taskReview: 'split-review',
+          },
+        }),
+        agents: { fake: { plugin: 'x' } },
+        rules: [{ ...split, id: 'rework', watch: 'ready-to-rework', mode: 'rework' }],
+      }),
+    )
+    expect(() => loadConfig(noRework)).toThrow(
+      'config workflow.roles.rework is required: rule rework reworks',
     )
   })
 })

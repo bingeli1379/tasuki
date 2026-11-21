@@ -15,15 +15,15 @@ const recording = (): { storage: StoragePort; created: NewItem[] } => {
 }
 
 describe('createItem', () => {
-  it('creates the item in refining with a trimmed title', async () => {
+  it('creates the item at the entry station with a trimmed title', async () => {
     const { storage, created } = recording()
-    await createItem(storage, { title: '  Login page  ', body: 'details' })
-    expect(created).toEqual([{ title: 'Login page', body: 'details', status: 'refining' }])
+    await createItem(storage, 'triage', { title: '  Login page  ', body: 'details' })
+    expect(created).toEqual([{ title: 'Login page', body: 'details', status: 'triage' }])
   })
 
   it('rejects a blank title without touching the tracker', async () => {
     const { storage, created } = recording()
-    await expect(createItem(storage, { title: '   ', body: '' })).rejects.toThrow(
+    await expect(createItem(storage, 'triage', { title: '   ', body: '' })).rejects.toThrow(
       'title is required',
     )
     expect(created).toEqual([])

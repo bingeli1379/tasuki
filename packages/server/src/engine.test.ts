@@ -3,7 +3,8 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import {
   createStatusMap,
   isRunnable,
-  ITEM_STATUS_DISPLAY,
+  DEFAULT_WORKFLOW,
+  itemStatusNames,
   TASK_STATUS_DISPLAY,
   type Rule,
   type RunExit,
@@ -25,7 +26,14 @@ import { migrate } from './runtime-store/migrate'
 import { RUNTIME_MIGRATIONS } from './runtime-store/migrations'
 import { createRuntimeStore } from './runtime-store/run-store'
 
-const statuses = createStatusMap({ item: ITEM_STATUS_DISPLAY, task: TASK_STATUS_DISPLAY })
+const named = itemStatusNames(DEFAULT_WORKFLOW)
+const statuses = createStatusMap({
+  item: Object.fromEntries(DEFAULT_WORKFLOW.statuses.map((s) => [s.id, s.name])),
+  task: TASK_STATUS_DISPLAY,
+})
+
+// Config fills these in from the failure role.
+const toFailure = { failed: 'blocked', max_attempts: 'blocked' }
 
 const split: Rule = {
   id: 'split',
@@ -36,7 +44,7 @@ const split: Rule = {
   maxAttempts: 2,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+  on: { succeeded: 'split-review', needs_input: 'needs-answers', ...toFailure },
 }
 
 // Rule B: no claim status, the lease alone keeps a second Run off the item.
@@ -48,7 +56,12 @@ const execute: Rule = {
   maxAttempts: 2,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
+  on: {
+    succeeded: 'in-review',
+    needs_input: 'blocked',
+    blocked_manual: 'blocked',
+    ...toFailure,
+  },
 }
 
 // Rule C: same claim status as split, and its new tasks go through split-review too.
@@ -61,7 +74,7 @@ const rework: Rule = {
   maxAttempts: 2,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'split-review', needs_input: 'blocked' },
+  on: { succeeded: 'split-review', needs_input: 'blocked', ...toFailure },
 }
 
 // What a scripted agent does once started: it gets an MCP client already connected to the
@@ -144,6 +157,7 @@ function setup(
     storage,
     runtime,
     statuses,
+    workflow: DEFAULT_WORKFLOW,
     rules: [split, execute, rework],
     holdLabel: 'hold',
     tokens,
@@ -185,6 +199,7 @@ function setup(
       runtime,
       clock,
       rules,
+      named,
       limits: {
         maxConcurrentRuns,
         leaseSeconds: 120,
@@ -280,11 +295,13 @@ describe('rule split on a fake agent', () => {
         outcome: verdict,
         verdict,
         summary: `said ${verdict}`,
+        from: 'ready-to-split',
+        to,
       })
       const comment = (await t.storage.comments(item.ref)).find((c) => c.author === 'engine')
       expect(comment).toMatchObject({ kind: 'system' })
       expect(comment?.body).toBe(
-        `Rule split, attempt 1: ${verdict}, moved to ${to}.\n\nsaid ${verdict}`,
+        `Rule \`split\`, attempt 1: \`${verdict}\`. **Splitting** → ${named(to)}.\n\nsaid ${verdict}`,
       )
     },
   )
@@ -426,12 +443,12 @@ describe('rule execute on a fake agent', () => {
     expect(
       (await t.storage.comments(schema?.ref ?? '')).map((c) => [c.author, c.kind, c.body]),
     ).toEqual([
-      ['engine', 'system', 'The agent moved it from to-do to in-progress.\n\nTo in-progress.'],
-      ['engine', 'system', 'The agent moved it from in-progress to in-review.\n\nTo in-review.'],
-      ['engine', 'system', 'The agent moved it from in-review to done.\n\nTo done.'],
+      ['engine', 'system', 'The agent moved it **To Do** → **In Progress**.\n\nTo in-progress.'],
+      ['engine', 'system', 'The agent moved it **In Progress** → **In Review**.\n\nTo in-review.'],
+      ['engine', 'system', 'The agent moved it **In Review** → **Done**.\n\nTo done.'],
     ])
     expect((await t.storage.comments(item?.ref ?? ''))[0]?.body).toBe(
-      'Rule execute, attempt 1: succeeded, moved to in-review.\n\nsaid succeeded',
+      'Rule `execute`, attempt 1: `succeeded`. **In Progress** → **In Review**.\n\nsaid succeeded',
     )
   })
 
@@ -500,7 +517,7 @@ describe('rule execute on a fake agent', () => {
     expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
     expect((await t.storage.get(schema?.ref ?? '')).status).toBe('to-do')
     expect((await t.storage.comments(schema?.ref ?? '')).at(-1)?.body).toBe(
-      "Moved back to to-do: rule execute's run ended failed.",
+      "Moved **In Progress** → **To Do**: rule `execute`'s run ended `failed`.",
     )
   })
 
@@ -617,7 +634,7 @@ describe('rule execute on a fake agent', () => {
       [1, 'abandoned'],
     ])
     expect((await second.storage.comments(item?.ref ?? ''))[0]?.body).toBe(
-      'Rule execute, attempt 1: the agent stopped answering. The next round tries again.',
+      'Rule `execute`, attempt 1: the agent stopped answering. The next round tries again.',
     )
   })
 
@@ -684,7 +701,7 @@ describe('auto-resume (state-machine.md)', () => {
       [1, 'blocked_manual'],
     ])
     expect((await t.storage.comments(ref)).map((c) => c.body)).toContain(
-      'No task is manual any more. Moved back to in-progress for rule execute to carry on.',
+      'No task is manual any more. Moved **Blocked** → **In Progress** for rule `execute` to carry on.',
     )
   })
 
@@ -762,7 +779,7 @@ describe('rule rework on a fake agent', () => {
     expect(t.started).toHaveLength(0)
     expect((await t.storage.get(item.ref)).status).toBe('blocked')
     expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
-      'Rule rework needs a comment saying what to rework, and none was left since the last run. Moved to blocked: write one, then move it back to ready-to-rework.',
+      'Rule `rework` needs a comment saying what to rework, and none was left since the last run. Moved **Ready to Rework** → **Blocked**: write one, then move it back to **Ready to Rework**.',
     )
 
     // A note written straight in the tracker is feedback too.
@@ -816,7 +833,7 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
     ])
     expect((await second.storage.get(item.ref)).status).toBe('splitting')
     expect((await second.storage.comments(item.ref))[0]?.body).toBe(
-      'Rule split, attempt 1: the agent stopped answering. Moved back to ready-to-split to try again.',
+      'Rule `split`, attempt 1: the agent stopped answering. Moved **Splitting** → **Ready to Split** to try again.',
     )
   })
 
@@ -842,7 +859,7 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
       [1, 'abandoned'],
     ])
     expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
-      'Rule split gave up after 2 attempts that never finished. Moved to blocked.',
+      'Rule `split` gave up after 2 attempts that never finished. Moved **Ready to Split** → **Blocked**.',
     )
 
     await t.storage.transition(item.ref, 'blocked', 'ready-to-split')
@@ -911,7 +928,7 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     })
     expect(await t.storage.get(item.ref)).toMatchObject({ status: 'splitting', labels: ['hold'] })
     expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
-      'Rule split, attempt 1: cancelled, a person pressed Stop. The engine moved nothing.',
+      'Rule `split`, attempt 1: `cancelled`, a person pressed Stop. The engine moved nothing.',
     )
     await engine.tick()
     expect(t.started).toHaveLength(1)
@@ -926,7 +943,7 @@ describe('stopping a run (stop-and-recovery.md)', () => {
       outcome: 'succeeded',
     })
     expect((await t.storage.comments(item.ref)).map((c) => c.body)).toContain(
-      'The hold is off. Moved back to ready-to-split for rule split to start again.',
+      'The hold is off. Moved **Splitting** → **Ready to Split** for rule `split` to start again.',
     )
   })
 
@@ -1030,7 +1047,7 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     await engine.enforce()
     await engine.settled()
     expect((await t.storage.comments(moved.ref)).at(-1)?.body).toBe(
-      'Rule split, attempt 1: cancelled, the item was moved while it ran. The engine moved nothing.',
+      'Rule `split`, attempt 1: `cancelled`, the item was moved while it ran. The engine moved nothing.',
     )
     expect((await t.storage.get(moved.ref)).status).toBe('refining')
     expect((await t.storage.get(held?.ref ?? '')).status).toBe('in-progress')
@@ -1141,7 +1158,7 @@ describe('global pause (stop-and-recovery.md)', () => {
     expect((await t.storage.get(split1.ref)).status).toBe('ready-to-split')
     expect((await t.storage.get(exec?.ref ?? '')).status).toBe('in-progress')
     expect((await t.storage.comments(split1.ref)).at(-1)?.body).toBe(
-      'Stopped by pausing the engine. Moved back to ready-to-split for rule split to start again.',
+      'Stopped by pausing the engine. Moved **Splitting** → **Ready to Split** for rule `split` to start again.',
     )
 
     await resume(t)

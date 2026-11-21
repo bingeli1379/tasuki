@@ -1,4 +1,5 @@
 import type { Rule } from '../../domain/rule'
+import type { StatusNames } from '../../domain/workflow'
 import type { Clock } from '../ports/clock'
 import type { RuntimeStorePort } from '../ports/runtime-store'
 import type { StoragePort } from '../ports/storage'
@@ -10,13 +11,14 @@ export interface RecoverDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
   clock: Clock
+  named: StatusNames
 }
 
 // Runs whose lease ran out are abandoned. An item left in the claim status goes back to the
 // watch status, where the next round picks it up as the next attempt (stop-and-recovery.md).
 // Returns the ids of the Runs it abandoned.
 export async function recoverRuns(
-  { storage, runtime, clock }: RecoverDeps,
+  { storage, runtime, clock, named }: RecoverDeps,
   rules: readonly Rule[],
 ): Promise<string[]> {
   const now = clock.now().getTime()
@@ -53,8 +55,8 @@ export async function recoverRuns(
         author: 'engine',
         kind: 'system',
         body: back
-          ? `Rule ${rule.id}, attempt ${run.attempt}: the agent stopped answering. Moved back to ${rule.watch} to try again.`
-          : `Rule ${rule.id}, attempt ${run.attempt}: the agent stopped answering. The next round tries again.`,
+          ? `Rule \`${rule.id}\`, attempt ${run.attempt}: the agent stopped answering. Moved ${named(rule.claim ?? rule.watch)} → ${named(rule.watch)} to try again.`
+          : `Rule \`${rule.id}\`, attempt ${run.attempt}: the agent stopped answering. The next round tries again.`,
       })
     await releaseTasks(storage, await storage.children(run.target), 'the agent stopped answering')
   }
