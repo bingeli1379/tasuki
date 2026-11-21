@@ -217,6 +217,30 @@ export function createSqliteTracker(
         throw e
       }
     },
+    async deleteItem(ref) {
+      if (get(ref).kind !== 'item') throw new NotFound(`${ref} is not an item`)
+      const units = [
+        ref,
+        ...db
+          .prepare('SELECT ref FROM work_unit WHERE parent = ?')
+          .all(ref)
+          .map((r) => String(r['ref'])),
+      ]
+      db.exec('BEGIN')
+      try {
+        for (const unit of units) {
+          db.prepare('DELETE FROM dependency WHERE task = ? OR blocked_by = ?').run(unit, unit)
+          db.prepare('DELETE FROM comment WHERE target = ?').run(unit)
+          db.prepare('DELETE FROM attachment WHERE target = ?').run(unit)
+        }
+        db.prepare('DELETE FROM work_unit WHERE parent = ?').run(ref)
+        db.prepare('DELETE FROM work_unit WHERE ref = ?').run(ref)
+        db.exec('COMMIT')
+      } catch (e) {
+        db.exec('ROLLBACK')
+        throw e
+      }
+    },
     async addLabel(ref, label) {
       return setLabel(ref, label, true)
     },
