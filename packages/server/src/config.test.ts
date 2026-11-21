@@ -73,8 +73,20 @@ describe('loadConfig', () => {
       maxConcurrentRuns: 2,
       leaseSeconds: 120,
       defaultMaxAttempts: 3,
+      softGraceSeconds: 300,
+      hardGraceSeconds: 10,
     })
+    expect(config.holdLabel).toBe('hold')
     expect(config.pollSeconds).toBe(5)
+  })
+
+  it('takes the hold label from labels.hold, as one word Jira can store', () => {
+    expect(loadConfig(write('{ "labels": { "hold": "tasuki-hold" } }')).holdLabel).toBe(
+      'tasuki-hold',
+    )
+    expect(() => loadConfig(write('{ "labels": { "hold": "on hold" } }'))).toThrow(
+      'config labels.hold must be one word with no spaces',
+    )
   })
 
   it('has no rules when it lists none, so the engine leaves every item alone', () => {

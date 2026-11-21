@@ -5,10 +5,13 @@ import {
   deleteTask,
   getItem,
   getTask,
+  holdItem,
   listBoard,
   moveItem,
   moveTask,
+  releaseItem,
   requestRework,
+  stopRun,
   updateItem,
   updateTask,
   type Rule,
@@ -24,6 +27,7 @@ export interface McpDeps {
   runtime: RuntimeStorePort
   statuses: StatusMap
   rules: readonly Rule[]
+  holdLabel: string
 }
 
 const json = (value: unknown): { content: { type: 'text'; text: string }[] } => ({
@@ -32,7 +36,13 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 
 // The user's own AI client (Claude Code, Codex) acting as the user: the same use cases as
 // the board, so whatever a person can do on the board this can do too (D57).
-export function createMcpServer({ storage, runtime, statuses, rules }: McpDeps): McpServer {
+export function createMcpServer({
+  storage,
+  runtime,
+  statuses,
+  rules,
+  holdLabel,
+}: McpDeps): McpServer {
   const server = new McpServer({ name: 'tasuki', version: '0.0.0' })
   server.registerTool(
     'list_board',
@@ -42,7 +52,8 @@ export function createMcpServer({ storage, runtime, statuses, rules }: McpDeps):
         'and `turn`: engine when a rule picks items up from it, person when items wait for a ' +
         'person there, absent otherwise; ' +
         'and `running`, the refs an agent is working on right now, and `tasks`, per item ref ' +
-        'that has tasks, how many are done out of how many. ' +
+        'that has tasks, how many are done out of how many, and `holdLabel`: an item with it ' +
+        'among its labels is on hold, and no agent starts on it. ' +
         'Items created a few seconds ago may not be listed yet when the tracker is Jira.',
     },
     async () =>
@@ -52,6 +63,7 @@ export function createMcpServer({ storage, runtime, statuses, rules }: McpDeps):
           runtime,
           { item: statuses.mapped('item'), task: statuses.mapped('task') },
           rules,
+          holdLabel,
         ),
       ),
   )
@@ -97,6 +109,38 @@ export function createMcpServer({ storage, runtime, statuses, rules }: McpDeps):
       },
     },
     async (input) => json(await requestRework(storage, statuses.mapped('item'), input)),
+  )
+  server.registerTool(
+    'hold_item',
+    {
+      description:
+        `Put an item on hold (the ${holdLabel} label): no agent starts on it until it is ` +
+        'released, and an agent working on it now is told to wind down; it is ended if it ' +
+        'has not after a grace period. The item stays in its status. Returns the item.',
+      inputSchema: { ref: z.string().describe('The item ref') },
+    },
+    async ({ ref }) => json(await holdItem({ storage, runtime }, holdLabel, ref)),
+  )
+  server.registerTool(
+    'release_item',
+    {
+      description:
+        'Take an item off hold. From the next round agents may start on it again: an item ' +
+        'whose agent was stopped picks up where its rule starts. Returns the item.',
+      inputSchema: { ref: z.string().describe('The item ref') },
+    },
+    async ({ ref }) => json(await releaseItem(storage, holdLabel, ref)),
+  )
+  server.registerTool(
+    'stop_run',
+    {
+      description:
+        'Stop the agent working on an item right now, and put the item on hold so none starts ' +
+        'again until you release it. Nothing on the item moves: its status and tasks stay as ' +
+        'the agent left them. Fails when no agent is running on it. Returns the item.',
+      inputSchema: { ref: z.string().describe('The item ref') },
+    },
+    async ({ ref }) => json(await stopRun({ storage, runtime }, holdLabel, ref)),
   )
   server.registerTool(
     'get_item',

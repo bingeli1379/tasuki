@@ -21,6 +21,9 @@ export interface Limits {
   maxConcurrentRuns: number
   leaseSeconds: number
   defaultMaxAttempts: number
+  // A soft cancel turns hard after this long; a hard one sends SIGKILL after this long.
+  softGraceSeconds: number
+  hardGraceSeconds: number
 }
 
 export interface Config {
@@ -31,6 +34,8 @@ export interface Config {
   statuses: StatusMapping
   pollSeconds: number
   limits: Limits
+  // The label that keeps the engine off an item.
+  holdLabel: string
   agents: Record<string, PluginRef>
   rules: Rule[]
 }
@@ -184,7 +189,13 @@ export function loadConfig(path: string): Config {
     maxConcurrentRuns: positive(rawLimits, 'maxConcurrentRuns', 2, 'limits'),
     leaseSeconds: positive(rawLimits, 'leaseSeconds', 120, 'limits'),
     defaultMaxAttempts: positive(rawLimits, 'defaultMaxAttempts', 3, 'limits'),
+    softGraceSeconds: positive(rawLimits, 'softGraceSeconds', 300, 'limits'),
+    hardGraceSeconds: positive(rawLimits, 'hardGraceSeconds', 10, 'limits'),
   }
+  const holdLabel = (isObject(raw['labels']) ? raw['labels']['hold'] : undefined) ?? 'hold'
+  // Jira labels cannot hold spaces.
+  if (typeof holdLabel !== 'string' || !/^\S+$/.test(holdLabel))
+    throw new Error('config labels.hold must be one word with no spaces')
   const agents = Object.fromEntries(
     Object.entries(isObject(raw['agents']) ? raw['agents'] : {}).map(([name, agent]) => [
       name,
@@ -228,6 +239,7 @@ export function loadConfig(path: string): Config {
       'poll',
     ),
     limits,
+    holdLabel,
     agents,
     rules,
   }

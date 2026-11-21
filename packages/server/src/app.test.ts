@@ -35,6 +35,7 @@ const appWith = (db = openDatabase(':memory:')): ReturnType<typeof createApp> =>
     runtime: memoryRuntime(),
     statuses,
     rules: [],
+    holdLabel: 'hold',
     tokens: createRunTokens(),
   })
 
@@ -259,6 +260,7 @@ describe('tasks', () => {
       runtime: memoryRuntime(),
       statuses: taskStatuses,
       rules: [],
+      holdLabel: 'hold',
       tokens: createRunTokens(),
     })
     const item = await storage.createItem({ title: 'Item', body: '', status: 'split-review' })
@@ -348,6 +350,9 @@ describe("MCP for the user's AI client", () => {
       'create_item',
       'move_item',
       'request_rework',
+      'hold_item',
+      'release_item',
+      'stop_run',
       'get_item',
       'update_item',
       'get_task',

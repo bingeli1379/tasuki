@@ -24,4 +24,8 @@ export const RUNTIME_MIGRATIONS: readonly string[] = [
   // S5: what the agent made, for checking its verdict (agent-contract.md).
   `ALTER TABLE run ADD COLUMN produced_questions INTEGER NOT NULL DEFAULT 0;
   ALTER TABLE run ADD COLUMN produced_tasks INTEGER NOT NULL DEFAULT 0;`,
+  // S7c: a person asked the Run to stop (stop-and-recovery.md).
+  `ALTER TABLE run ADD COLUMN cancel_requested_at TEXT;
+  ALTER TABLE run ADD COLUMN cancel_mode TEXT CHECK (cancel_mode IN ('soft','hard'));
+  ALTER TABLE run ADD COLUMN cancel_requested_by TEXT CHECK (cancel_requested_by IN ('stop','hold','moved'));`,
 ]

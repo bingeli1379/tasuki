@@ -135,15 +135,21 @@ function setup(
     runtime,
     statuses,
     rules: [split, execute, rework],
+    holdLabel: 'hold',
     tokens,
   })
   const scripts: Script[] = []
   const started: RunSpec[] = []
+  // The signals each agent got, in order; with ignoreSigterm an agent outlives SIGTERM.
+  const signals: string[] = []
+  const agent = { ignoreSigterm: false }
   const runner: RunnerPort = {
     start(spec) {
       started.push(spec)
       const script = scripts.shift() ?? splitInto()
-      const exit = (async () => {
+      let killed: (exit: RunExit) => void = () => {}
+      const dead = new Promise<RunExit>((resolve) => (killed = resolve))
+      const alive = (async () => {
         const mcp = new Client({ name: 'agent', version: '0' })
         await mcp.connect(
           new StreamableHTTPClientTransport(new URL(spec.mcp.url), {
@@ -153,7 +159,13 @@ function setup(
         )
         return script(mcp, spec)
       })()
-      return { exit }
+      return {
+        exit: Promise.race([alive, dead]),
+        terminate(signal) {
+          signals.push(signal)
+          if (signal === 'SIGKILL' || !agent.ignoreSigterm) killed({ code: null, signal })
+        },
+      }
     },
   }
   const logs: string[] = []
@@ -163,7 +175,14 @@ function setup(
       runtime,
       clock,
       rules,
-      limits: { maxConcurrentRuns, leaseSeconds: 120, defaultMaxAttempts: 3 },
+      limits: {
+        maxConcurrentRuns,
+        leaseSeconds: 120,
+        defaultMaxAttempts: 3,
+        softGraceSeconds: 300,
+        hardGraceSeconds: 10,
+      },
+      holdLabel: 'hold',
       workspaceRoot: mkdtempSync(join(tmpdir(), 'tasuki-ws-')),
       runners: { fake: runner },
       tokens,
@@ -205,6 +224,8 @@ function setup(
     approvedItem,
     scripts,
     started,
+    signals,
+    agent,
     engine,
     readyItem,
     now,
@@ -811,6 +832,171 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
     await second.engine().tick()
     expect((await second.storage.get(item.ref)).status).toBe('refining')
     expect((await second.runtime.runsFor(item.ref))[0]?.outcome).toBe('abandoned')
+  })
+})
+
+describe('stopping a run (stop-and-recovery.md)', () => {
+  const stop = (t: ReturnType<typeof setup>, ref: string) =>
+    t.app.request(`/api/items/${ref}/stop`, { method: 'POST' })
+  const hold = (t: ReturnType<typeof setup>, ref: string, method: 'PUT' | 'DELETE') =>
+    t.app.request(`/api/items/${ref}/hold`, { method })
+  // Waits for the go, tries to write, reports, then never exits on its own.
+  const lateWriter = () => {
+    let go: () => void = () => {}
+    let wrote: (refusal: string) => void = () => {}
+    const gate = new Promise<void>((resolve) => (go = resolve))
+    const refusal = new Promise<string>((resolve) => (wrote = resolve))
+    const script: Script = async (mcp, spec) => {
+      await gate
+      const res = await mcp.callTool({ name: 'create_task', arguments: { title: 'Late' } })
+      await report('succeeded')(mcp, spec)
+      wrote(text(res))
+      return hang(mcp, spec)
+    }
+    return { script, go, refusal }
+  }
+
+  it('Stop ends the agent, holds the item where it was, and releasing starts it over', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    expect((await stop(t, item.ref)).status).toBe(200)
+    await engine.enforce()
+    await engine.settled()
+
+    expect(t.signals).toEqual(['SIGTERM'])
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      outcome: 'cancelled',
+      cancelMode: 'hard',
+      cancelRequestedBy: 'stop',
+    })
+    expect(await t.storage.get(item.ref)).toMatchObject({ status: 'splitting', labels: ['hold'] })
+    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+      'Rule split, attempt 1: cancelled, a person pressed Stop. The engine moved nothing.',
+    )
+    await engine.tick()
+    expect(t.started).toHaveLength(1)
+
+    expect((await hold(t, item.ref, 'DELETE')).status).toBe(200)
+    await engine.tick()
+    await engine.settled()
+    expect(t.started).toHaveLength(2)
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      attempt: 1,
+      outcome: 'succeeded',
+    })
+    expect((await t.storage.comments(item.ref)).map((c) => c.body)).toContain(
+      'The hold is off. Moved back to ready-to-split for rule split to start again.',
+    )
+  })
+
+  it('Stop with no agent on the item is a 400 and puts nothing on hold', async () => {
+    const t = setup()
+    const item = await t.readyItem()
+    expect((await stop(t, item.ref)).status).toBe(400)
+    expect((await t.storage.get(item.ref)).labels).toEqual([])
+  })
+
+  it('an agent that ignores SIGTERM gets SIGKILL after hardGraceSeconds', async () => {
+    const t = setup()
+    t.scripts.push(hang)
+    t.agent.ignoreSigterm = true
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await stop(t, item.ref)
+    await engine.enforce()
+    t.now.t += 9_000
+    await engine.enforce()
+    expect(t.signals).toEqual(['SIGTERM'])
+    t.now.t += 1_000
+    await engine.enforce()
+    await engine.settled()
+    expect(t.signals).toEqual(['SIGTERM', 'SIGKILL'])
+    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('cancelled')
+  })
+
+  it("hold refuses the agent's writes and ignores its report; past softGraceSeconds it is ended", async () => {
+    const t = setup()
+    const agent = lateWriter()
+    t.scripts.push(agent.script)
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    expect((await hold(t, item.ref, 'PUT')).status).toBe(200)
+    agent.go()
+    expect(await agent.refusal).toMatch(/^RUN_CANCELLED/)
+
+    t.now.t += 299_000
+    await engine.enforce()
+    expect(t.signals).toEqual([])
+    t.now.t += 1_000
+    await engine.enforce()
+    await engine.settled()
+    expect(t.signals).toEqual(['SIGTERM'])
+    const [run] = await t.runtime.runsFor(item.ref)
+    expect(run).toMatchObject({
+      outcome: 'cancelled',
+      cancelMode: 'hard',
+      cancelRequestedBy: 'hold',
+    })
+    expect(run?.verdict).toBeUndefined()
+    expect(await t.storage.children(item.ref)).toEqual([])
+    expect((await t.storage.get(item.ref)).status).toBe('splitting')
+  })
+
+  it('a hold set in the tracker by hand, or a person moving the item, is noticed by the round', async () => {
+    const t = setup()
+    t.scripts.push(hang, hang)
+    const [held] = await t.approvedItem()
+    const moved = await t.readyItem()
+    const engine = t.engine([split, execute])
+    await engine.tick()
+    expect(t.started).toHaveLength(2)
+
+    await t.storage.addLabel(held?.ref ?? '', 'hold')
+    await t.storage.transition(moved.ref, 'splitting', 'refining')
+    await engine.tick()
+    expect(
+      (await t.runtime.liveRuns())
+        .map((r) => [r.target, r.cancelMode, r.cancelRequestedBy])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual([
+      [held?.ref, 'soft', 'hold'],
+      [moved.ref, 'soft', 'moved'],
+    ])
+    expect(t.started).toHaveLength(2)
+
+    t.now.t += 300_000
+    await engine.enforce()
+    await engine.settled()
+    expect((await t.storage.comments(moved.ref)).at(-1)?.body).toBe(
+      'Rule split, attempt 1: cancelled, the item was moved while it ran. The engine moved nothing.',
+    )
+    expect((await t.storage.get(moved.ref)).status).toBe('refining')
+    expect((await t.storage.get(held?.ref ?? '')).status).toBe('in-progress')
+  })
+
+  it('leaves an item on hold alone until it is released', async () => {
+    const t = setup()
+    const item = await t.readyItem()
+    await hold(t, item.ref, 'PUT')
+    const engine = t.engine()
+    await engine.tick()
+    expect(t.started).toHaveLength(0)
+    await hold(t, item.ref, 'DELETE')
+    await engine.tick()
+    await engine.settled()
+    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+  })
+
+  it('only an item goes on hold', async () => {
+    const t = setup()
+    const [, task] = await t.approvedItem()
+    expect((await hold(t, task?.ref ?? '', 'PUT')).status).toBe(400)
   })
 })
 

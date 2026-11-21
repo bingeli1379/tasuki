@@ -2,6 +2,8 @@ import {
   InvalidInput,
   NotFound,
   RunConflict,
+  type CancelMode,
+  type CancelReason,
   type Clock,
   type Outcome,
   type Run,
@@ -33,6 +35,11 @@ function toRun(row: Row): Run {
       questions: Number(row['produced_questions']),
       tasks: Number(row['produced_tasks']),
     },
+    ...optional('cancelRequestedAt', row['cancel_requested_at']),
+    ...(optional('cancelMode', row['cancel_mode']) as { cancelMode?: CancelMode }),
+    ...(optional('cancelRequestedBy', row['cancel_requested_by']) as {
+      cancelRequestedBy?: CancelReason
+    }),
     leaseUntil: String(row['lease_until']),
     startedAt: String(row['started_at']),
     lastActivityAt: String(row['last_activity_at']),
@@ -116,6 +123,14 @@ export function createRuntimeStore(
       db.prepare(
         "UPDATE run SET state = 'finished', outcome = ?, finished_at = ? WHERE id = ? AND state = 'running'",
       ).run(outcome, clock.now().toISOString(), id)
+    },
+    async requestCancel(id, mode, by) {
+      db.prepare(
+        `UPDATE run SET cancel_requested_at = COALESCE(cancel_requested_at, ?),
+           cancel_requested_by = COALESCE(cancel_requested_by, ?),
+           cancel_mode = CASE WHEN cancel_mode = 'hard' THEN 'hard' ELSE ? END
+         WHERE id = ? AND state = 'running'`,
+      ).run(clock.now().toISOString(), by, mode, id)
     },
     async liveRuns() {
       return db

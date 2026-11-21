@@ -7,14 +7,17 @@ import {
   EditConflict,
   getItem,
   getTask,
+  holdItem,
   InvalidInput,
   listBoard,
   MAX_ATTACHMENT_BYTES,
   moveItem,
   moveTask,
   NotFound,
+  releaseItem,
   requestRework,
   StatusConflict,
+  stopRun,
   updateItem,
   updateTask,
   type Rule,
@@ -45,10 +48,19 @@ export interface AppDeps {
   runtime: RuntimeStorePort
   statuses: StatusMap
   rules: readonly Rule[]
+  holdLabel: string
   tokens: RunTokens
 }
 
-export function createApp({ db, storage, runtime, statuses, rules, tokens }: AppDeps): Hono {
+export function createApp({
+  db,
+  storage,
+  runtime,
+  statuses,
+  rules,
+  holdLabel,
+  tokens,
+}: AppDeps): Hono {
   const app = new Hono()
   app.onError((e, c) => {
     if (e instanceof InvalidInput) return c.json({ error: e.message }, 400)
@@ -66,6 +78,7 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
         runtime,
         { item: statuses.mapped('item'), task: statuses.mapped('task') },
         rules,
+        holdLabel,
       ),
     ),
   )
@@ -100,6 +113,15 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
       }),
     )
   })
+  app.post('/api/items/:ref/stop', async (c) =>
+    c.json(await stopRun({ storage, runtime }, holdLabel, c.req.param('ref'))),
+  )
+  app.put('/api/items/:ref/hold', async (c) =>
+    c.json(await holdItem({ storage, runtime }, holdLabel, c.req.param('ref'))),
+  )
+  app.delete('/api/items/:ref/hold', async (c) =>
+    c.json(await releaseItem(storage, holdLabel, c.req.param('ref'))),
+  )
   app.get('/api/items/:ref', async (c) =>
     c.json(await getItem(storage, runtime, c.req.param('ref'))),
   )
@@ -192,7 +214,7 @@ export function createApp({ db, storage, runtime, statuses, rules, tokens }: App
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ storage, runtime, statuses, rules }).connect(transport)
+    await createMcpServer({ storage, runtime, statuses, rules, holdLabel }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   // The facade for agents the engine started: only a live Run's token gets in.
