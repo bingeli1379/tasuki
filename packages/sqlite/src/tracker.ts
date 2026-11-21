@@ -70,6 +70,14 @@ export function createSqliteTracker(
     return toWorkUnit(ctx, row)
   }
 
+  // Synchronous from read to write, so nothing else in this process lands in between.
+  function setLabel(ref: string, label: string, on: boolean): WorkUnit {
+    const labels = get(ref).labels.filter((l) => l !== label)
+    if (on) labels.push(label)
+    db.prepare('UPDATE work_unit SET labels = ? WHERE ref = ?').run(JSON.stringify(labels), ref)
+    return get(ref)
+  }
+
   // One statement, so two creates cannot get the same number.
   function nextRef(): string {
     const row = db.prepare('UPDATE ref_counter SET last = last + 1 RETURNING last').get()
@@ -208,6 +216,12 @@ export function createSqliteTracker(
         db.exec('ROLLBACK')
         throw e
       }
+    },
+    async addLabel(ref, label) {
+      return setLabel(ref, label, true)
+    },
+    async removeLabel(ref, label) {
+      return setLabel(ref, label, false)
     },
     async comments(target) {
       get(target)
