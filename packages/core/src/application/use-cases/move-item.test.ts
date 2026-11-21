@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { storageStub } from '../../testing/storage-stub'
 import type { StoragePort } from '../ports/storage'
+import { StatusConflict } from '../status-conflict'
 import { moveItem } from './move-item'
+import { requestRework } from './request-rework'
 
 const recording = (): { storage: StoragePort; moves: string[][] } => {
   const moves: string[][] = []
@@ -54,5 +56,55 @@ describe('moveItem', () => {
       moveItem(storage, board, { ref: 'X-1', from: 'done', to: 'done' }),
     ).rejects.toThrow('X-1 is already in done')
     expect(moves).toEqual([])
+  })
+})
+
+describe('requestRework', () => {
+  const setup = (status = 'in-review') => {
+    const log: string[] = []
+    const item = {
+      ref: 'X-1',
+      kind: 'item' as const,
+      title: 't',
+      body: '',
+      status,
+      labels: [],
+      version: '1',
+    }
+    const storage = storageStub({
+      get: () => Promise.resolve(item),
+      addComment: (c) => (
+        log.push(`comment ${c.author} ${c.body}`),
+        Promise.resolve({ ...c, id: '1', createdAt: '' })
+      ),
+      transition: (ref, from, to) => (
+        log.push(`move ${from}>${to}`),
+        Promise.resolve({ ...item, status: to })
+      ),
+    })
+    return { storage, log }
+  }
+  const mapped = ['in-review', 'ready-to-rework', 'done']
+
+  it('leaves the feedback first, then sends the item back', async () => {
+    const { storage, log } = setup()
+    const moved = await requestRework(storage, mapped, {
+      ref: 'X-1',
+      from: 'in-review',
+      feedback: 'Wrong colour.',
+    })
+    expect(moved.status).toBe('ready-to-rework')
+    expect(log).toEqual(['comment human Wrong colour.', 'move in-review>ready-to-rework'])
+  })
+
+  it('refuses without feedback, and leaves no comment when the item already moved', async () => {
+    const { storage, log } = setup('done')
+    await expect(
+      requestRework(storage, mapped, { ref: 'X-1', from: 'in-review', feedback: ' ' }),
+    ).rejects.toThrow('feedback is empty')
+    await expect(
+      requestRework(storage, mapped, { ref: 'X-1', from: 'in-review', feedback: 'Wrong.' }),
+    ).rejects.toBeInstanceOf(StatusConflict)
+    expect(log).toEqual([])
   })
 })

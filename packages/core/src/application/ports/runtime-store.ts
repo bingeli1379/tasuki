@@ -26,4 +26,6 @@ export interface RuntimeStorePort {
   liveRuns(): Promise<Run[]>
   // Newest first.
   runsFor(target: Ref): Promise<Run[]>
+  // The newest Run of each target, where that Run ended in outcome.
+  latestRunsEndedIn(outcome: Outcome): Promise<Run[]>
 }
