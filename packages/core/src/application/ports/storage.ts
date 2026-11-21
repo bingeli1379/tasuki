@@ -77,4 +77,6 @@ export interface StoragePort {
   addAttachment(target: Ref, attachment: NewAttachment): Promise<Attachment>
   // Throws NotFound when the id is not an attachment of target.
   readAttachment(target: Ref, id: string): Promise<{ attachment: Attachment; data: Uint8Array }>
+  // Throws NotFound when the id is not an attachment of target. Does not touch the version.
+  deleteAttachment(target: Ref, id: string): Promise<void>
 }

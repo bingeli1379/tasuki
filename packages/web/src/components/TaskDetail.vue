@@ -261,8 +261,14 @@ const authorOf = (c: Comment): string =>
             </div>
             <p class="flex flex-wrap gap-x-3 text-xs text-muted">
               <span v-if="detail.task.origin">from {{ detail.task.origin }}</span>
-              <span v-if="detail.task.blockedBy.length > 0">
-                after {{ detail.task.blockedBy.map(taskTitle).join(', ') }}
+              <span v-if="detail.task.blockedBy.length > 0" class="flex items-center gap-1">
+                <UIcon name="i-lucide-corner-down-right" class="size-3.5 shrink-0" />
+                Waits for
+                {{
+                  detail.task.blockedBy
+                    .map((r) => (taskTitle(r) === r ? r : `${r} ${taskTitle(r)}`))
+                    .join(', ')
+                }}
               </span>
             </p>
             <!-- eslint-disable-next-line vue/no-v-html -- markdown-it with html disabled -->

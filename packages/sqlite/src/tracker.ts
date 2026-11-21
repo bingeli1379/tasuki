@@ -303,5 +303,11 @@ export function createSqliteTracker(
       if (row === undefined) throw new NotFound(`${target} has no attachment ${id}`)
       return { attachment: toAttachment(row), data: new Uint8Array(row['data'] as Uint8Array) }
     },
+    async deleteAttachment(target, id) {
+      const { changes } = db
+        .prepare('DELETE FROM attachment WHERE target = ? AND id = ?')
+        .run(target, Number(id))
+      if (changes === 0) throw new NotFound(`${target} has no attachment ${id}`)
+    },
   }
 }

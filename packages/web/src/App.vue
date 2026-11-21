@@ -295,17 +295,64 @@ function leave(e: DragEvent, status: string): void {
     over.value = undefined
 }
 
+// Same storage key and values as Nuxt UI's color-mode plugin (VueUse useDark), which reads
+// them on the next load.
+const SCHEME_KEY = 'vueuse-color-scheme'
+function initialDark(): boolean {
+  let stored: string | null = null
+  try {
+    stored = localStorage.getItem(SCHEME_KEY)
+  } catch {
+    // Storage blocked: follow the system.
+  }
+  if (stored === 'dark' || stored === 'light') return stored === 'dark'
+  return matchMedia('(prefers-color-scheme: dark)').matches
+}
+const dark = ref(initialDark())
+
+function toggleTheme(e: MouseEvent): void {
+  const apply = (): void => {
+    dark.value = !dark.value
+    document.documentElement.classList.toggle('dark', dark.value)
+    try {
+      localStorage.setItem(SCHEME_KEY, dark.value ? 'dark' : 'light')
+    } catch {
+      // Storage blocked: the switch lasts until the page reloads.
+    }
+  }
+  const root = document.documentElement.style
+  root.setProperty('--reveal-x', `${e.clientX}px`)
+  root.setProperty('--reveal-y', `${e.clientY}px`)
+  if (
+    typeof document.startViewTransition !== 'function' ||
+    matchMedia('(prefers-reduced-motion: reduce)').matches
+  )
+    apply()
+  else document.startViewTransition(apply)
+}
+
 onMounted(load)
 </script>
 
 <template>
   <UApp>
     <div class="flex min-h-screen flex-col bg-muted">
-      <header
-        class="flex items-center justify-between border-b border-default bg-default px-6 py-3"
-      >
-        <h1 class="text-lg font-semibold">Tasuki</h1>
+      <header class="flex items-center justify-between px-6 pt-5 pb-3">
+        <h1
+          class="flex items-center gap-3 text-2xl font-extrabold tracking-tight text-highlighted"
+          style="font-stretch: 78%"
+        >
+          <span aria-hidden="true" class="block h-6 w-2.5 -skew-x-[28deg] rounded-[3px] bg-sash" />
+          Tasuki
+        </h1>
         <span class="flex items-center gap-2">
+          <UButton
+            :icon="dark ? 'i-lucide-sun' : 'i-lucide-moon'"
+            :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
+            color="neutral"
+            variant="ghost"
+            @click="toggleTheme"
+          />
           <UButton
             v-if="paused"
             label="Resume"
@@ -315,6 +362,8 @@ onMounted(load)
           />
           <UDropdownMenu
             v-else
+            :content="{ align: 'end' }"
+            :ui="{ itemLeadingIcon: 'size-4' }"
             :items="[
               { label: 'Pause', onSelect: () => setPaused('pause') },
               {
@@ -375,7 +424,7 @@ onMounted(load)
         </span>
       </header>
 
-      <main class="flex flex-1 flex-col p-6">
+      <main class="flex flex-1 flex-col px-6 pt-2 pb-6">
         <UAlert v-if="error" color="error" variant="subtle" :title="error" class="mb-4" />
         <UAlert
           v-if="paused"
@@ -398,14 +447,16 @@ onMounted(load)
             v-for="column in columns"
             :key="column.status"
             :aria-labelledby="`column-${column.status}`"
-            class="flex w-72 shrink-0 flex-col gap-2 rounded-lg p-3 transition-colors"
-            :class="target === column.status ? 'bg-primary/10 ring-2 ring-primary' : 'bg-elevated'"
+            class="flex w-72 shrink-0 flex-col gap-2 rounded-2xl p-2.5 transition-[background-color,box-shadow] duration-200"
+            :class="target === column.status ? 'bg-primary/10 ring-2 ring-primary' : 'bg-(--lane)'"
             @dragenter.prevent="over = column.status"
             @dragleave="leave($event, column.status)"
             @dragover.prevent
             @drop.prevent="drop(column.status)"
           >
-            <h2 class="flex items-center justify-between px-1 text-sm font-medium">
+            <h2
+              class="flex items-center justify-between px-1.5 pt-1 pb-1 text-[15px] font-semibold"
+            >
               <span class="flex items-center gap-1.5">
                 <UTooltip v-if="column.turn" :text="TURN[column.turn].hint" :delay-duration="100">
                   <span role="img" :aria-label="TURN[column.turn].hint" class="flex cursor-help">
@@ -418,59 +469,68 @@ onMounted(load)
                 </UTooltip>
                 <span :id="`column-${column.status}`">{{ column.displayName }}</span>
               </span>
-              <UBadge :label="column.items.length" color="neutral" variant="subtle" size="sm" />
+              <span class="text-sm font-medium text-dimmed">{{ column.items.length }}</span>
             </h2>
-            <article
-              v-for="item in column.items"
-              :key="item.ref"
-              :aria-label="item.title"
-              :draggable="!pending.includes(item.ref)"
-              :class="{ 'opacity-60': pending.includes(item.ref) }"
-              @dragstart="dragging = item"
-              @dragend="((dragging = undefined), (over = undefined))"
-            >
-              <UCard :ui="{ root: 'relative', body: 'p-3 sm:p-3' }">
-                <div class="flex items-center justify-between">
-                  <p class="flex items-center gap-2 text-xs text-muted">
-                    <span>{{ item.ref }}</span>
-                    <UBadge
-                      v-if="running.includes(item.ref)"
-                      :label="stopping.includes(item.ref) ? 'Stopping' : 'Running'"
-                      :color="stopping.includes(item.ref) ? 'error' : 'primary'"
-                      variant="subtle"
-                      size="sm"
-                    />
-                    <UBadge
-                      v-if="item.labels.includes(holdLabel)"
-                      label="On hold"
-                      color="warning"
-                      variant="subtle"
-                      size="sm"
-                    />
-                    <UBadge
-                      v-if="tasks[item.ref]"
-                      :label="`${tasks[item.ref]?.done}/${tasks[item.ref]?.total} tasks`"
-                      color="neutral"
-                      variant="outline"
-                      size="sm"
-                    />
-                  </p>
-                </div>
-                <!-- Its ::after covers the whole card, so a click anywhere opens the item while
+            <TransitionGroup name="card" tag="div" class="flex flex-col gap-2">
+              <article
+                v-for="item in column.items"
+                :key="item.ref"
+                :aria-label="item.title"
+                :draggable="!pending.includes(item.ref)"
+                class="card-frame rounded-[calc(var(--radius-xl)+1.5px)] p-[1.5px] transition-colors duration-150"
+                :class="{
+                  'opacity-60': pending.includes(item.ref),
+                  'agent-ring': running.includes(item.ref),
+                  'agent-ring-stopping': stopping.includes(item.ref),
+                }"
+                @dragstart="dragging = item"
+                @dragend="((dragging = undefined), (over = undefined))"
+              >
+                <div
+                  class="relative rounded-xl bg-default p-3 shadow-[0_1px_2px_rgb(22_26_46/0.06)]"
+                >
+                  <div class="flex items-center justify-between">
+                    <p class="flex items-center gap-2 text-xs text-muted">
+                      <span class="font-medium text-dimmed">{{ item.ref }}</span>
+                      <UBadge
+                        v-if="running.includes(item.ref)"
+                        :label="stopping.includes(item.ref) ? 'Stopping' : 'Running'"
+                        :color="stopping.includes(item.ref) ? 'error' : 'primary'"
+                        variant="subtle"
+                        size="sm"
+                      />
+                      <UBadge
+                        v-if="item.labels.includes(holdLabel)"
+                        label="On hold"
+                        color="warning"
+                        variant="subtle"
+                        size="sm"
+                      />
+                      <UBadge
+                        v-if="tasks[item.ref]"
+                        :label="`${tasks[item.ref]?.done}/${tasks[item.ref]?.total} tasks`"
+                        color="neutral"
+                        variant="outline"
+                        size="sm"
+                      />
+                    </p>
+                  </div>
+                  <!-- Its ::after covers the whole card, so a click anywhere opens the item while
                      keyboard users still get one focusable button; moving without dragging is
                      in the item's own More menu. -->
-                <button
-                  type="button"
-                  class="cursor-pointer text-left font-medium after:absolute after:inset-0 after:rounded-lg hover:underline focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary"
-                  @click="openDetail(item)"
-                >
-                  {{ item.title }}
-                </button>
-                <p v-if="item.body" class="mt-1 line-clamp-3 text-sm text-toned">
-                  {{ previewText(item.body) }}
-                </p>
-              </UCard>
-            </article>
+                  <button
+                    type="button"
+                    class="mt-1 cursor-pointer text-left leading-snug font-semibold text-highlighted after:absolute after:inset-0 after:rounded-xl hover:text-primary focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary"
+                    @click="openDetail(item)"
+                  >
+                    {{ item.title }}
+                  </button>
+                  <p v-if="item.body" class="mt-1 line-clamp-3 text-sm text-muted">
+                    {{ previewText(item.body) }}
+                  </p>
+                </div>
+              </article>
+            </TransitionGroup>
             <div
               v-if="target === column.status"
               class="rounded-md border-2 border-dashed border-primary p-3 text-center text-sm text-primary"

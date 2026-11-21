@@ -237,6 +237,40 @@ describe('item detail', () => {
     }
   })
 
+  it('deletes an attachment once the body no longer shows it', async () => {
+    const app = appWith()
+    const item = await created(app)
+    const res = await upload(app, item.ref, new File([PNG], 'dot.png', { type: 'image/png' }))
+    const { id } = (await res.json()) as { id: string }
+    const patch = async (body: string, version: string): Promise<WorkUnit> =>
+      (await (
+        await app.request(`/api/items/${item.ref}`, {
+          method: 'PATCH',
+          ...json({ expectedVersion: version, body }),
+        })
+      ).json()) as WorkUnit
+    const remove = (): Promise<Response> | Response =>
+      app.request(`/api/items/${item.ref}/attachments/${id}`, { method: 'DELETE' })
+
+    const shown = await patch(`![dot.png](attachment:${id})`, item.version)
+    const refused = await remove()
+    expect(refused.status).toBe(400)
+    expect(await refused.json()).toEqual({
+      error: `${item.ref}'s body still shows dot.png; take it out of the body first`,
+    })
+
+    await patch('', shown.version)
+    expect((await remove()).status).toBe(200)
+    expect((await app.request(`/api/items/${item.ref}/attachments/${id}`)).status).toBe(404)
+    expect((await remove()).status).toBe(404)
+    const detail = (await (await app.request(`/api/items/${item.ref}`)).json()) as {
+      attachments: unknown[]
+      comments: { kind: string; body: string }[]
+    }
+    expect(detail.attachments).toEqual([])
+    expect(detail.comments).toMatchObject([{ kind: 'system', body: 'Deleted attachment dot.png.' }])
+  })
+
   it('a file over 10 MB is a 413', async () => {
     const app = appWith()
     const item = await created(app)
@@ -371,6 +405,7 @@ describe("MCP for the user's AI client", () => {
       'delete_task',
       'add_comment',
       'add_attachment',
+      'delete_attachment',
       'get_attachment',
     ])
   })
@@ -461,5 +496,14 @@ describe("MCP for the user's AI client", () => {
       arguments: { ref: item.ref, id: attachment.id },
     })
     expect(image.content).toMatchObject([{ type: 'image', mimeType: 'image/png' }])
+
+    await client.callTool({
+      name: 'delete_attachment',
+      arguments: { ref: item.ref, id: attachment.id },
+    })
+    const after = JSON.parse(
+      text(await client.callTool({ name: 'get_item', arguments: { ref: item.ref } })),
+    ) as { attachments: unknown[] }
+    expect(after.attachments).toEqual([])
   })
 })

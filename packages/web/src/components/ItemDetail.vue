@@ -61,6 +61,9 @@ const taskOpen = computed({
 })
 const toast = useToast()
 const bodyEditor = useTemplateRef('bodyEditor')
+const fileInput = useTemplateRef('fileInput')
+// The image attachment shown full size.
+const preview = ref<Attachment>()
 
 // Passed to UEditor once: a new object on each render makes it rebuild the editor and
 // register its plugins twice ("Adding different instances of a keyed plugin").
@@ -81,7 +84,7 @@ const stoppable = computed(() => {
 const more = computed(() => [
   {
     label: 'Move to',
-    icon: 'i-lucide-arrow-right',
+    icon: 'i-lucide-columns-3',
     children: props.columns
       .filter((c) => c.status !== item.value?.status)
       // Ready to Rework asks what to fix right here: a dialog of the board's own would sit
@@ -219,6 +222,30 @@ async function addComment(): Promise<void> {
   }
 }
 
+// The attachment asking whether it should really go: deleting it cannot be undone. Its error
+// shows by the list, where the person is looking, not at the top of the dialog.
+const confirmingAttachment = ref<string>()
+const removingAttachment = ref(false)
+const attachmentError = ref('')
+async function removeAttachment(a: Attachment): Promise<void> {
+  removingAttachment.value = true
+  try {
+    await call(
+      `/api/items/${encodeURIComponent(props.itemRef)}/attachments/${encodeURIComponent(a.id)}`,
+      { method: 'DELETE' },
+    )
+    edits++
+    confirmingAttachment.value = undefined
+    attachmentError.value = ''
+    // Read again: the deletion left a line among the comments.
+    await load()
+  } catch (e) {
+    attachmentError.value = messageOf(e)
+  } finally {
+    removingAttachment.value = false
+  }
+}
+
 async function upload(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const file = input.files?.[0]
@@ -330,6 +357,11 @@ async function decide(to: string): Promise<void> {
 const taskStatus = (status: string): string => TASK_STATUS_DISPLAY[status] ?? status
 const taskTitle = (ref: string): string =>
   detail.value?.tasks.find((t) => t.ref === ref)?.title ?? ref
+// A blocker by its ref and title, so two tasks with similar titles cannot be mixed up.
+const taskName = (ref: string): string => {
+  const title = taskTitle(ref)
+  return title === ref ? ref : `${ref} ${title}`
+}
 
 const isImage = (a: Attachment): boolean => a.mimeType.startsWith('image/')
 const size = (bytes: number): string =>
@@ -357,10 +389,26 @@ const authorOf = (c: Comment): string =>
     v-model:open="open"
     :title="item?.ref ?? itemRef"
     :description="item ? statusName(item.status) : 'Loading…'"
-    :ui="{ content: 'sm:max-w-5xl' }"
+    :ui="{ content: 'sm:max-w-5xl', header: 'py-3 sm:py-3 min-h-0', close: 'top-2 end-4' }"
   >
+    <!-- Ref and status on one quiet line; the item's own title below is the heading. -->
+    <template #title>
+      <span class="flex items-center gap-2 text-sm">
+        <span class="font-medium text-dimmed">{{ item?.ref ?? itemRef }}</span>
+        <UBadge
+          v-if="item"
+          :label="statusName(item.status)"
+          color="neutral"
+          variant="subtle"
+          size="sm"
+        />
+      </span>
+    </template>
+    <template #description>
+      <span class="sr-only">{{ item ? statusName(item.status) : 'Loading…' }}</span>
+    </template>
     <template #body>
-      <div class="flex flex-col gap-6">
+      <div class="flex flex-col gap-8">
         <UAlert v-if="error" color="error" variant="subtle" :title="error" />
         <UAlert
           v-if="confirmingDelete"
@@ -412,7 +460,11 @@ const authorOf = (c: Comment): string =>
                   :disabled="!detail"
                   @click="startEdit"
                 />
-                <UDropdownMenu :items="more">
+                <UDropdownMenu
+                  :items="more"
+                  :content="{ align: 'end' }"
+                  :ui="{ itemLeadingIcon: 'size-4' }"
+                >
                   <UButton
                     icon="i-lucide-ellipsis"
                     aria-label="More actions"
@@ -497,114 +549,257 @@ const authorOf = (c: Comment): string =>
         </p>
 
         <template v-if="detail">
-          <section aria-labelledby="attachments-heading" class="flex flex-col gap-2">
-            <div class="flex items-center justify-between">
-              <h3 id="attachments-heading" class="text-sm font-medium">Attachments</h3>
-              <label>
-                <span class="sr-only">Attach a file</span>
-                <input
-                  type="file"
-                  class="text-sm file:mr-2 file:rounded file:border-0 file:bg-elevated file:px-2 file:py-1"
-                  :disabled="uploading"
-                  @change="upload"
-                />
-              </label>
-            </div>
-            <p v-if="detail.attachments.length === 0" class="text-sm text-muted">None yet.</p>
-            <ul class="flex flex-col gap-1">
-              <li
-                v-for="a in detail.attachments"
-                :key="a.id"
-                class="flex items-center justify-between gap-2 text-sm"
-              >
-                <a
-                  :href="attachmentUrl(detail.item.ref, a.id)"
-                  target="_blank"
-                  class="truncate underline"
-                >
-                  {{ a.filename }}
-                </a>
-                <span class="flex shrink-0 items-center gap-2 text-muted">
-                  {{ size(a.size) }}
-                  <UButton
-                    v-if="editing && isImage(a)"
-                    :label="`Insert ${a.filename}`"
-                    size="xs"
-                    color="neutral"
-                    variant="outline"
-                    @click="insert(a)"
-                  />
-                </span>
-              </li>
-            </ul>
-          </section>
-
-          <section aria-labelledby="tasks-heading" class="flex flex-col gap-2">
-            <div class="flex items-center justify-between gap-2">
-              <h3 id="tasks-heading" class="text-sm font-medium">Tasks</h3>
-              <span v-if="detail.item.status === 'split-review'" class="flex gap-2">
-                <UButton
-                  label="Send back to Refining"
-                  color="neutral"
-                  variant="outline"
-                  size="sm"
-                  :disabled="moving"
-                  @click="decide('refining')"
-                />
-                <UButton
-                  label="Approve and start"
-                  size="sm"
-                  :loading="moving"
-                  :disabled="detail.tasks.length === 0"
-                  @click="decide('in-progress')"
-                />
-              </span>
-              <span v-else-if="detail.item.status === 'in-review'" class="flex gap-2">
-                <UButton
-                  label="Rework"
-                  color="neutral"
-                  variant="outline"
-                  size="sm"
-                  :disabled="moving"
-                  @click="reworking = true"
-                />
-                <UButton
-                  label="Accept as done"
-                  size="sm"
-                  :loading="moving"
-                  @click="decide('done')"
-                />
-              </span>
-            </div>
-            <p v-if="detail.tasks.length === 0" class="text-sm text-muted">No tasks yet.</p>
-            <ol class="flex flex-col">
-              <li v-for="t in detail.tasks" :key="t.ref" :aria-label="`Task ${t.title}`">
-                <!-- The whole row opens the task, so the status lines up with what it belongs to. -->
-                <button
-                  type="button"
-                  class="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto_6.5rem] items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
-                  @click="openTask = t.ref"
-                >
-                  <span class="flex min-w-0 flex-col">
-                    <span class="truncate">
-                      <span class="text-muted">{{ t.ref }}</span> {{ t.title }}
-                    </span>
-                    <span v-if="t.blockedBy.length > 0" class="truncate text-xs text-muted">
-                      after {{ t.blockedBy.map(taskTitle).join(', ') }}
-                    </span>
+          <!-- Work on the left, what came with it on the right, so a row never stretches across
+               the whole dialog. -->
+          <div class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_16rem]">
+            <div class="flex min-w-0 flex-col gap-8">
+              <section aria-labelledby="tasks-heading" class="flex flex-col gap-2">
+                <div class="flex items-center justify-between gap-2">
+                  <h3 id="tasks-heading" class="text-sm font-semibold text-highlighted">Tasks</h3>
+                  <span v-if="detail.item.status === 'split-review'" class="flex gap-2">
+                    <UButton
+                      label="Send back to Refining"
+                      color="neutral"
+                      variant="outline"
+                      size="sm"
+                      :disabled="moving"
+                      @click="decide('refining')"
+                    />
+                    <UButton
+                      label="Approve and start"
+                      size="sm"
+                      :loading="moving"
+                      :disabled="detail.tasks.length === 0"
+                      @click="decide('in-progress')"
+                    />
                   </span>
-                  <span class="text-xs text-muted">{{ t.origin }}</span>
-                  <UBadge
-                    :label="taskStatus(t.status)"
-                    :color="TASK_COLOR[t.status] ?? 'neutral'"
-                    variant="subtle"
-                    size="sm"
-                    class="justify-self-end"
+                  <span v-else-if="detail.item.status === 'in-review'" class="flex gap-2">
+                    <UButton
+                      label="Rework"
+                      color="neutral"
+                      variant="outline"
+                      size="sm"
+                      :disabled="moving"
+                      @click="reworking = true"
+                    />
+                    <UButton
+                      label="Accept as done"
+                      size="sm"
+                      :loading="moving"
+                      @click="decide('done')"
+                    />
+                  </span>
+                </div>
+                <p v-if="detail.tasks.length === 0" class="text-sm text-muted">No tasks yet.</p>
+                <ol class="flex flex-col">
+                  <li v-for="t in detail.tasks" :key="t.ref" :aria-label="`Task ${t.title}`">
+                    <!-- The whole row opens the task, so the status lines up with what it belongs to. -->
+                    <button
+                      type="button"
+                      class="grid w-full cursor-pointer grid-cols-[minmax(0,1fr)_auto_6.5rem] items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm hover:bg-elevated focus-visible:outline-2 focus-visible:outline-primary"
+                      @click="openTask = t.ref"
+                    >
+                      <span class="flex min-w-0 flex-col">
+                        <span class="truncate">
+                          <span class="text-muted">{{ t.ref }}</span> {{ t.title }}
+                        </span>
+                        <span
+                          v-if="t.blockedBy.length > 0"
+                          class="flex items-center gap-1 truncate text-xs text-muted"
+                        >
+                          <UIcon name="i-lucide-corner-down-right" class="size-3.5 shrink-0" />
+                          Waits for {{ t.blockedBy.map(taskName).join(', ') }}
+                        </span>
+                      </span>
+                      <span class="text-xs text-muted">{{ t.origin }}</span>
+                      <UBadge
+                        :label="taskStatus(t.status)"
+                        :color="TASK_COLOR[t.status] ?? 'neutral'"
+                        variant="subtle"
+                        size="sm"
+                        class="justify-self-end"
+                      />
+                    </button>
+                  </li>
+                </ol>
+              </section>
+
+              <section aria-labelledby="comments-heading" class="flex flex-col gap-3">
+                <h3 id="comments-heading" class="text-sm font-semibold text-highlighted">
+                  Comments
+                </h3>
+                <p v-if="comments.length === 0" class="text-sm text-muted">No comments yet.</p>
+                <article
+                  v-for="c in comments"
+                  :key="c.id"
+                  :aria-label="`Comment by ${authorOf(c)}`"
+                  class="rounded-md border border-default p-3"
+                >
+                  <p class="mb-1 flex items-center gap-2 text-xs text-muted">
+                    <span class="font-medium text-default">{{ authorOf(c) }}</span>
+                    <UBadge v-if="c.kind !== 'note'" :label="c.kind" size="sm" variant="subtle" />
+                    <time :datetime="c.createdAt">{{
+                      new Date(c.createdAt).toLocaleString()
+                    }}</time>
+                  </p>
+                  <!-- eslint-disable-next-line vue/no-v-html -- markdown-it with html disabled -->
+                  <div class="markdown" v-html="c.html" />
+                </article>
+                <form class="flex flex-col gap-2" @submit.prevent="addComment">
+                  <UFormField label="Add a comment">
+                    <UTextarea v-model="commentDraft" :rows="3" autoresize class="w-full" />
+                  </UFormField>
+                  <UButton
+                    type="submit"
+                    label="Comment"
+                    :loading="commenting"
+                    :disabled="commentDraft.trim() === ''"
+                    class="self-end"
                   />
-                </button>
-              </li>
-            </ol>
-          </section>
+                </form>
+              </section>
+            </div>
+            <aside
+              class="order-first flex min-w-0 flex-col gap-8 lg:order-none lg:border-l lg:border-default lg:pl-6"
+            >
+              <section aria-labelledby="attachments-heading" class="flex flex-col gap-2">
+                <div class="flex items-center justify-between">
+                  <h3 id="attachments-heading" class="text-sm font-semibold text-highlighted">
+                    Attachments
+                  </h3>
+                  <!-- The browser's own file input reads "Choose file, no file chosen" in the
+                       system language; a button opens it instead. -->
+                  <input
+                    ref="fileInput"
+                    type="file"
+                    aria-label="Attach a file"
+                    tabindex="-1"
+                    class="sr-only"
+                    :disabled="uploading"
+                    @change="upload"
+                  />
+                  <UButton
+                    label="Attach"
+                    icon="i-lucide-paperclip"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    :loading="uploading"
+                    @click="fileInput?.click()"
+                  />
+                </div>
+                <p v-if="detail.attachments.length === 0" class="text-sm text-muted">None yet.</p>
+                <ul class="flex flex-col gap-2">
+                  <li
+                    v-for="a in detail.attachments"
+                    :key="a.id"
+                    class="flex min-w-0 items-center gap-3 text-sm"
+                  >
+                    <!-- Every attachment the same row; an image's square is its thumbnail. -->
+                    <button
+                      v-if="isImage(a)"
+                      type="button"
+                      :aria-label="`Preview ${a.filename}`"
+                      class="size-11 shrink-0 cursor-zoom-in overflow-hidden rounded-md bg-elevated ring-1 ring-(--ui-border-muted) focus-visible:outline-2 focus-visible:outline-primary"
+                      @click="preview = a"
+                    >
+                      <img
+                        :src="attachmentUrl(detail.item.ref, a.id)"
+                        alt=""
+                        loading="lazy"
+                        class="size-full object-cover"
+                      />
+                    </button>
+                    <span
+                      v-else
+                      class="flex size-11 shrink-0 items-center justify-center rounded-md bg-elevated text-muted"
+                    >
+                      <UIcon name="i-lucide-file" class="size-5" />
+                    </span>
+                    <span class="flex min-w-0 flex-col">
+                      <a
+                        :href="attachmentUrl(detail.item.ref, a.id)"
+                        target="_blank"
+                        class="truncate hover:underline"
+                      >
+                        {{ a.filename }}
+                      </a>
+                      <span class="text-xs text-muted">{{ size(a.size) }}</span>
+                    </span>
+                    <span class="ml-auto flex shrink-0 items-center gap-1">
+                      <UButton
+                        v-if="editing && isImage(a)"
+                        label="Insert"
+                        :aria-label="`Insert ${a.filename}`"
+                        size="xs"
+                        color="neutral"
+                        variant="outline"
+                        @click="insert(a)"
+                      />
+                      <template v-if="confirmingAttachment === a.id">
+                        <UButton
+                          label="Keep"
+                          size="xs"
+                          color="neutral"
+                          variant="ghost"
+                          @click="confirmingAttachment = undefined"
+                        />
+                        <UButton
+                          label="Delete"
+                          :aria-label="`Delete ${a.filename} for good`"
+                          size="xs"
+                          color="error"
+                          :loading="removingAttachment"
+                          @click="removeAttachment(a)"
+                        />
+                      </template>
+                      <UButton
+                        v-else
+                        icon="i-lucide-trash-2"
+                        :aria-label="`Delete ${a.filename}`"
+                        size="xs"
+                        color="neutral"
+                        variant="ghost"
+                        class="text-dimmed hover:text-error"
+                        @click="((confirmingAttachment = a.id), (attachmentError = ''))"
+                      />
+                    </span>
+                  </li>
+                </ul>
+                <p v-if="attachmentError" role="alert" class="text-sm text-error">
+                  {{ attachmentError }}
+                </p>
+              </section>
+
+              <section aria-labelledby="runs-heading" class="flex flex-col gap-2">
+                <h3 id="runs-heading" class="text-sm font-semibold text-highlighted">Runs</h3>
+                <p v-if="detail.runs.length === 0" class="text-sm text-muted">
+                  No agent has worked on it.
+                </p>
+                <ul class="flex flex-col gap-2">
+                  <li
+                    v-for="r in detail.runs"
+                    :key="r.id"
+                    :aria-label="`Run ${r.rule} attempt ${r.attempt}`"
+                    class="flex flex-col gap-0.5 text-sm"
+                  >
+                    <span class="flex items-center gap-2">
+                      <span>{{ r.rule }}, attempt {{ r.attempt }}</span>
+                      <UBadge
+                        :label="r.outcome ?? (r.cancelMode === undefined ? 'running' : 'stopping')"
+                        :color="outcomeColor(r)"
+                        variant="subtle"
+                        size="sm"
+                      />
+                    </span>
+                    <time :datetime="r.startedAt" class="text-xs text-muted">
+                      {{ new Date(r.startedAt).toLocaleString() }}
+                    </time>
+                  </li>
+                </ul>
+              </section>
+            </aside>
+          </div>
 
           <TaskDetail
             v-if="openTask"
@@ -615,62 +810,21 @@ const authorOf = (c: Comment): string =>
             @changed="load"
           />
 
-          <section aria-labelledby="runs-heading" class="flex flex-col gap-2">
-            <h3 id="runs-heading" class="text-sm font-medium">Runs</h3>
-            <p v-if="detail.runs.length === 0" class="text-sm text-muted">
-              No agent has worked on it.
-            </p>
-            <ul class="flex flex-col gap-1">
-              <li
-                v-for="r in detail.runs"
-                :key="r.id"
-                :aria-label="`Run ${r.rule} attempt ${r.attempt}`"
-                class="flex items-center justify-between gap-2 text-sm"
-              >
-                <span>{{ r.rule }} · attempt {{ r.attempt }}</span>
-                <span class="flex shrink-0 items-center gap-2 text-muted">
-                  <time :datetime="r.startedAt">{{ new Date(r.startedAt).toLocaleString() }}</time>
-                  <UBadge
-                    :label="r.outcome ?? (r.cancelMode === undefined ? 'running' : 'stopping')"
-                    :color="outcomeColor(r)"
-                    variant="subtle"
-                    size="sm"
-                  />
-                </span>
-              </li>
-            </ul>
-          </section>
-
-          <section aria-labelledby="comments-heading" class="flex flex-col gap-3">
-            <h3 id="comments-heading" class="text-sm font-medium">Comments</h3>
-            <p v-if="comments.length === 0" class="text-sm text-muted">No comments yet.</p>
-            <article
-              v-for="c in comments"
-              :key="c.id"
-              :aria-label="`Comment by ${authorOf(c)}`"
-              class="rounded-md border border-default p-3"
-            >
-              <p class="mb-1 flex items-center gap-2 text-xs text-muted">
-                <span class="font-medium text-default">{{ authorOf(c) }}</span>
-                <UBadge v-if="c.kind !== 'note'" :label="c.kind" size="sm" variant="subtle" />
-                <time :datetime="c.createdAt">{{ new Date(c.createdAt).toLocaleString() }}</time>
-              </p>
-              <!-- eslint-disable-next-line vue/no-v-html -- markdown-it with html disabled -->
-              <div class="markdown" v-html="c.html" />
-            </article>
-            <form class="flex flex-col gap-2" @submit.prevent="addComment">
-              <UFormField label="Add a comment">
-                <UTextarea v-model="commentDraft" :rows="3" autoresize class="w-full" />
-              </UFormField>
-              <UButton
-                type="submit"
-                label="Comment"
-                :loading="commenting"
-                :disabled="commentDraft.trim() === ''"
-                class="self-end"
+          <UModal
+            :open="preview !== undefined"
+            :title="preview?.filename ?? ''"
+            :ui="{ content: 'sm:max-w-4xl' }"
+            @update:open="(v) => !v && (preview = undefined)"
+          >
+            <template #body>
+              <img
+                v-if="preview"
+                :src="attachmentUrl(detail.item.ref, preview.id)"
+                :alt="preview.filename"
+                class="mx-auto max-h-[75vh] rounded-lg object-contain"
               />
-            </form>
-          </section>
+            </template>
+          </UModal>
         </template>
       </div>
     </template>

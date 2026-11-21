@@ -5,8 +5,10 @@ import { runtimeStub } from '../../testing/runtime-stub'
 import { storageStub } from '../../testing/storage-stub'
 import { NotFound } from '../not-found'
 import type { ItemPatch, NewAttachment, NewComment } from '../ports/storage'
+import type { Attachment } from '../../domain/attachment'
 import { addAttachment } from './add-attachment'
 import { addComment } from './add-comment'
+import { deleteAttachment } from './delete-attachment'
 import { getItem } from './get-item'
 import { updateItem } from './update-item'
 
@@ -162,5 +164,58 @@ describe('addAttachment', () => {
       }),
     ).rejects.toThrow('larger than 10 MB')
     expect(added).toEqual([])
+  })
+})
+
+describe('deleteAttachment', () => {
+  const dot: Attachment = {
+    id: '1',
+    target: 'X-1',
+    filename: 'dot.png',
+    mimeType: 'image/png',
+    size: 1,
+    createdAt: '2026-11-21T00:00:00.000Z',
+  }
+  function setup(body: string) {
+    const deleted: string[] = []
+    const logged: NewComment[] = []
+    const storage = storageStub({
+      get: () => Promise.resolve({ ...item, body }),
+      attachments: () => Promise.resolve([dot]),
+      deleteAttachment: (_ref, id) => {
+        deleted.push(id)
+        return Promise.resolve()
+      },
+      addComment: (c) => {
+        logged.push(c)
+        return Promise.resolve({ ...c, id: 'c', createdAt: '' })
+      },
+    })
+    return { storage, deleted, logged }
+  }
+
+  it('deletes it and leaves a line saying so', async () => {
+    // attachment:12 is another file, not this one.
+    const t = setup('see ![other](attachment:12)')
+    await deleteAttachment(t.storage, 'X-1', '1')
+    expect(t.deleted).toEqual(['1'])
+    expect(t.logged).toEqual([
+      { target: 'X-1', author: 'human', kind: 'system', body: 'Deleted attachment dot.png.' },
+    ])
+  })
+
+  it('refuses while the body still shows it, so the body never has a broken image', async () => {
+    const t = setup('before\n\n![dot.png](attachment:1)\n\nafter')
+    await expect(deleteAttachment(t.storage, 'X-1', '1')).rejects.toThrow(
+      "X-1's body still shows dot.png; take it out of the body first",
+    )
+    expect(t.deleted).toEqual([])
+    expect(t.logged).toEqual([])
+  })
+
+  it('is NotFound for an id the unit does not have', async () => {
+    const t = setup('')
+    await expect(deleteAttachment(t.storage, 'X-1', '9')).rejects.toBeInstanceOf(NotFound)
+    expect(t.deleted).toEqual([])
   })
 })

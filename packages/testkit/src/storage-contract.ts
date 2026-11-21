@@ -292,6 +292,34 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       )
     })
 
+    it('a deleted attachment is gone, and only its own unit can delete it', async () => {
+      const owner = await newItem('attachment to delete')
+      const other = await newItem('attachment bystander')
+      const kept = await fixture.storage.addAttachment(owner.ref, {
+        filename: 'keep.png',
+        mimeType: 'image/png',
+        data: PNG,
+      })
+      const gone = await fixture.storage.addAttachment(owner.ref, {
+        filename: 'gone.png',
+        mimeType: 'image/png',
+        data: PNG,
+      })
+      await expect(fixture.storage.deleteAttachment(other.ref, gone.id)).rejects.toBeInstanceOf(
+        NotFound,
+      )
+      const before = (await fixture.storage.get(owner.ref)).version
+      await fixture.storage.deleteAttachment(owner.ref, gone.id)
+      expect(await fixture.storage.attachments(owner.ref)).toEqual([kept])
+      await expect(fixture.storage.readAttachment(owner.ref, gone.id)).rejects.toBeInstanceOf(
+        NotFound,
+      )
+      await expect(fixture.storage.deleteAttachment(owner.ref, gone.id)).rejects.toBeInstanceOf(
+        NotFound,
+      )
+      expect((await fixture.storage.get(owner.ref)).version).toBe(before)
+    })
+
     it('a body embedding its own attachment round-trips unchanged', async () => {
       const item = await newItem('embedded image')
       const added = await fixture.storage.addAttachment(item.ref, {

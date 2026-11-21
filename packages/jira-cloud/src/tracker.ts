@@ -505,5 +505,13 @@ export function createJiraTracker(
         data: new Uint8Array(await res.arrayBuffer()),
       }
     },
+
+    async deleteAttachment(target, id) {
+      const issue = await getUnit(target)
+      // The attachment API takes any id, so check it belongs to this issue first.
+      if (!issue.fields.attachment.some((a) => String(a.id) === id))
+        throw new NotFound(`${target} has no attachment ${id}`)
+      await jira('DELETE', `/attachment/${id}`)
+    },
   }
 }

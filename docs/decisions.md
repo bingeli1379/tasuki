@@ -655,3 +655,27 @@
 - 取代：D68 寫死的 `AWAITING_PERSON` 清單改成每個 status 的 `waitsFor`。D51 的「看板順序照 state-machine.md」改成照使用者列的順序。D37 第 3 點的 `on.failed`、`on.max_attempts` 改成 `outcomes` 底下的同名結果，預設仍是 `failure` 角色那一站。state-machine.md 那十站從定案改成預設流程，等 W1、W2 做完時一併改寫它與 config-and-rules.md。
 - 重新檢視：角色不夠用時（又有程式需要點名某一站）；store 契約大到第三方寫不動時；共用部署需要多個團隊各自一套流程時（現在一個 engine 一套）。
 
+## D79 看板的外觀：靛藍、亮暗切換、agent 在跑的卡片有繞圈的光
+
+- 背景：作者覺得畫面太制式，像套版網站。要有質感、亮暗模式能切換、帶一點動效。
+- 決定：
+  - 配色：白天是偏冷的紙色加靛藍，晚上是靛藍夜色，token 寫在 `web/src/assets/main.css`，蓋過 Nuxt UI 的 `--ui-*` 變數。黃色只留給 logo 那一撇（襷，接力賽斜掛的帶子），favicon 用同一個形狀。
+  - 字型：Bricolage Grotesque，`@fontsource-variable` 的 `standard.css`（粗細與寬度兩軸），打包進 bundle。
+  - 亮暗切換：開 Nuxt UI 的 `colorMode`（VueUse `useDark`），按鈕自己寫，讀寫同一個 localStorage key `vueuse-color-scheme`，切換時用 View Transition 從按鈕的位置圓形展開。
+  - agent 在跑的卡片：卡片外面一直有一圈 1.5px 的框，墊在卡片後面，所以圓角跟直邊一樣粗。agent 在跑時框上有一段靛藍光繞圈，三秒一圈；Stopping 時變灰。作者在 demo 上比過條紋、底線、掃光、呼吸與五種顏色後選的。條紋太吵、又蓋到字，左邊加一道色邊會跟外框打架。
+  - 卡片移到新欄時輕輕落下（`TransitionGroup`）。系統開了減少動態時，三種動效都關掉，跑中的卡片改成靜止的靛藍框。
+  - 詳情：標題列縮成一行（ref 加 status 標籤），下面分兩欄，左邊 Tasks 與 Comments，右邊附件與 Runs，窄螢幕時右欄排到上面。附件每個都是同一種列，圖片是縮圖，點了在同一頁放大。原生的檔案選擇器藏起來，換成按鈕，因為它會照系統語言顯示中文。依賴寫成 `Waits for TSK-5 Prepare`，帶 ref。下拉選單貼齊按鈕右邊。
+- 重新檢視：W4 的設定頁、S9 的登入頁做出來時，照同一套 token；繞圈的光如果在很多張卡同時跑時太吵，改成只有滑鼠移上去才繞。
+
+## D80 刪除附件，body 還在用就擋下來
+
+- 背景：S3 只做了新增與讀取附件，作者試用 D79 的新畫面時發現傳錯檔刪不掉。
+- 決定：
+  - `StoragePort` 加 `deleteAttachment(target, id)`，id 不屬於 target 時丟 `NotFound`，不動 version。sqlite 刪那一列；Jira 先確認附件掛在這張 issue 上（`DELETE /attachment/{id}` 收任何 id），再刪。契約測試加一條，KAN 上實測過。
+  - use case `deleteAttachment`：body 裡還有 `](attachment:<id>)` 時拒絕（`InvalidInput`，REST 400），訊息說是哪個檔案，請人先從 body 拿掉。刪掉後留一則人的 `system` comment「Deleted attachment x.png.」（D74 的人的操作紀錄），因為刪了就收不回來。
+  - 看板與使用者 MCP 走同一個 use case（D57）：`DELETE /api/items/:ref/attachments/:id`、`delete_attachment`。
+  - 畫面：附件那一列有垃圾桶，點了先問（Keep / Delete），錯誤顯示在附件清單下面，不在詳情最上面。
+- 沒選的：照刪留下破圖（人不知道 body 為什麼壞了）；刪附件時一起把 body 裡的引用拿掉（偷改人寫的內容）。作者讓小夏挑，選了擋下來。
+- 已知限制：只檢查附件所屬那張 unit 的 body。comment 的 markdown 也會把 `attachment:<id>` 畫成圖，但畫面上沒有插入附件到 comment 的方法，所以不檢查。
+- 重新檢視：comment 能插入附件時，檢查要擴大到 comment。
+
