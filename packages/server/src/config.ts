@@ -140,7 +140,8 @@ function expandEnv(value: unknown, path: string): unknown {
 
 export function loadConfig(path: string): Config {
   const file = resolve(path)
-  if (!existsSync(file)) throw new Error(`config file not found: ${file}`)
+  if (!existsSync(file))
+    throw new Error(`config file not found: ${file}. Run tasuki init there, or pass --config`)
   const configDir = dirname(file)
   // Variables already in the environment win over .env (D49).
   const envFile = join(configDir, '.env')

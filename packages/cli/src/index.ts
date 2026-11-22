@@ -2,11 +2,12 @@
 import type { Clock } from '@tasuki/core'
 import { pauseCommand, resumeCommand, runDoctor, startEngine } from '@tasuki/server'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { parseArgs } from 'node:util'
+import { init } from './init'
 
 const clock: Clock = { now: () => new Date() }
-const COMMANDS = ['start', 'doctor', 'pause', 'resume']
+const COMMANDS = ['init', 'start', 'doctor', 'pause', 'resume']
 
 try {
   const { values, positionals } = parseArgs({
@@ -19,6 +20,7 @@ try {
   const command = positionals[0] ?? 'start'
   if (!COMMANDS.includes(command))
     throw new Error(`unknown command ${command}: ${COMMANDS.join(', ')}`)
+  if (command === 'init') await init(resolve(values.config))
   if (command === 'doctor') process.exit(await runDoctor(values.config, clock))
   if (command === 'pause') await pauseCommand(values.config, clock, values.kill)
   if (command === 'resume') await resumeCommand(values.config, clock)
