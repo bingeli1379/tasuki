@@ -7,21 +7,19 @@ export interface Station {
   // Set when the station waits for a person. Whether the engine handles it comes from the
   // rules, never from here: a station marked for the engine with no rule on it would lie.
   handledBy?: 'person'
-  // What a person can conclude here: button label -> the station the item goes to.
-  outcomes: Readonly<Record<string, string>>
+  // Where a person can send the item from here, one button each, the last the main one. The
+  // board labels a button with the station it goes to (D82, D87).
+  outcomes: readonly string[]
 }
 
 // The stations code has a use for, by what it uses them for rather than by name.
 export interface Roles {
   // New items start here.
   entry: string
-  // Where the board ends.
-  done: string
-  // Where a rule's failed and max_attempts go unless it says otherwise.
+  // Where a rule's failed, needs_input and max_attempts go unless it says otherwise.
   failure: string
-  // The only station where a person may edit and delete tasks (D70).
-  taskReview?: string
-  // Moving an item here asks what to rework first (D75).
+  // Not set by hand: the station the rework rule watches (D86). Moving an item here asks
+  // what to rework first, since that rule's agent works from it (D75).
   rework?: string
 }
 
@@ -32,35 +30,29 @@ export interface Workflow {
 
 export const DEFAULT_WORKFLOW: Workflow = {
   statuses: [
-    { id: 'refining', name: 'Refining', outcomes: {} },
-    { id: 'ready-to-split', name: 'Ready to Split', outcomes: {} },
-    { id: 'splitting', name: 'Splitting', outcomes: {} },
-    { id: 'needs-answers', name: 'Needs Answers', handledBy: 'person', outcomes: {} },
+    { id: 'refining', name: 'Refining', outcomes: [] },
+    { id: 'ready-to-split', name: 'Ready to Split', outcomes: [] },
+    { id: 'splitting', name: 'Splitting', outcomes: [] },
+    { id: 'needs-answers', name: 'Needs Answers', handledBy: 'person', outcomes: [] },
     {
       id: 'split-review',
       name: 'Split Review',
       handledBy: 'person',
-      outcomes: { '→ Refining': 'refining', '→ In Progress': 'in-progress' },
+      outcomes: ['refining', 'in-progress'],
     },
-    { id: 'in-progress', name: 'In Progress', outcomes: {} },
+    { id: 'in-progress', name: 'In Progress', outcomes: [] },
     {
       id: 'in-review',
       name: 'In Review',
       handledBy: 'person',
-      outcomes: { '→ Ready to Rework': 'ready-to-rework', '→ Done': 'done' },
+      outcomes: ['ready-to-rework', 'done'],
     },
-    { id: 'ready-to-rework', name: 'Ready to Rework', outcomes: {} },
+    { id: 'ready-to-rework', name: 'Ready to Rework', outcomes: [] },
     // Auto-resume moves it on once a person has done the manual tasks.
-    { id: 'blocked', name: 'Blocked', handledBy: 'person', outcomes: {} },
-    { id: 'done', name: 'Done', outcomes: {} },
+    { id: 'blocked', name: 'Blocked', handledBy: 'person', outcomes: [] },
+    { id: 'done', name: 'Done', outcomes: [] },
   ],
-  roles: {
-    entry: 'refining',
-    done: 'done',
-    failure: 'blocked',
-    taskReview: 'split-review',
-    rework: 'ready-to-rework',
-  },
+  roles: { entry: 'refining', failure: 'blocked' },
 }
 
 // How a status reads in a comment: its display name in bold, so a status never blends into

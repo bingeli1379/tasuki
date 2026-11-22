@@ -15,9 +15,8 @@ import { TASK_COLOR } from '../task-status'
 
 const props = defineProps<{
   taskRef: string
-  // Tasks are edited and deleted only while the item is in the taskReview status.
-  itemStatus: string
-  taskReview: string | undefined
+  // Tasks are edited and deleted only while no agent works on the item (D86).
+  agentWorking: boolean
   taskTitle: (ref: string) => string
 }>()
 // The item detail reads its task list again after any change made here.
@@ -39,9 +38,6 @@ const editorUi = {
   content: 'markdown [&_.ProseMirror]:min-h-[30vh] [&_.ProseMirror]:px-3 [&_.ProseMirror]:py-2',
 }
 
-const editable = computed(
-  () => props.taskReview !== undefined && props.itemStatus === props.taskReview,
-)
 const body = computed(() =>
   detail.value ? renderMarkdown(detail.value.task.body, detail.value.task.ref) : '',
 )
@@ -246,23 +242,26 @@ const authorOf = (c: Comment): string =>
                   :disabled="busy"
                   @click="move(m.to)"
                 />
-                <UButton
-                  v-if="editable"
-                  label="Edit"
-                  color="neutral"
-                  variant="outline"
-                  size="sm"
-                  @click="startEdit"
-                />
-                <UButton
-                  v-if="editable"
-                  label="Delete task"
-                  color="error"
-                  variant="outline"
-                  size="sm"
-                  :disabled="busy"
-                  @click="confirmingDelete = true"
-                />
+                <UTooltip text="Stop the agent first" :disabled="!agentWorking">
+                  <UButton
+                    label="Edit"
+                    color="neutral"
+                    variant="outline"
+                    size="sm"
+                    :disabled="agentWorking"
+                    @click="startEdit"
+                  />
+                </UTooltip>
+                <UTooltip text="Stop the agent first" :disabled="!agentWorking">
+                  <UButton
+                    label="Delete task"
+                    color="error"
+                    variant="outline"
+                    size="sm"
+                    :disabled="busy || agentWorking"
+                    @click="confirmingDelete = true"
+                  />
+                </UTooltip>
               </span>
             </div>
             <p class="flex flex-wrap gap-x-3 text-xs text-muted">

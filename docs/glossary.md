@@ -10,9 +10,9 @@
 | ref | tracker 內的 opaque key，例如 `PROJ-123`。domain 不解析它的格式。 |
 | status | 邏輯名（kebab-case）。config 的 `workflow` 把它對到 tracker 的 key（每站的 `key`，task 的 `taskStatuses`）。 |
 | workflow | config 的 `workflow`：item 的 status 清單（順序就是看板的欄）、角色、task status 的對照。省略時是 state-machine.md 的預設流程（D81）。 |
-| role | 程式需要點名某一站時認的用途，由 `workflow.roles` 指定：`entry`（新 item 從這裡開始）、`done`、`failure`（規則失敗的預設去處）、`taskReview`（只有這站能改 task）、`rework`（送進來要先寫改什麼）。 |
+| role | 程式需要點名某一站時認的用途，由 `workflow.roles` 指定：`entry`（新 item 從這裡開始）、`failure`（規則失敗的預設去處）。看板打回時要先寫改什麼的那站不是角色，是 rework 規則盯的那站（D86）。 |
 | handledBy | 一站誰處理：`engine`（有規則 watch，從規則算）或 `person`（config 寫的）。看板分別標雷達與眼睛。 |
-| outcomes（站上的） | 人在這站能下的結論：按鈕字到下一站。跟規則上給 agent 的 `outcomes` 同形（D84）。 |
+| outcomes（站上的） | 人在這站能把 item 送去哪些站，一站一顆按鈕，最後一個是主按鈕。按鈕字是「→ 目標站的顯示名」，不寫在 config（D87）。規則上給 agent 的 `outcomes` 是結果名到站的 map（D84）。 |
 | logical name / display name | 邏輯名是 config 與程式用的 key（`ready-to-split`），顯示名是 UI 用的 Title Case（`Ready to Split`）。 |
 | manual task | status 為 `manual` 的 task，等人做。 |
 | attachment | item 上的附件。body 用 `![說明](attachment:<id>)` 引用。 |
@@ -21,7 +21,7 @@
 | origin | task 是誰建立的，`refine`、`splitter`、`human` 三種。 |
 | hold | item 上的 label（名稱可設定）。貼上後 AI 不碰這張 item。 |
 | blocked | item 的 status，預設流程裡 `failure` 角色那站，系統發現卡住了。跟 hold 不同，hold 是人叫 AI 別碰。 |
-| split-review | item 的 status，預設流程裡 `taskReview` 角色那站，拆完 task 之後等人檢查的關卡。 |
+| split-review | item 的 status，預設流程裡拆完 task 之後等人檢查的關卡。 |
 | gate | 規則之間需要人放行的點。目前只有 split-review，可在 config 裡略過。 |
 
 ## Engine

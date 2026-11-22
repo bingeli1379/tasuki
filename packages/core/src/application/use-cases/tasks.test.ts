@@ -31,8 +31,8 @@ const run: Run = {
 }
 
 const workflow = (...stations: (Partial<Station> & { id: string })[]): Workflow => ({
-  statuses: stations.map((s) => ({ name: s.id, outcomes: {}, ...s })),
-  roles: { entry: 'refining', done: 'done', failure: 'blocked' },
+  statuses: stations.map((s) => ({ name: s.id, outcomes: [], ...s })),
+  roles: { entry: 'refining', failure: 'blocked' },
 })
 
 const unit = (ref: string, over: Partial<WorkUnit> = {}): WorkUnit => ({
@@ -285,34 +285,32 @@ describe('a person on a task', () => {
     ])
   })
 
-  it('edits and deletes tasks only while the item is at the taskReview station', async () => {
+  it('edits and deletes tasks at any station while no agent works on the item', async () => {
     const deleted: string[] = []
-    const storageIn = (status: string) =>
-      storageStub({
-        get: get(units(status)),
+    let live: Run[] = []
+    const deps = {
+      storage: storageStub({
+        get: get(units('in-progress')),
         updateItem: (ref) => Promise.resolve(unit(ref, { title: 'Renamed' })),
         deleteTask: (ref) => (deleted.push(ref), Promise.resolve()),
-      })
+      }),
+      runtime: runtimeStub({ liveRuns: () => Promise.resolve(live) }),
+    }
     const edit = { ref: 'X-3', expectedVersion: '1', title: 'Renamed' }
-    expect((await updateTask(storageIn('split-review'), 'split-review', edit)).title).toBe(
-      'Renamed',
-    )
-    await deleteTask(storageIn('split-review'), 'split-review', 'X-3')
+    expect((await updateTask(deps, edit)).title).toBe('Renamed')
+    await deleteTask(deps, 'X-3')
     expect(deleted).toEqual(['X-3'])
 
-    const refused = 'X-3 can only be changed while X-1 is in split-review; it is in in-progress'
-    await expect(updateTask(storageIn('in-progress'), 'split-review', edit)).rejects.toThrow(
-      refused,
-    )
-    await expect(deleteTask(storageIn('in-progress'), 'split-review', 'X-3')).rejects.toThrow(
-      refused,
-    )
-    await expect(
-      deleteTask(storageIn('split-review'), 'split-review', 'X-1'),
-    ).rejects.toBeInstanceOf(NotFound)
-    await expect(deleteTask(storageIn('split-review'), undefined, 'X-3')).rejects.toThrow(
-      'no status has the taskReview role',
-    )
-    expect(deleted).toEqual(['X-3'])
+    // An agent on another item does not matter.
+    live = [{ ...run, target: 'X-9' }]
+    await deleteTask(deps, 'X-3')
+    expect(deleted).toEqual(['X-3', 'X-3'])
+
+    live = [{ ...run, target: 'X-1' }]
+    const refused = 'an agent is working on X-1; stop it before changing X-3'
+    await expect(updateTask(deps, edit)).rejects.toThrow(refused)
+    await expect(deleteTask(deps, 'X-3')).rejects.toThrow(refused)
+    await expect(deleteTask(deps, 'X-1')).rejects.toBeInstanceOf(NotFound)
+    expect(deleted).toEqual(['X-3', 'X-3'])
   })
 })

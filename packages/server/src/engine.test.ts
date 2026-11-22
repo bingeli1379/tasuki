@@ -181,7 +181,8 @@ function setup(
     storage,
     runtime,
     statuses,
-    workflow: DEFAULT_WORKFLOW,
+    // What loadConfig derives from the rework rule.
+    workflow: { ...DEFAULT_WORKFLOW, roles: { ...DEFAULT_WORKFLOW.roles, rework: rework.watch } },
     rules: [split, execute, rework, review, executeOrDesign],
     holdLabel: 'hold',
     tokens,

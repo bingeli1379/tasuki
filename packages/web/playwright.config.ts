@@ -127,7 +127,7 @@ function engine(name: string, port: number, config: object): string {
 // has further to go.
 const stations = [
   ...DEFAULT_WORKFLOW.statuses,
-  { id: 'triage', handledBy: 'person', outcomes: { '→ Ready to Split': 'ready-to-split' } },
+  { id: 'triage', handledBy: 'person', outcomes: ['ready-to-split'] },
   { id: 'ai-review', name: 'AI Review' },
 ]
 

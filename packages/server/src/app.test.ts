@@ -15,11 +15,11 @@ const statuses = createStatusMap({
 })
 const workflow: Workflow = {
   statuses: [
-    { id: 'refining', name: 'Refining', outcomes: {} },
-    { id: 'ready-to-split', name: 'Ready to Split', outcomes: {} },
-    { id: 'done', name: 'Done', outcomes: {} },
+    { id: 'refining', name: 'Refining', outcomes: [] },
+    { id: 'ready-to-split', name: 'Ready to Split', outcomes: [] },
+    { id: 'done', name: 'Done', outcomes: [] },
   ],
-  roles: { entry: 'refining', done: 'done', failure: 'done' },
+  roles: { entry: 'refining', failure: 'done' },
 }
 
 // The real sqlite tracker in memory: the server is tested against a tracker that keeps
@@ -301,12 +301,13 @@ describe('tasks', () => {
       db,
       'M',
     )
+    const runtime = memoryRuntime()
     const app = createApp({
       db: openDatabase(':memory:'),
       storage,
-      runtime: memoryRuntime(),
+      runtime,
       statuses: taskStatuses,
-      workflow: { ...workflow, roles: { ...workflow.roles, taskReview: 'split-review' } },
+      workflow,
       rules: [],
       holdLabel: 'hold',
       tokens: createRunTokens(),
@@ -322,7 +323,7 @@ describe('tasks', () => {
       })
     const first = await task('Prepare')
     const second = await task('Build', [first.ref])
-    return { app, storage, item, first, second }
+    return { app, runtime, item, first, second }
   }
   const send = (method: string, body: unknown): RequestInit => ({
     method,
@@ -361,8 +362,8 @@ describe('tasks', () => {
     expect(stale.status).toBe(409)
   })
 
-  it('edits and deletes a task in split-review, and refuses once the item moved on', async () => {
-    const { app, storage, item, first, second } = await setup()
+  it('edits and deletes a task, and refuses while an agent works on its item', async () => {
+    const { app, runtime, item, first, second } = await setup()
     const edited = await app.request(
       `/api/tasks/${first.ref}`,
       send('PATCH', { expectedVersion: first.version, title: 'Prepare well' }),
@@ -371,11 +372,19 @@ describe('tasks', () => {
     expect((await app.request(`/api/tasks/${second.ref}`, { method: 'DELETE' })).status).toBe(200)
     expect((await app.request(`/api/tasks/${second.ref}`)).status).toBe(404)
 
-    await storage.transition(item.ref, 'split-review', 'in-progress')
+    await runtime.createRun({
+      target: item.ref,
+      rule: 'execute',
+      agent: 'fake',
+      attempt: 1,
+      from: 'in-progress',
+      workspace: '/w',
+      leaseSeconds: 60,
+    })
     const refused = await app.request(`/api/tasks/${first.ref}`, { method: 'DELETE' })
     expect(refused.status).toBe(400)
     expect(await refused.json()).toEqual({
-      error: `${first.ref} can only be changed while ${item.ref} is in split-review; it is in in-progress`,
+      error: `an agent is working on ${item.ref}; stop it before changing ${first.ref}`,
     })
   })
 })

@@ -10,8 +10,8 @@ interface Column {
   status: string
   displayName: string
   handledBy?: 'engine' | 'person'
-  // What a person can conclude in this status: button label -> where the item goes.
-  outcomes: Record<string, string>
+  // Where a person can send the item from this status, the last the main choice.
+  outcomes: string[]
   items: Item[]
 }
 

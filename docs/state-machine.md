@@ -5,7 +5,7 @@ Jira / sqlite 的實際名稱靠 config 的 status mapping 對應，這份文件
 
 名詞以 glossary.md 為準，欄位細節以 data-model.md 為準。
 
-下面的十站是預設流程。站可以在 config 的 `workflow` 自己列，程式只認角色不認名字（D78、D81）：`entry` 是 `refining`、`failure` 是 `blocked`、`taskReview` 是 `split-review`、`rework` 是 `ready-to-rework`、`done` 是 `done`。這份文件寫到站名的地方，換了流程就讀成扮演那個角色的站。
+下面的十站是預設流程。站可以在 config 的 `workflow` 自己列，程式只認角色不認名字（D78、D81）：`entry` 是 `refining`、`failure` 是 `blocked`。`ready-to-rework` 的「打回要先寫回饋」來自 rework 規則盯它，不是角色（D86）。這份文件寫到站名的地方，換了流程就讀成扮演那個角色的站。
 
 ## Item
 
@@ -110,7 +110,7 @@ stateDiagram-v2
 - engine 不重開 `done`，agent 也不行。rework 一律開新 task。
 - 人走的邊：`to-do`、`in-progress` 接手成 `manual`，`manual` 交回 `to-do` 或做完成 `done`，按錯時把 `done` 改回 `to-do` 或 `manual`。改回去只在 item 沒有存活的 Run 時可以，agent 可能正依賴它是 done（D74）。不在這些邊上的移動拒絕（domain 的 `personMoveRefusal`）。
 - 人在看板或使用者 MCP 的每個操作（移動 item 或 task、hold、release、Stop）都留一則 author 是人、kind 是 `system` 的 comment，例如「Moved **Manual** → **Done**.」（D82）。誰、什麼時候由 comment 本身記著。用 `system` 不用 `note`，因為 rework 的 agent 把人最新的 note 當成回饋（D74）。
-- 人只能在 item 是 `split-review` 時改 task 的 title、body，或刪掉 task（D70）。
+- 人改 task 的 title、body 或刪掉 task，只在 item 沒有存活的 Run 時可以，在哪一站都行。有 agent 在跑就先 Stop（D86，原本只限 `split-review`，D70）。
 - 目前 orchestrator 一個 item 起一個 process（M1），engine 看不到裡面的 subagent。把執行中的 task 改成 `manual` 只是 soft stop，之後不再派它。要立刻停掉那張 task，只能 hard stop 整個 orchestrator。
 - task 層的「review 沒過重做幾次」engine 管不到，由 orchestrator 的 prompt 約束。item 層用 Run 的重試次數與用量設上限。
 

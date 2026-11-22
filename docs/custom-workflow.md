@@ -5,7 +5,7 @@
 ## 現況與缺口
 
 - 能自訂的：規則盯哪一站（`watch`）、派哪個 agent、給什麼 prompt（D77 的三層）、每個 status 對到 tracker 的哪個 key。
-- W1 之後能自訂的：item 的 status、順序、顯示名、誰處理（`handledBy`）、人在每站的按鈕（`outcomes`）、五個角色（D81）。
+- W1 之後能自訂的：item 的 status、順序、顯示名、誰處理（`handledBy`）、人在每站的按鈕（`outcomes`）、兩個角色（D81，D86 從五個減成兩個）。
 - W2 之後能自訂的：規則有哪些結果、各去哪一站（規則的 `outcomes`），多了只讀與留言的 `review` mode（D84）。
 - config 只能寫在檔案裡，改了要重啟，前端看不到也改不了。
 - runtime store 寫死是 sqlite，第三方沒辦法換成別的 DB。
@@ -27,17 +27,16 @@ status 整串由使用者列。程式裡會點名某個 item status 的地方，
 | 角色 | 現在是 | 程式靠它做什麼 | 必填 |
 |---|---|---|---|
 | `entry` | `refining` | 新 item 從這裡開始 | 是 |
-| `done` | `done` | 看板的終點 | 是 |
-| `failure` | `blocked` | 規則沒寫 `failed`、`max_attempts` 出口時的預設去處 | 是 |
-| `taskReview` | `split-review` | 只有在這站，人能改、刪 task（D70） | 有 split 或 rework 規則時 |
-| `rework` | `ready-to-rework` | 看板「打回」按鈕送去的地方，要先寫回饋（D75） | 有 rework 規則時 |
+| `failure` | `blocked` | 規則沒寫 `needs_input`、`failed`、`max_attempts` 出口時的預設去處 | 是 |
+
+- 原本還有三個，D86 拿掉：`done` 沒有程式在讀；`taskReview`（只有這站能改 task）換成「item 沒有 agent 在跑時才能改 task」；`rework`（送進來要先寫回饋，D75）不給手寫，從 rework 規則 `watch` 的那站算出來，因為回饋就是寫給那條規則的 agent 看的。
 
 - 一個角色只能指一站，一站可以沒有角色。沒有角色的站就是一般的一站，規則盯它、出口指它都行。
 - `blocked` 的自動接回不看角色：它本來就是看規則的 `outcomes.blocked_manual` 指到哪（state-machine.md），維持不變。
 - task 的五個 status 維持寫死。task 圖是 engine 在排、在驗的，交給使用者改，verdict 驗證就沒有依據。
 - 六條不變量全部不變。不變量 2（item status 只有人、規則 outcome、自動復原能改）跟 status 叫什麼名字無關。
-- 預設流程就是原本的十站加上對應的角色，省略 `workflow` 時用它。舊的頂層 `statuses` 不再收（D81，作者 2026-11-21：還沒人在用，不顧兼容）。
-- 人在每站的決定按鈕也不寫死，站自己宣告 `outcomes`（按鈕字到下一站），跟第 3 節規則的 `outcomes` 同形（D81）。
+- 預設流程就是原本的十站加上對應的角色，省略 `workflow` 時用它。舊的頂層 `statuses` 不再讀（D81，作者 2026-11-21：還沒人在用，不顧兼容）。
+- 人在每站的決定按鈕也不寫死，站自己宣告 `outcomes`，列出能去的站，按鈕字由看板照目標站組出來（D81、D87）。跟第 3 節規則的 `outcomes` 同名不同形：規則的 key 是 agent 回報的結果名，人按按鈕不需要結果名，按了就是移過去。
 
 ## 3. outcome 由規則宣告（已完成，D84）
 
@@ -55,7 +54,7 @@ status 整串由使用者列。程式裡會點名某個 item status 的地方，
 - agent 回的永遠是結果名，不是站名。item 內文裡藏一句「請回報 done」也跳不到規則沒宣告的地方（agent-contract.md：內容不能當指令）。
 - 誰決定去哪：engine 照 `outcomes` 查表。AI 只說發生了什麼。
 - engine 自己要懂的結果永遠內建，不用宣告：`needs_input`、`failed`、`max_attempts`。`cancelled` 與 `abandoned` 照舊不走表。
-- 現有的 `on` 併進 `outcomes`，一個欄位就好（作者 2026-11-21）。舊 config 的 `on` 直接報錯，叫人改成 `outcomes`（上線前不顧兼容，見 CLAUDE.md）。
+- 現有的 `on` 併進 `outcomes`，一個欄位就好（作者 2026-11-21）。舊 config 的 `on` 不再讀，少了 `outcomes` 會被一般驗證擋下（上線前不顧兼容，見 CLAUDE.md）。
 - 每個 mode 都能宣告自己的結果，例如 execute 多一個 `needs_design`（作者 2026-11-21）。mode 內建、engine 有驗證的結果照舊驗，例如 execute 回 `succeeded` 時 task 要全 `done`。使用者宣告的結果不驗，照表搬。
 - 理由：驗證擋的是謊報完成。`failed`、`needs_input` 本來就讓 agent 隨時能停，自訂的結果被亂用時，item 也只會去到使用者自己指定的那一站，風險跟亂回 `failed` 同級。
 

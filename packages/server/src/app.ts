@@ -174,16 +174,19 @@ export function createApp({
     if (typeof body.expectedVersion !== 'string')
       throw new InvalidInput('expectedVersion is required')
     return c.json(
-      await updateTask(storage, workflow.roles.taskReview, {
-        ref: c.req.param('ref'),
-        expectedVersion: body.expectedVersion,
-        ...(typeof body.title === 'string' ? { title: body.title } : {}),
-        ...(typeof body.body === 'string' ? { body: body.body } : {}),
-      }),
+      await updateTask(
+        { storage, runtime },
+        {
+          ref: c.req.param('ref'),
+          expectedVersion: body.expectedVersion,
+          ...(typeof body.title === 'string' ? { title: body.title } : {}),
+          ...(typeof body.body === 'string' ? { body: body.body } : {}),
+        },
+      ),
     )
   })
   app.delete('/api/tasks/:ref', async (c) => {
-    await deleteTask(storage, workflow.roles.taskReview, c.req.param('ref'))
+    await deleteTask({ storage, runtime }, c.req.param('ref'))
     return c.json({ ok: true })
   })
   app.post('/api/tasks/:ref/comments', async (c) => {

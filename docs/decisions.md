@@ -543,7 +543,7 @@
   - S7 太大，拆成 S7a 到 S7d，每段都能在瀏覽器操作（D41）。S7a 先做，因為 S7b 的自動接回要等人把 manual task 標成 `done`。
   - task 詳情：item 詳情的 task 清單點下去開第二層 modal，顯示內文、origin、等哪幾張、comment（engine 與 agent 留的原因就在這裡，D67）與留言框。新的 use case `getTask`，REST 是 `/api/tasks/:ref`，使用者 MCP 加 `get_task`；`add_comment` 原本就能留在 task 上，描述改成 item 或 task（D57）。
   - 人改 task status 只走 task 圖上人的四條邊：接手（`to-do`、`in-progress` 到 `manual`）、交回（`manual` 到 `to-do`）、做完（`manual` 到 `done`）。domain 的 `personMoveRefusal` 擋其他的，`done` 不能重開（待釐清 12）。use case `moveTask`，跟 item 一樣用 compare-and-set，撞上 `StatusConflict` 回 409。人移動不留原因（D67）。Run 還在跑時接手也可以，只是 soft stop（M1）。
-  - 修 task：item 在 `split-review` 時才能改 title、body 或刪除，其他時候 `InvalidInput`。拆之前 splitter 還在建，放行之後 agent 可能正照著做。改內容沿用 `StoragePort.updateItem`（兩邊本來就吃 task）。blockedBy 不開放改，要兩邊都補拆 link 的寫入，這次換不到什麼；要改依賴就打回重拆。
+  - 修 task：item 在 `split-review` 時才能改 title、body 或刪除，其他時候 `InvalidInput`（D86 改成 item 沒有存活的 Run 就能改）。拆之前 splitter 還在建，放行之後 agent 可能正照著做。改內容沿用 `StoragePort.updateItem`（兩邊本來就吃 task）。blockedBy 不開放改，要兩邊都補拆 link 的寫入，這次換不到什麼；要改依賴就打回重拆。
   - `StoragePort.deleteTask`：連它兩個方向的 dependency、comment、附件一起刪，等它的 task 從此不等。sqlite 包在一個 transaction 裡；Jira 用 `DELETE /issue/{key}`，link、comment、附件由 Jira 一起刪。刪除不帶 version，畫面上要先按一次再確認。
   - sqlite 的 ref 原本是 `MAX(rowid) + 1`，刪掉最後一張之後下一張會拿到同一個 ref，舊 comment、log 裡的 ref 就指錯東西。改成 `ref_counter` 表發號，migration 從現有的 `MAX(rowid)` 起算，已經發出去的 ref 不變。契約測試多一條：刪掉之後新建的 task 不會撞到舊 ref。
 - 理由：splitter 拆得差不多但有一兩張不對時，原本只能打回重拆，等一輪 agent。人在 `split-review` 直接修，前台省一次重跑，後台只多一個 port 方法和一個狀態檢查。
@@ -683,10 +683,10 @@
 
 - 背景：照 D78 做 W1。custom-workflow.md 只定了概念，沒寫 config 長什麼樣子，也沒處理詳情裡寫死站名的決定按鈕（`split-review` 的 Send back / Approve、`in-review` 的 Rework / Accept）。作者說還沒人在用，結構可以大改、不顧兼容。
 - 決定：
-  - config 的頂層 `statuses` 拿掉，換成 `workflow`：`statuses` 是一個陣列，順序就是看板的順序，每站是 `id`（邏輯名，kebab-case）、`name`（省略時是 id 的 Title Case）、`key`（tracker 的 status，省略時是 name）、`handledBy`、`outcomes`；`roles` 是一個 map，指出五個角色各是哪一站；`taskStatuses` 是 task 五個 status 的對照。舊寫法啟動就報錯，叫人搬進 `workflow`。省略 `workflow` 時是預設十站。
+  - config 的頂層 `statuses` 拿掉，換成 `workflow`：`statuses` 是一個陣列，順序就是看板的順序，每站是 `id`（邏輯名，kebab-case）、`name`（省略時是 id 的 Title Case）、`key`（tracker 的 status，省略時是 name）、`handledBy`、`outcomes`；`roles` 是一個 map，指出五個角色各是哪一站（D86 減成 `entry`、`failure` 兩個）；`taskStatuses` 是 task 五個 status 的對照。舊寫法啟動就報錯，叫人搬進 `workflow`（D85 拿掉這句專門的錯誤，改成不讀）。省略 `workflow` 時是預設十站。
   - 角色放 map 不寫在站上：map 天生一個角色只有一個值，不用另外驗重複。
   - D78 的 `waitsFor: "human"` 改名 `handledBy: "person"`，看板 API 的 `turn` 也改名 `handledBy`，從 config 到畫面同一個詞。作者覺得 turn 像回合制遊戲，要的語意是「這站誰處理」。`engine` 不給手寫，有規則 watch 才是，手寫的雷達會在沒規則時說謊（D68）。`assignee` 會撞 Jira 的欄位，`owner` 像在講誰有權限改設定，都沒選。
-  - 人的決定按鈕改成站上的 `outcomes`：按鈕字到下一站，按下去就是移過去，不帶別的行為。跟 W2 規則上給 agent 的 `outcomes` 同名同形，一邊是 agent 的結論、一邊是人的結論。最後一個是實心的主按鈕。目標是 `rework` 角色那站時，照 D75 先問改什麼，這件事看目標站的角色，不看是哪顆按鈕。預設流程填好原本那四顆，字沒變。
+  - 人的決定按鈕改成站上的 `outcomes`：按鈕字到下一站（D87 改成只列目標站），按下去就是移過去，不帶別的行為。跟 W2 規則上給 agent 的 `outcomes` 同名同形，一邊是 agent 的結論、一邊是人的結論。最後一個是實心的主按鈕。目標是 `rework` 角色那站時，照 D75 先問改什麼，這件事看目標站的角色，不看是哪顆按鈕。預設流程填好原本那四顆，字沒變。
   - 原本 `split-review` 沒有 task 時 Approve 是灰的，這個條件拿掉：按鈕是通用的，放不了這種條件；execute 底下沒有 task 時 `succeeded` 照字面成立（D69），最多空跑一次。
   - 規則沒寫 `on.failed`、`on.max_attempts` 時，讀 config 就填成 `failure` 那站，core 的 `exitFor` 不再寫死 `blocked`。W2 把 `on` 併進 `outcomes` 時照搬。
   - use case 只收它要的角色：`createItem` 收 `entry`，`updateTask`、`deleteTask` 收 `taskReview`（沒有就一律拒絕），`requestRework` 收 `rework`（沒有就拒絕）。`listBoard` 改收整份 workflow，回傳每欄的 `outcomes` 與整個 `roles`。使用者 MCP 的 tool 說明照角色填站名，不再寫死 `refining`、`split-review`、`ready-to-rework`（D57）。
@@ -723,7 +723,7 @@
 
 - 背景：照 D78 與 custom-workflow.md 第 3、4 節做 W2。原本 agent 只能回四個固定的 verdict，engine 查規則的 `on` 決定去哪，使用者沒辦法加一站「AI 看一看、給結論」。
 - 決定：
-  - 規則的 `on` 改名 `outcomes`，key 是結果名（小寫加底線），值是目標站。舊的 `on` 讀檔就報錯叫人改，不轉換。custom-workflow.md 原本寫「讀進來時轉換」，作者改成上線前一律不顧兼容（2026-11-21，寫進 CLAUDE.md）。
+  - 規則的 `on` 改名 `outcomes`，key 是結果名（小寫加底線），值是目標站。舊的 `on` 讀檔就報錯叫人改，不轉換（D85 拿掉這句專門的錯誤，改成不讀）。custom-workflow.md 原本寫「讀進來時轉換」，作者改成上線前一律不顧兼容（2026-11-21，寫進 CLAUDE.md）。
   - 結果分三種。mode 自己的必填、engine 會驗：split、rework 是 `succeeded`，execute 是 `succeeded` 與 `blocked_manual`，review 沒有。每條規則都有的 `needs_input`、`failed`、`max_attempts` 可省略，省略時跟 D81 的 `failed` 一樣填成 `failure` 那站；以前 `needs_input` 是必填，作者決定照同一招處理（2026-11-21）。其他名字是規則自己宣告的，不驗，照表搬。每條規則至少要有一個不屬於第二種的結果，不然 agent 只能失敗。
   - `report_result` 的欄位還是叫 `verdict`，但 enum 每個 Run 照規則產生（`max_attempts` 以外的結果名）。facade 與 `reportResult` use case 都擋選項以外的值，item 內文叫 agent 回 `done` 這類站名也只會被拒絕。facade 從 run token 找到 Run 的規則，整條規則交進去，不再只給 mode。
   - 新的 `review` mode：只有 `get_item`、`list_tasks`、`list_comments`、`add_comment`、`report_result`。`create_task` 原本是「不是 execute 就掛」，改成只有 split 與 rework 掛，不然 review 會拿到建 task 的權限。預設 prompt 叫 agent 留一則 note 再選結論。
@@ -735,3 +735,40 @@
 - 實測：`pnpm test` 343 條、`pnpm check` 沒有錯誤與警告；`pnpm e2e` 的 sqlite 與 jira 各 12 條全過（分開跑）。
 - 沒選的：自訂結果也讓使用者寫驗證條件（例如 `approve` 要有一則 note）。驗證擋的是謊報完成，自訂結果被亂用時 item 也只會去使用者自己指定的站，風險跟亂回 `failed` 同級（custom-workflow.md 第 3 節）。
 - 重新檢視：有人需要自訂結果的驗證時；`report_result` 要回傳多個結論或帶參數時；W4 熱重載後，進行中的 Run 規則被改掉、結果名對不上時。
+
+
+## D85 不為舊寫法寫專門的錯誤訊息
+
+- 背景：D81 與 D84 各留了一句只為舊 config 存在的錯誤：頂層 `statuses` 報「moved into workflow」，規則的 `on` 報「moved into outcomes」。作者問這是不是特別設計的，認為上線前不顧兼容也包括不替舊寫法指路（2026-11-22）。
+- 決定：兩句都拿掉，CLAUDE.md 的「舊寫法報錯叫人改」改成不寫專門偵測舊寫法的錯誤。config 照舊不檢查多出來的 key。
+  - 規則寫 `on` 沒寫 `outcomes`：`on` 被略過，撞到 mode 必填的 `outcomes.succeeded`；review 規則撞到「至少要有一個 agent 能完成的結果」。還是起不來，只是訊息不說它搬去哪。
+  - 頂層 `statuses`：被略過，沒寫 `workflow` 時用預設十站，key 是顯示名。sqlite 照跑；接 Jira 時 key 要對得上 Jira 的 status，對不上不會在啟動時被擋。
+- 掃過的地方：`packages/*/src` 的 config 解析、migration（只有重建表時的整表複製，沒有轉換舊資料）、MCP 與 API 的參數，沒有別的專門處理舊寫法的分支。
+- 重新檢視：上線之後改 config 欄位時；決定 config 要拒絕不認得的 key 時（那時舊寫法會自然報錯）。
+
+
+## D86 角色只留 `entry` 與 `failure`，改 task 看有沒有 agent 在跑
+
+- 背景：作者看 config 的 `roles` 時問，除了新 item 去哪、失敗去哪，其他角色真的需要嗎（2026-11-22）。對過程式碼：`done` 沒有任何程式在讀（D81 的已知限制）；`taskReview` 與 `rework` 不是出口，是站的行為，一個管人能不能改 task，一個管打回要不要先寫回饋。
+- 決定：
+  - `done` 拿掉。看板照 `workflow.statuses` 的順序畫，不需要終點。
+  - `taskReview` 拿掉，人改、刪 task 的條件從「item 在這站」改成「item 沒有存活的 Run」，有的話 `InvalidInput` 叫人先 Stop。作者的提法：有 agent 在跑就不能直接改，要先停。D70 沒選「任何時候都能改」的理由是會跟 orchestrator 讀到的內容打架，有 Run 就擋正好避開。`updateTask`、`deleteTask` 跟 `deleteItem` 一樣收 `{ storage, runtime }`。看板的 Edit、Delete task 一律顯示，最新的 Run 還在跑時灰掉，提示 Stop the agent first。
+  - `rework` 不給手寫，讀 config 時從 mode 是 `rework` 的規則 `watch` 的那站算出來，填進 `workflow.roles.rework`，下游（看板、`requestRework`、使用者 MCP）照舊讀它。打回時寫的回饋就是給那條規則的 agent 讀的，兩件事本來就綁在一起。rework 規則有好幾條時要盯同一站，不然讀檔拒絕。沒有 rework 規則就沒有這個值，`request_rework` 照舊拒絕。
+- 理由：前台少寫三個欄位，config 只剩一眼看得懂的兩個。後台少一個必填驗證與兩個條件驗證，多一個「rework 規則盯同一站」的驗證。`blocked` 時也能改 task，改完讓它自動接回，不用打回重拆。
+- 已知限制：檢查「沒有 Run」與真的寫入之間，engine 可能剛好 claim 了這張 item。改內容帶 version，會撞出 409；刪除不帶 version，agent 之後讀不到那張 task，`set_task_status` 拿到 NotFound。跟人直接在 Jira 上刪 task 一樣，agent-contract 本來就要 agent 以 tracker 現況為準。
+- 取代：D70 的「只在 `split-review` 改 task」、D81 的五個角色。
+- 實測：`pnpm test` 341 條、`vp check` 與全部 typecheck 沒有錯誤。
+- 重新檢視：又有程式需要點名某一站時（先看能不能從規則算）；有人要在 agent 跑的時候讓人改 task 時。
+
+
+## D87 站上的 `outcomes` 只列目標站
+
+- 背景：作者看 config 時發現站上 `outcomes` 的 key 是 `→ Refining` 這種畫面上的字，config 應該寫規格（2026-11-22）。D82 已經把按鈕字定成「箭頭加目標站的顯示名」，key 從 value 就算得出來，等於同一件事寫兩次。
+- 決定：
+  - 站上的 `outcomes` 從「按鈕字到站」的 map 改成目標站的陣列，例如 `["refining", "in-progress"]`。陣列的順序就是按鈕的順序，最後一個是主按鈕，不再靠 object key 的順序。同一站列兩次讀檔拒絕。
+  - 按鈕字由看板組：`→` 加目標站的顯示名。`Station.outcomes`、看板 API 每欄的 `outcomes` 都變成 `string[]`，使用者 MCP 的 `list_board` 說明跟著改。
+  - 欄位名照舊叫 `outcomes`（作者決定）：意思還是人在這站能得出哪些結論，只是寫法從 map 變陣列。
+- 沒選的：學規則取結果名（`{ "send_back": "refining" }`）。人按按鈕不需要 verdict，按了就是移過去，多一層名字只是翻譯。
+- 取代：D81「人的決定按鈕改成站上的 `outcomes`：按鈕字到下一站」的寫法；按鈕不能再自訂文字。
+- 實測：`pnpm test` 343 條、`vp check` 與全部 typecheck 沒有錯誤，sqlite E2E 12 條全過。
+- 重新檢視：有人需要按鈕寫目標站以外的字時（例如多語系）。

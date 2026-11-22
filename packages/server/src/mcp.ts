@@ -51,23 +51,19 @@ export function createMcpServer({
   holdLabel,
 }: McpDeps): McpServer {
   const server = new McpServer({ name: 'tasuki', version: '0.0.0' })
-  const { entry, taskReview, rework } = workflow.roles
-  const onlyInTaskReview =
-    taskReview === undefined
-      ? 'never: no status lets a person change tasks'
-      : `only while its item is in ${taskReview}`
+  const { entry, rework } = workflow.roles
+  const noAgent = 'while no agent works on its item (stop_run first)'
   server.registerTool(
     'list_board',
     {
       description:
         'List the board: one column per item status in board order, each with its items ' +
         'and `handledBy`: engine when a rule picks items up from it, person when items wait ' +
-        'for a person there, absent otherwise, and `outcomes`: what a person can conclude ' +
-        'there, a label for each and the status that sends the item to (move_item, or ' +
+        'for a person there, absent otherwise, and `outcomes`: the statuses a person can ' +
+        'send the item to from there, the last the main choice (move_item, or ' +
         'request_rework when it is the rework status); ' +
-        'and `roles`: which status new items start in (entry), where the board ends (done), ' +
-        'where failed runs go (failure), where tasks can be changed (taskReview) and where ' +
-        'work is sent back (rework); ' +
+        'and `roles`: which status new items start in (entry), where failed runs go ' +
+        '(failure) and where work is sent back (rework, the status the rework rule watches); ' +
         'and `running`, the refs an agent is working on right now (`stopping`: of those, the ' +
         'ones told to stop and winding down), and `tasks`, per item ref ' +
         'that has tasks, how many are done out of how many, and `holdLabel`: an item with it ' +
@@ -264,7 +260,7 @@ export function createMcpServer({
     'update_task',
     {
       description:
-        `Change a task's title and/or body, ${onlyInTaskReview}. Pass the ` +
+        `Change a task's title and/or body, ${noAgent}. Pass the ` +
         'version from get_task; if someone changed the task since, the call fails and returns ' +
         'it as it is now. Returns the updated task.',
       inputSchema: {
@@ -276,24 +272,27 @@ export function createMcpServer({
     },
     async ({ ref, version, title, body }) =>
       json(
-        await updateTask(storage, taskReview, {
-          ref,
-          expectedVersion: version,
-          ...(title === undefined ? {} : { title }),
-          ...(body === undefined ? {} : { body }),
-        }),
+        await updateTask(
+          { storage, runtime },
+          {
+            ref,
+            expectedVersion: version,
+            ...(title === undefined ? {} : { title }),
+            ...(body === undefined ? {} : { body }),
+          },
+        ),
       ),
   )
   server.registerTool(
     'delete_task',
     {
       description:
-        `Delete a task, ${onlyInTaskReview}. Its comments go with it, and ` +
+        `Delete a task, ${noAgent}. Its comments go with it, and ` +
         'tasks that waited for it no longer do. Cannot be undone.',
       inputSchema: { ref: z.string() },
     },
     async ({ ref }) => {
-      await deleteTask(storage, taskReview, ref)
+      await deleteTask({ storage, runtime }, ref)
       return json({ deleted: ref })
     },
   )

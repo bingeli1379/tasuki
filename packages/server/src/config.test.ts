@@ -61,25 +61,19 @@ describe('loadConfig', () => {
 
   it('defaults to the ten stations and their roles, keyed by display name', () => {
     const { workflow } = loadConfig(write('{}'))
-    expect(workflow.roles).toEqual({
-      entry: 'refining',
-      done: 'done',
-      failure: 'blocked',
-      taskReview: 'split-review',
-      rework: 'ready-to-rework',
-    })
+    expect(workflow.roles).toEqual({ entry: 'refining', failure: 'blocked' })
     expect(workflow.statuses.find((s) => s.id === 'in-review')).toEqual({
       id: 'in-review',
       name: 'In Review',
       handledBy: 'person',
-      outcomes: { '→ Ready to Rework': 'ready-to-rework', '→ Done': 'done' },
+      outcomes: ['ready-to-rework', 'done'],
     })
   })
 
-  // A workflow whose first station is the entry and last is done and failure.
+  // A workflow whose first station is the entry and last the failure one.
   const flow = (ids: string[], over: Record<string, unknown> = {}): Record<string, unknown> => ({
     statuses: ids.map((id) => ({ id })),
-    roles: { entry: ids[0], done: ids.at(-1), failure: ids.at(-1) },
+    roles: { entry: ids[0], failure: ids.at(-1) },
     ...over,
   })
 
@@ -94,11 +88,11 @@ describe('loadConfig', () => {
                 id: 'ai-review',
                 name: 'AI Review',
                 handledBy: 'person',
-                outcomes: { Ship: 'shipped' },
+                outcomes: ['shipped'],
               },
               { id: 'shipped' },
             ],
-            roles: { entry: 'triage', done: 'shipped', failure: 'triage' },
+            roles: { entry: 'triage', failure: 'triage' },
             taskStatuses: { 'to-do': '10002' },
           },
         }),
@@ -106,11 +100,11 @@ describe('loadConfig', () => {
     )
     expect(config.workflow).toEqual({
       statuses: [
-        { id: 'triage', name: 'Triage', outcomes: {} },
-        { id: 'ai-review', name: 'AI Review', handledBy: 'person', outcomes: { Ship: 'shipped' } },
-        { id: 'shipped', name: 'Shipped', outcomes: {} },
+        { id: 'triage', name: 'Triage', outcomes: [] },
+        { id: 'ai-review', name: 'AI Review', handledBy: 'person', outcomes: ['shipped'] },
+        { id: 'shipped', name: 'Shipped', outcomes: [] },
       ],
-      roles: { entry: 'triage', done: 'shipped', failure: 'triage' },
+      roles: { entry: 'triage', failure: 'triage' },
     })
     // Without a key, the tracker stores the name, as sqlite does.
     expect(config.statuses).toEqual({
@@ -120,7 +114,6 @@ describe('loadConfig', () => {
   })
 
   it.each([
-    [{ statuses: { item: {} } }, 'config statuses moved into workflow'],
     [{ workflow: { statuses: [] } }, 'config workflow.statuses must list at least one status'],
     [{ workflow: flow(['Triage']) }, 'workflow.statuses[0].id must be a kebab-case name'],
     [{ workflow: flow(['a', 'a']) }, 'config workflow.statuses: a is listed twice'],
@@ -149,31 +142,39 @@ describe('loadConfig', () => {
       {
         workflow: {
           ...flow(['a', 'b']),
-          statuses: [{ id: 'a', outcomes: { Go: 'c' } }, { id: 'b' }],
+          statuses: [{ id: 'a', outcomes: ['c'] }, { id: 'b' }],
         },
       },
-      'workflow.statuses (a).outcomes.Go: status "c" is not in workflow.statuses',
+      'workflow.statuses (a).outcomes: status "c" is not in workflow.statuses',
     ],
     [
       {
         workflow: {
           ...flow(['a', 'b']),
-          statuses: [{ id: 'a', outcomes: { Go: 'a' } }, { id: 'b' }],
+          statuses: [{ id: 'a', outcomes: ['a'] }, { id: 'b' }],
         },
       },
-      'workflow.statuses (a).outcomes.Go must go to another status',
+      'workflow.statuses (a).outcomes: a must be another status',
+    ],
+    [
+      { workflow: { ...flow(['a', 'b']), statuses: [{ id: 'a', outcomes: { Go: 'b' } }] } },
+      'workflow.statuses[0] (a).outcomes must list statuses',
+    ],
+    [
+      { workflow: { ...flow(['a', 'b']), statuses: [{ id: 'a', outcomes: ['b', 'b'] }] } },
+      'workflow.statuses[0] (a).outcomes lists a status twice',
     ],
     [{ workflow: { statuses: [{ id: 'a' }] } }, 'config workflow.roles is required'],
     [
-      { workflow: flow(['a'], { roles: { done: 'a', failure: 'a' } }) },
+      { workflow: flow(['a'], { roles: { failure: 'a' } }) },
       'config workflow.roles.entry is required',
     ],
     [
-      { workflow: flow(['a'], { roles: { entry: 'a', done: 'a', failure: 'z' } }) },
+      { workflow: flow(['a'], { roles: { entry: 'a', failure: 'z' } }) },
       'config workflow.roles.failure: status "z" is not in workflow.statuses',
     ],
     [
-      { workflow: flow(['a'], { roles: { entry: 'a', done: 'a', failure: 'a', start: 'a' } }) },
+      { workflow: flow(['a'], { roles: { entry: 'a', failure: 'a', start: 'a' } }) },
       'config workflow.roles.start: not a role',
     ],
     [
@@ -302,10 +303,6 @@ describe('loadConfig', () => {
       'rules[0] (split).outcomes.approve: status "approved" is not in workflow.statuses',
     ],
     [
-      { ...split, outcomes: undefined, on: split.outcomes },
-      'rules[0] (split).on moved into outcomes',
-    ],
-    [
       { ...split, maxAttempts: 0 },
       'rules[0] (split).maxAttempts must be a whole number of at least 1',
     ],
@@ -322,10 +319,7 @@ describe('loadConfig', () => {
         workflow: flow(['refining', 'ready-to-rework', 'splitting', 'split-review', 'blocked'], {
           roles: {
             entry: 'refining',
-            done: 'blocked',
             failure: 'blocked',
-            taskReview: 'split-review',
-            rework: 'ready-to-rework',
           },
           taskStatuses: { 'to-do': 'T' },
         }),
@@ -354,9 +348,7 @@ describe('loadConfig', () => {
           {
             roles: {
               entry: 'refining',
-              done: 'blocked',
               failure: 'blocked',
-              taskReview: 'split-review',
             },
             taskStatuses: { 'to-do': 'T' },
           },
@@ -407,9 +399,7 @@ describe('loadConfig', () => {
         workflow: flow(splitStations, {
           roles: {
             entry: 'refining',
-            done: 'needs-answers',
             failure: 'refining',
-            taskReview: 'split-review',
           },
         }),
         agents: { fake: { plugin: 'x' } },
@@ -438,33 +428,20 @@ describe('loadConfig', () => {
     ])
   })
 
-  it('needs a taskReview station for a rule that makes tasks, and a rework one to rework', () => {
-    const noReview = write(
-      JSON.stringify({
-        workflow: flow(splitStations),
-        agents: { fake: { plugin: 'x' } },
-        rules: [split],
-      }),
-    )
-    expect(() => loadConfig(noReview)).toThrow(
-      'config workflow.roles.taskReview is required: rule split makes tasks',
-    )
-    const noRework = write(
-      JSON.stringify({
-        workflow: flow([...splitStations, 'ready-to-rework'], {
-          roles: {
-            entry: 'refining',
-            done: 'needs-answers',
-            failure: 'needs-answers',
-            taskReview: 'split-review',
-          },
+  it('sends work back to the status the rework rule watches, and only one', () => {
+    const rework = { ...split, id: 'rework', watch: 'ready-to-rework', mode: 'rework' }
+    const config = (rules: unknown[]) =>
+      write(
+        JSON.stringify({
+          workflow: flow([...splitStations, 'ready-to-rework', 'redo']),
+          agents: { fake: { plugin: 'x' } },
+          rules,
         }),
-        agents: { fake: { plugin: 'x' } },
-        rules: [{ ...split, id: 'rework', watch: 'ready-to-rework', mode: 'rework' }],
-      }),
-    )
-    expect(() => loadConfig(noRework)).toThrow(
-      'config workflow.roles.rework is required: rule rework reworks',
+      )
+    expect(loadConfig(config([split])).workflow.roles.rework).toBeUndefined()
+    expect(loadConfig(config([split, rework])).workflow.roles.rework).toBe('ready-to-rework')
+    expect(() => loadConfig(config([rework, { ...rework, id: 'again', watch: 'redo' }]))).toThrow(
+      'config rules: rework rules must watch one status, not ready-to-rework, redo',
     )
   })
 })
