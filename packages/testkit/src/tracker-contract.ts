@@ -493,5 +493,18 @@ export function describeTrackerContract(name: string, setup: () => Promise<Track
           .toEqual(created)
       })
     })
+
+    it('a heartbeat reads back as written, and clearing it leaves none', async () => {
+      const t = fixture.tracker
+      // Optional: a tracker only one process opens keeps none.
+      if (t.readHeartbeat === undefined || t.writeHeartbeat === undefined) return
+      const beat = { engineId: 'contract', lastSeen: '2026-11-22T10:00:00.000Z' }
+      await t.writeHeartbeat(beat)
+      expect(await t.readHeartbeat()).toEqual(beat)
+      await t.writeHeartbeat(undefined)
+      expect(await t.readHeartbeat()).toBeUndefined()
+      // Clearing twice is not an error.
+      await t.writeHeartbeat(undefined)
+    })
   })
 }

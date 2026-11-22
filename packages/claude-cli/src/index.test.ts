@@ -32,7 +32,16 @@ if (process.env.FAKE === 'no-session' && args.includes('--resume')) {
   console.error('No conversation found with session ID: ' + args[args.indexOf('--resume') + 1])
   process.exit(1)
 }
-if (process.env.FAKE === 'hang') {
+if (process.env.FAKE === 'init' && !args.includes('--version')) {
+  console.log(JSON.stringify({ type: 'system', subtype: 'ui_status' }))
+  console.log(JSON.stringify({
+    type: 'system',
+    subtype: 'init',
+    mcp_servers: [{ name: 'gitlab', status: 'connected' }, { name: 'jira', status: 'needs-auth' }],
+    skills: ['sdd:apply'],
+  }))
+  setInterval(() => {}, 1000)
+} else if (process.env.FAKE === 'hang') {
   const child = spawn('sleep', ['1000'], { stdio: 'ignore' })
   writeFileSync(process.env.FAKE_OUT + '.child', String(child.pid))
   setInterval(() => {}, 1000)
@@ -250,5 +259,41 @@ describe('claude-cli runner', () => {
     expect(make({ mcpServers: { tasuki: {} } })).toThrow('the name tasuki is taken')
     expect(make({ appendSystemPrompt: 'a', appendSystemPromptFile: 'b.md' })).toThrow('not both')
     expect(make({ appendSystemPromptFile: '/nowhere.md' })).toThrow('/nowhere.md does not exist')
+  })
+})
+
+describe('claude-cli doctor', () => {
+  it('a CLI that does not run is the one error', async () => {
+    const { runner } = setup('', { command: '/nonexistent/claude', allowedTools: [] })
+    const findings = await runner.doctor?.()
+    expect(findings).toHaveLength(1)
+    expect(findings?.[0]?.level).toBe('error')
+    expect(findings?.[0]?.message).toContain('/nonexistent/claude does not run')
+  })
+
+  it('warns on empty allowedTools, and starts nothing more when nothing is required', async () => {
+    const { runner, calls } = setup('', { allowedTools: [] })
+    expect(await runner.doctor?.()).toEqual([
+      { level: 'warning', message: expect.stringContaining('allowedTools is empty') },
+    ])
+    expect(calls().map((c) => c.args)).toEqual([['--version']])
+  })
+
+  it('reads the init line for what requires names, then ends the CLI', async () => {
+    const { runner, calls } = setup('init', {
+      allowedTools: ['Read'],
+      mcpServers: { gitlab: { type: 'stdio', command: 'x' } },
+      requires: { mcpServers: ['gitlab', 'jira', 'slack'], skills: ['sdd:apply', 'sdd:propose'] },
+    })
+    expect(await runner.doctor?.()).toEqual([
+      { level: 'error', message: 'requires.mcpServers: jira is needs-auth' },
+      { level: 'error', message: 'requires.mcpServers: slack is not configured' },
+      { level: 'error', message: 'requires.skills: sdd:propose is not loaded' },
+    ])
+    const probe = calls()[1]?.args ?? []
+    expect(probe).toContain('--strict-mcp-config')
+    expect(JSON.parse(probe[probe.indexOf('--mcp-config') + 1] ?? '{}')).toEqual({
+      mcpServers: { gitlab: { type: 'stdio', command: 'x' } },
+    })
   })
 })

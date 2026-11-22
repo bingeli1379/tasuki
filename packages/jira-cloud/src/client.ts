@@ -26,7 +26,9 @@ export function createFetch(options: JiraOptions): JiraFetch {
     const headers = new Headers(init.headers)
     headers.set('Authorization', auth)
     if (!headers.has('Accept')) headers.set('Accept', 'application/json')
-    const res = await fetch(`${options.baseUrl}/rest/api/3${path}`, {
+    // The board API lives apart from the platform one (/rest/agile/1.0).
+    const url = path.startsWith('/rest/') ? path : `/rest/api/3${path}`
+    const res = await fetch(`${options.baseUrl}${url}`, {
       ...init,
       headers,
       signal: AbortSignal.timeout(TIMEOUT_MS),

@@ -6,6 +6,7 @@ import {
   DEFAULT_WORKFLOW,
   itemStatusNames,
   TASK_STATUS_DISPLAY,
+  type Heartbeat,
   type Rule,
   type RunExit,
   type RunnerPort,
@@ -230,9 +231,15 @@ function setup(
     },
   }
   const logs: string[] = []
+  const beats: Heartbeat[] = []
   const engine = (rules: Rule[] | ReturnType<typeof liveFlow> = [split], maxConcurrentRuns = 2) =>
     createEngine({
-      tracker,
+      tracker: {
+        ...tracker,
+        writeHeartbeat: async (b) => {
+          if (b !== undefined) beats.push(b)
+        },
+      },
       store,
       clock,
       flow: Array.isArray(rules) ? liveFlow(rules) : rules,
@@ -248,6 +255,7 @@ function setup(
       runners: { fake: runner },
       tokens,
       mcpUrl: 'http://localhost/agent-mcp',
+      engineId: 'test-engine',
       log: (m) => logs.push(m),
     })
   const readyItem = async (title = 'Login page'): Promise<WorkUnit> => {
@@ -291,6 +299,7 @@ function setup(
     readyItem,
     now,
     logs,
+    beats,
     logDir,
     storeDb,
     trackerDb,
@@ -1645,5 +1654,7 @@ describe('the flow saved on the settings page (D91)', () => {
 
     expect((await t.tracker.get(item.ref)).status).toBe('ready-to-split')
     expect(t.started).toEqual([])
+    // It still holds the project while it waits (D66).
+    expect(t.beats).toEqual([{ engineId: 'test-engine', lastSeen: '2026-11-20T12:00:00.000Z' }])
   })
 })

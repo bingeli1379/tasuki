@@ -1,5 +1,6 @@
 import type { RuleMode, RunExit } from '../../domain/rule'
 import type { Ref } from '../../domain/work-unit'
+import type { DoctorFinding } from './doctor'
 
 export interface RunSpec {
   runId: string
@@ -32,4 +33,7 @@ export interface RunHandle {
 
 export interface RunnerPort {
   start(spec: RunSpec): RunHandle
+  // The agent preflight (doctor, check 9 and 10): the CLI is there, what the agent needs is
+  // installed. Left out by a runner with nothing to check.
+  doctor?(): Promise<DoctorFinding[]>
 }
