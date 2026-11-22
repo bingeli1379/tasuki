@@ -179,6 +179,9 @@ importers:
       '@tasuki/claude-cli':
         specifier: workspace:*
         version: link:packages/claude-cli
+      '@tasuki/codex-cli':
+        specifier: workspace:*
+        version: link:packages/codex-cli
       '@tasuki/fake-runner':
         specifier: workspace:*
         version: link:packages/fake-runner
@@ -219,6 +222,10 @@ importers:
       '@tasuki/core':
         specifier: workspace:*
         version: link:../core
+    devDependencies:
+      '@tasuki/testkit':
+        specifier: workspace:*
+        version: link:../testkit
 
   packages/cli:
     dependencies:
@@ -234,6 +241,9 @@ importers:
       '@tasuki/claude-cli':
         specifier: workspace:*
         version: link:../claude-cli
+      '@tasuki/codex-cli':
+        specifier: workspace:*
+        version: link:../codex-cli
       '@tasuki/core':
         specifier: workspace:*
         version: link:../core
@@ -253,6 +263,16 @@ importers:
       '@tasuki/web':
         specifier: workspace:*
         version: link:../web
+
+  packages/codex-cli:
+    dependencies:
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@tasuki/testkit':
+        specifier: workspace:*
+        version: link:../testkit
 
   packages/core: {}
 

@@ -60,7 +60,7 @@ function checkAuth(auth: unknown, env: Record<string, string>): void {
   if (variable === undefined)
     throw new Error('options.auth must be inherit-login, api-key or oauth-token')
   if ((env[variable] ?? '') === '')
-    throw new Error(`options.auth ${auth} needs options.env.${variable}`)
+    throw new Error(`options.auth ${String(auth)} needs options.env.${variable}`)
   if (auth === 'oauth-token')
     for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])
       if (env[key] !== undefined)

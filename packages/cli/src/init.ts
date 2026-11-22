@@ -124,6 +124,10 @@ const AGENTS = {
     `      "options": { "allowedTools": ${JSON.stringify(ALLOWED_TOOLS)} },`,
     '    },',
   ],
+  // Codex has no per-tool list: the sandbox is what its shell commands may touch.
+  codex: [
+    '    "codex": { "plugin": "@tasuki/codex-cli", "options": { "sandbox": "workspace-write" } },',
+  ],
   fake: ['    "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } },'],
 }
 
@@ -185,6 +189,11 @@ export async function init(configPath: string, fetchFn: typeof fetch = fetch): P
             value: 'claude' as const,
             label: 'claude',
             hint: "the claude CLI with this machine's login",
+          },
+          {
+            value: 'codex' as const,
+            label: 'codex',
+            hint: "the codex CLI with this machine's login",
           },
           { value: 'fake' as const, label: 'fake', hint: 'tries the flow without an LLM' },
         ],

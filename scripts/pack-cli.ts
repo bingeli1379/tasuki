@@ -12,6 +12,7 @@ const PACKAGES = [
   'sqlite',
   'jira-cloud',
   'claude-cli',
+  'codex-cli',
   'fake-runner',
   'auth-builtin',
   'auth-http',

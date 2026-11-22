@@ -17,5 +17,8 @@
   },
   "dependencies": {
     "@tasuki/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@tasuki/testkit": "workspace:*"
   }
 }

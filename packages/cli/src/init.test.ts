@@ -92,7 +92,7 @@ describe('tasuki init', () => {
       'kan',
       'Task',
       'Subtask',
-      ['claude'],
+      ['claude', 'codex'],
       'auth-builtin',
     ])
     await init(config, fetchFn as unknown as typeof fetch)
@@ -105,6 +105,7 @@ describe('tasuki init', () => {
     expect(text).toContain('"apiToken": "${JIRA_API_TOKEN}"')
     expect(text).not.toContain('right')
     expect(text).toContain('"@tasuki/auth-builtin"')
+    expect(text).toContain('"@tasuki/codex-cli"')
     const env = join(config, '..', '.env')
     expect(readFileSync(env, 'utf8')).toBe('JIRA_EMAIL=me@x.io\nJIRA_API_TOKEN=right\n')
     expect(statSync(env).mode & 0o777).toBe(0o600)

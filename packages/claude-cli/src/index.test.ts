@@ -17,6 +17,7 @@ import {
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { describeRunnerContract } from '@tasuki/testkit'
 import { describe, expect, it } from 'vite-plus/test'
 import plugin from './index'
 
@@ -309,3 +310,17 @@ describe('claude-cli doctor', () => {
     })
   })
 })
+
+describeRunnerContract('claude-cli', async () => ({
+  runner: (behavior) => setup(behavior === 'succeed' ? '' : behavior).runner,
+  missing: () =>
+    plugin.runner?.(
+      {
+        clock: { now: () => new Date() },
+        configDir: '',
+        dataDir: '',
+        statuses: createStatusMap({}),
+      },
+      { command: '/nowhere/claude' },
+    ) as RunnerPort,
+}))

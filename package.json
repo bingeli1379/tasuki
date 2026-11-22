@@ -17,6 +17,7 @@
     "@tasuki/auth-builtin": "workspace:*",
     "@tasuki/auth-http": "workspace:*",
     "@tasuki/claude-cli": "workspace:*",
+    "@tasuki/codex-cli": "workspace:*",
     "@tasuki/fake-runner": "workspace:*",
     "@tasuki/jira-cloud": "workspace:*",
     "@tasuki/sqlite": "workspace:*",
