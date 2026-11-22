@@ -27,13 +27,25 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
 import { createEngine } from './engine'
+import { createLiveFlow, type Flow } from './flow'
 import { createRunTokens } from './run-tokens'
 
 const named = itemStatusNames(DEFAULT_WORKFLOW)
-const statuses = createStatusMap({
+const mapping = {
   item: Object.fromEntries(DEFAULT_WORKFLOW.statuses.map((s) => [s.id, s.name])),
   task: TASK_STATUS_DISPLAY,
-})
+}
+const statuses = createStatusMap(mapping)
+// What parseFlow derives from the rework rule.
+const workflow = {
+  ...DEFAULT_WORKFLOW,
+  roles: { ...DEFAULT_WORKFLOW.roles, rework: 'ready-to-rework' },
+}
+const liveFlow = (rules: Rule[]) =>
+  createLiveFlow(
+    { agents: ['fake'], defaultMaxAttempts: 3 },
+    { flow: { workflow, statuses: mapping, rules, holdLabel: 'hold' } satisfies Flow, raw: {} },
+  )
 
 // Config fills these in from the failure role.
 const toFailure = { failed: 'blocked', max_attempts: 'blocked' }
@@ -183,11 +195,8 @@ function setup(
   const app = createApp({
     tracker,
     store,
-    statuses,
-    // What loadConfig derives from the rework rule.
-    workflow: { ...DEFAULT_WORKFLOW, roles: { ...DEFAULT_WORKFLOW.roles, rework: rework.watch } },
-    rules: [split, execute, rework, review, executeOrDesign],
-    holdLabel: 'hold',
+    flow: liveFlow([split, execute, rework, review, executeOrDesign]),
+    agents: ['fake'],
     tokens,
   })
   const scripts: Script[] = []
@@ -221,13 +230,12 @@ function setup(
     },
   }
   const logs: string[] = []
-  const engine = (rules: Rule[] = [split], maxConcurrentRuns = 2) =>
+  const engine = (rules: Rule[] | ReturnType<typeof liveFlow> = [split], maxConcurrentRuns = 2) =>
     createEngine({
       tracker,
       store,
       clock,
-      rules,
-      named,
+      flow: Array.isArray(rules) ? liveFlow(rules) : rules,
       limits: {
         maxConcurrentRuns,
         leaseSeconds: 120,
@@ -235,7 +243,6 @@ function setup(
         softGraceSeconds: 300,
         hardGraceSeconds: 10,
       },
-      holdLabel: 'hold',
       workspaceRoot: mkdtempSync(join(tmpdir(), 'tasuki-ws-')),
       logDir,
       runners: { fake: runner },
@@ -359,6 +366,16 @@ describe('rule split on a fake agent', () => {
       expect((await t.store.runsFor(item.ref))[0]?.outcome).toBe('failed')
       expect((await t.tracker.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
     }
+    // The board marks them while they stay where the failure put them.
+    const failedOn = async () =>
+      ((await (await t.app.request('/api/board')).json()) as { failed: Record<string, unknown> })
+        .failed
+    expect(await failedOn()).toEqual({
+      [silent.ref]: { outcome: 'failed', rule: 'split', attempts: 1 },
+      [crashed.ref]: { outcome: 'failed', rule: 'split', attempts: 1 },
+    })
+    await t.tracker.transition(silent.ref, 'blocked', 'refining')
+    expect(Object.keys(await failedOn())).toEqual([crashed.ref])
   })
 
   // agent-contract.md, the verdict table.
@@ -647,6 +664,45 @@ describe('rule execute on a fake agent', () => {
       'set_task_status',
       'report_result',
     ])
+  })
+
+  it('gives a custom agent every tool, and moves its item on whatever it reports (D92)', async () => {
+    const t = setup()
+    const custom: Rule = {
+      id: 'custom',
+      watch: 'in-progress',
+      agent: 'fake',
+      mode: 'custom',
+      maxAttempts: 3,
+      outcomes: {
+        succeeded: 'done',
+        done_for_now: 'in-review',
+        needs_input: 'blocked',
+        ...toFailure,
+      },
+      prompt: '',
+      session: 'fresh',
+    }
+    let names: string[] = []
+    t.scripts.push(async (client, spec) => {
+      names = (await client.listTools()).tools.map((tool) => tool.name)
+      return report('done_for_now')(client, spec)
+    })
+    const [item] = await t.approvedItem()
+    const engine = t.engine([custom])
+    await engine.tick()
+    await engine.settled()
+    expect(names).toEqual([
+      'get_item',
+      'list_tasks',
+      'create_task',
+      'list_comments',
+      'add_comment',
+      'set_task_status',
+      'report_result',
+    ])
+    // Its tasks are still open, which execute would refuse.
+    expect((await t.tracker.get(item?.ref ?? '')).status).toBe('in-review')
   })
 
   it('after a lease expiry the item stays in-progress, its tasks go back, and attempt 2 runs', async () => {
@@ -1025,6 +1081,11 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
     expect((await t.tracker.comments(item.ref)).at(-1)?.body).toBe(
       'Rule `split` gave up after 2 attempts that never finished. Moved **Ready to Split** → **Blocked**.',
     )
+    const board = async () =>
+      (await (await t.app.request('/api/board')).json()) as { failed: Record<string, unknown> }
+    expect((await board()).failed).toEqual({
+      [item.ref]: { outcome: 'max_attempts', rule: 'split', attempts: 2 },
+    })
 
     await t.tracker.transition(item.ref, 'blocked', 'ready-to-split')
     t.scripts.push(splitInto())
@@ -1036,6 +1097,7 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
       outcome: 'succeeded',
     })
     expect((await t.tracker.get(item.ref)).status).toBe('split-review')
+    expect((await board()).failed).toEqual({})
   })
 
   it('leaves an item a person already moved out of the claim status where it is', async () => {
@@ -1517,5 +1579,71 @@ describe('what the engine hands a runner (S8)', () => {
       expect(body.match(/noise/g)).toHaveLength(19)
     }
     expect((await t.tracker.comments(reported.ref))[0]?.body).not.toContain('The end of the log')
+  })
+})
+
+describe('the flow saved on the settings page (D91)', () => {
+  const admin = {
+    userId: 'local',
+    username: '',
+    displayName: '',
+    access: 'admin' as const,
+    disabled: false,
+    createdAt: '',
+  }
+  // The default stations keyed as the test tracker keys them, and a split rule sending
+  // succeeded wherever it is told.
+  const raw = (succeeded: string) => ({
+    workflow: {
+      statuses: DEFAULT_WORKFLOW.statuses.map((s) => ({ ...s, key: s.name })),
+      roles: DEFAULT_WORKFLOW.roles,
+      taskStatuses: TASK_STATUS_DISPLAY,
+    },
+    rules: [
+      {
+        id: 'split',
+        watch: 'ready-to-split',
+        claim: 'splitting',
+        agent: 'fake',
+        mode: 'split',
+        outcomes: { succeeded, needs_input: 'needs-answers' },
+      },
+    ],
+  })
+
+  it('takes effect on the next round, while a Run already going keeps the rule it started on', async () => {
+    const t = setup()
+    const flow = liveFlow([split])
+    const engine = t.engine(flow)
+    let release = (): void => {}
+    const gate = new Promise<void>((resolve) => (release = resolve))
+    t.scripts.push(async (mcp, spec) => {
+      await gate
+      return splitInto()(mcp, spec)
+    })
+    const first = await t.readyItem('First')
+    await engine.tick()
+
+    await flow.save({ tracker: t.tracker, store: t.store }, admin, undefined, raw('in-progress'))
+    release()
+    await engine.settled()
+    expect((await t.tracker.get(first.ref)).status).toBe('split-review')
+
+    const second = await t.readyItem('Second')
+    await engine.tick()
+    await engine.settled()
+    expect((await t.tracker.get(second.ref)).status).toBe('in-progress')
+    expect(flow.saved()).toMatchObject({ version: 1, flow: raw('in-progress') })
+  })
+
+  it('starts nothing while a station is keyed to a status the tracker lacks', async () => {
+    const t = setup()
+    const flow = liveFlow([split])
+    flow.unmatched = ['in-review']
+    const item = await t.readyItem()
+    await t.engine(flow).tick()
+
+    expect((await t.tracker.get(item.ref)).status).toBe('ready-to-split')
+    expect(t.started).toEqual([])
   })
 })

@@ -1,7 +1,9 @@
 import type { Outcome, Verdict } from './run'
 import { isRunnable, type TaskNode } from './task'
 
-export type RuleMode = 'split' | 'execute' | 'rework' | 'review'
+// custom: every tool, nothing checked, the prompt alone says what to do; it still has to say
+// where a finished item goes (D92).
+export type RuleMode = 'split' | 'execute' | 'rework' | 'review' | 'custom'
 
 // What each mode itself means by an outcome, so the engine checks it before acting on it
 // (agent-contract.md). Every other outcome a rule declares is moved on as it is.
@@ -10,6 +12,7 @@ export const MODE_OUTCOMES: Record<RuleMode, readonly string[]> = {
   execute: ['succeeded', 'blocked_manual'],
   rework: ['succeeded'],
   review: [],
+  custom: ['succeeded'],
 }
 
 // The outcomes every rule has without declaring them: config sends them to the failure
@@ -104,6 +107,8 @@ function refuse(
   { tasks, produced }: Evidence,
 ): string | undefined {
   const claim = `the agent reported ${verdict}`
+  // Whoever picked custom answers for its verdicts, needs_input included (D92).
+  if (mode === 'custom') return undefined
   if (verdict !== 'needs_input' && !MODE_OUTCOMES[mode].includes(verdict)) return undefined
   switch (verdict) {
     case 'succeeded': {

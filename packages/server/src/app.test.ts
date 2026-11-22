@@ -1,6 +1,6 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { createStatusMap, type WorkUnit, type Workflow } from '@tasuki/core'
+import { createStatusMap, type StatusMapping, type WorkUnit, type Workflow } from '@tasuki/core'
 import {
   createSqliteStore,
   createSqliteTracker,
@@ -11,11 +11,14 @@ import {
 } from '@tasuki/sqlite'
 import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
+import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
+import { defaultPrompt } from './prompts'
 import { createRunTokens } from './run-tokens'
 
-const statuses = createStatusMap({
+const mapping: StatusMapping = {
   item: { refining: 'Refining', 'ready-to-split': 'Ready to Split', done: 'Done' },
-})
+}
+const statuses = createStatusMap(mapping)
 const workflow: Workflow = {
   statuses: [
     { id: 'refining', name: 'Refining', outcomes: [] },
@@ -43,14 +46,19 @@ const memoryStore = (): ReturnType<typeof createSqliteStore> => {
   return createSqliteStore(db, { now: () => new Date() })
 }
 
+// A flow already parsed, with no rules.
+const liveFlow = (statuses: StatusMapping) =>
+  createLiveFlow(
+    { agents: [], defaultMaxAttempts: 3 },
+    { flow: { workflow, statuses, rules: [], holdLabel: 'hold' }, raw: {} },
+  )
+
 const appWith = (): ReturnType<typeof createApp> =>
   createApp({
     tracker: memoryTracker(),
     store: memoryStore(),
-    statuses,
-    workflow,
-    rules: [],
-    holdLabel: 'hold',
+    flow: liveFlow(mapping),
+    agents: [],
     tokens: createRunTokens(),
   })
 
@@ -281,10 +289,11 @@ describe('item detail', () => {
 })
 
 describe('tasks', () => {
-  const taskStatuses = createStatusMap({
+  const taskMapping: StatusMapping = {
     item: { 'split-review': 'Split Review', 'in-progress': 'In Progress' },
     task: { 'to-do': 'To Do', manual: 'Manual', done: 'Done' },
-  })
+  }
+  const taskStatuses = createStatusMap(taskMapping)
   const setup = async () => {
     const db = openDatabase(':memory:')
     migrate(db, TRACKER_MIGRATIONS)
@@ -297,10 +306,8 @@ describe('tasks', () => {
     const app = createApp({
       tracker,
       store,
-      statuses: taskStatuses,
-      workflow,
-      rules: [],
-      holdLabel: 'hold',
+      flow: liveFlow(taskMapping),
+      agents: [],
       tokens: createRunTokens(),
     })
     const item = await tracker.createItem({ title: 'Item', body: '', status: 'split-review' })
@@ -515,5 +522,108 @@ describe("MCP for the user's AI client", () => {
       text(await client.callTool({ name: 'get_item', arguments: { ref: item.ref } })),
     ) as { attachments: unknown[] }
     expect(after.attachments).toEqual([])
+  })
+})
+
+describe('the flow settings (D91)', () => {
+  // The flow out of the store, with the tracker keyed by it, as the server starts.
+  const setup = async () => {
+    const store = memoryStore()
+    const flow = await loadFlow(store, { agents: ['fake'], defaultMaxAttempts: 3 })
+    const db = openDatabase(':memory:')
+    migrate(db, TRACKER_MIGRATIONS)
+    const tracker = createSqliteTracker(
+      { clock: { now: () => new Date() }, configDir: '', dataDir: '', statuses: flow.statuses },
+      db,
+      'M',
+    )
+    const app = createApp({ tracker, store, flow, agents: ['fake'], tokens: createRunTokens() })
+    return { app, tracker }
+  }
+  const put = (app: ReturnType<typeof createApp>, version: number | undefined, flow: unknown) =>
+    app.request('/api/flow', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...(version === undefined ? {} : { version }), flow }),
+    })
+  const stations = DEFAULT_FLOW['workflow'] as { statuses: { id: string; name: string }[] }
+  const withStations = (statuses: unknown[], entry = 'refining') => ({
+    ...DEFAULT_FLOW,
+    workflow: { ...stations, statuses, roles: { entry, failure: 'blocked' } },
+  })
+
+  it('starts on the default, never saved, with what the form picks from', async () => {
+    const { app } = await setup()
+    expect(await (await app.request('/api/flow')).json()).toEqual({
+      flow: DEFAULT_FLOW,
+      agents: ['fake'],
+      defaultMaxAttempts: 3,
+      prompts: {
+        split: defaultPrompt('split'),
+        execute: defaultPrompt('execute'),
+        rework: defaultPrompt('rework'),
+        review: defaultPrompt('review'),
+        custom: '',
+      },
+      // sqlite takes any key.
+      trackerStatuses: null,
+    })
+  })
+
+  it('a save shows on the board at once, and a save from an older version is a 409', async () => {
+    const { app } = await setup()
+    const added = withStations([...stations.statuses, { id: 'ai-review', name: 'AI Review' }])
+    const saved = await put(app, undefined, added)
+    expect(await saved.json()).toEqual({ version: 1 })
+    const board = (await (await app.request('/api/board')).json()) as {
+      columns: { status: string }[]
+      unmatched: string[]
+    }
+    expect(board.columns.map((c) => c.status).at(-1)).toBe('ai-review')
+    expect(board.unmatched).toEqual([])
+    expect(await (await app.request('/api/flow')).json()).toMatchObject({ version: 1, flow: added })
+
+    const stale = await put(app, undefined, DEFAULT_FLOW)
+    expect(stale.status).toBe(409)
+    expect(await (await app.request('/api/flow')).json()).toMatchObject({ version: 1 })
+  })
+
+  it('refuses a flow that cannot work, saying where', async () => {
+    const { app } = await setup()
+    const res = await put(app, undefined, {
+      ...DEFAULT_FLOW,
+      rules: [{ id: 'split', watch: 'ready-to-split', agent: 'claude', mode: 'split' }],
+    })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: `rules[0] (split).agent: no agent "claude" in the config file's agents`,
+    })
+  })
+
+  it('a new display name is fine with items on it; a new id is not, and names them', async () => {
+    const { app, tracker } = await setup()
+    const item = await tracker.createItem({
+      title: 'Login page',
+      body: '',
+      status: 'needs-answers',
+    })
+    const renamed = (to: { id: string; name: string }) =>
+      withStations(stations.statuses.map((s) => (s.id === 'needs-answers' ? { ...s, ...to } : s)))
+    expect(
+      (await put(app, undefined, renamed({ id: 'needs-answers', name: 'Asked' }))).status,
+    ).toBe(200)
+    const board = (await (await app.request('/api/board')).json()) as {
+      columns: { status: string; displayName: string; items: unknown[] }[]
+    }
+    expect(board.columns.find((c) => c.status === 'needs-answers')).toMatchObject({
+      displayName: 'Asked',
+      items: [{ ref: item.ref }],
+    })
+
+    const moved = await put(app, 1, renamed({ id: 'asked', name: 'Asked' }))
+    expect(moved.status).toBe(400)
+    expect(await moved.json()).toEqual({
+      error: `move these off the statuses removed or renamed first: ${item.ref} (needs-answers)`,
+    })
   })
 })

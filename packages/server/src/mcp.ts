@@ -18,22 +18,18 @@ import {
   stopRun,
   updateItem,
   updateTask,
-  type Rule,
   type StorePort,
-  type StatusMap,
-  type Workflow,
   type TrackerPort,
 } from '@tasuki/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import type { LiveFlow } from './flow'
 
 export interface McpDeps {
   tracker: TrackerPort
   store: StorePort
-  statuses: StatusMap
-  workflow: Workflow
-  rules: readonly Rule[]
-  holdLabel: string
+  // Read once: a server lives for one request.
+  flow: LiveFlow
 }
 
 const json = (value: unknown): { content: { type: 'text'; text: string }[] } => ({
@@ -42,14 +38,9 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 
 // The user's own AI client (Claude Code, Codex) acting as the user: the same use cases as
 // the board, so whatever a person can do on the board this can do too (D57).
-export function createMcpServer({
-  tracker,
-  store,
-  statuses,
-  workflow,
-  rules,
-  holdLabel,
-}: McpDeps): McpServer {
+export function createMcpServer({ tracker, store, flow }: McpDeps): McpServer {
+  const { workflow, rules, holdLabel } = flow.current()
+  const statuses = flow.statuses
   const server = new McpServer({ name: 'tasuki', version: '0.0.0' })
   const { entry, rework } = workflow.roles
   const noAgent = 'while no agent works on its item (stop_run first)'

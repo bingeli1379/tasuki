@@ -56,7 +56,8 @@
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約（已完成，D88） | 行為不變，契約測試多一套 |
 | S9a | `auth-builtin`、access 與帳號管理、setup token、session cookie 與 CSRF、登入防暴力、`Host` 檢查、`/mcp` 的個人 API token（已完成，D60、D89） | 用 log 裡的 setup token 建第一個 admin、建帳號、改 access、ttl 過期或改 ttl 被踢回登入頁、沒登入打 API 被拒；產生 token 貼進 Claude Code，撤銷後 401 |
 | S9c | `auth-http`、開放非 loopback 綁定（`publicUrl`、`allowInsecure`）（已完成，D89、D90） | setup 連結建第一個 admin；admin 貼一串 username 加人，名單上的人用外部帳號登入，刪掉的進不來 |
-| W4 | 流程設定進 store、設定頁（只給 `admin` 與 `maintainer`）、熱重載、修改歷史（要 S9 的 auth） | 在網頁上改規則和 prompt，下一輪就生效，看得到誰改了什麼 |
+| W4a | 流程設定（站、角色、task status 對照、規則與 prompt、hold label）進 store，設定頁用表單（只給 `admin` 與 `maintainer`）、熱重載；agent、poll、limits 留在檔案（已完成，D91） | 在網頁上加一站、改規則的 prompt，下一輪就生效；存檔不合法時看到錯在哪 |
+| W4b | 流程設定的修改歷史、回到任一版（D91） | 看得到誰在什麼時候改了什麼，能回到前一版 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
 | S12 | codex runner、npm CLI 打包、container image | `init`、`doctor`、`start` 可用 |
@@ -112,6 +113,8 @@
 ## 待驗證（動手前對現行文件確認）
 
 這些在設計時是憑印象寫的。
+
+- `claude -p` 用 `--resume` 接回一段快滿的對話時，會不會自己壓縮（auto-compact）。`session: per-item` 的規則接了很多次之後要靠它；不會的話，要讓 runner 在 token 用量太高時改開新對話，或同一張卡接了 N 次就重開（作者 2026-11-22 提出）。
 
 - `codex` 的 headless 指令：輸出格式、session resume、工具白名單、注入 MCP 設定的方式。`claude` 已在 S8 用 2.1.323 驗過（D76）：`-p --output-format stream-json --verbose`、`--session-id` 自訂 uuid、`--resume`（找不到時 exit 1）、`--mcp-config` 給 http server 帶 header、`--allowedTools` 的格式是 `mcp__<server>` 與 `Bash(git:*)`。
 - `claude` 與 `codex` 各自的 `api-key`、`oauth-token` 認證要吃哪個環境變數（D35）。claude-cli 目前只做 `inherit-login`。

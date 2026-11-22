@@ -518,6 +518,18 @@ export function createJiraTracker(
       }
     },
 
+    async listStatuses(kind) {
+      // Per issue type, as the project's workflow gives them.
+      const types = await jira<{ id: string; statuses: { id: string; name: string }[] }[]>(
+        'GET',
+        `/project/${options.project}/statuses`,
+      )
+      return (types.find((t) => t.id === options.issueTypes[kind])?.statuses ?? []).map((s) => ({
+        key: s.id,
+        name: s.name,
+      }))
+    },
+
     async deleteAttachment(target, id) {
       const issue = await getUnit(target)
       // The attachment API takes any id, so check it belongs to this issue first.

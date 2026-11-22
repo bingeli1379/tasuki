@@ -93,6 +93,9 @@ interface TrackerPort {
   removeLabel(ref: Ref, label: string): Promise<WorkUnit>
   updateTask(ref: Ref, patch: TaskPatch): Promise<void>
   setLabels(ref: Ref, labels: string[]): Promise<void>
+  // Optional: the statuses a unit of this kind can be in, for a tracker with a fixed set (Jira).
+  // The settings page picks keys from it, and a save is refused on a key outside it (D91).
+  listStatuses?(kind: Kind): Promise<{ key: string; name: string }[]>
 }
 
 interface Clock {
@@ -116,6 +119,9 @@ interface StorePort {
   requestCancel(id: string, mode: CancelMode, by: CancelReason): Promise<void>  // first time stays; a hard one upgrades soft and its reason wins (D73)
   isPaused(): Promise<boolean>                // the global pause, kept in engine_state (D73)
   setPaused(paused: boolean): Promise<void>
+  // The flow settings as opaque JSON, every save a new version; the engine checks them (D91).
+  latestFlow(): Promise<FlowVersion | undefined>          // undefined before the first save
+  saveFlow(expected: number | undefined, flow: unknown, savedBy: string): Promise<FlowVersion>  // throws FlowConflict if not the latest
 }
 
 interface RunnerPort {

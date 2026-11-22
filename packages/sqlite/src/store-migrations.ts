@@ -134,4 +134,11 @@ export const STORE_MIGRATIONS: readonly string[] = [
   // S9c (D90): who the outside system says an account is, bound at its first sign in.
   `ALTER TABLE account ADD COLUMN external_id TEXT;
   CREATE UNIQUE INDEX account_by_external_id ON account(external_id);`,
+  // W4a (D91): every save of the flow settings, as JSON the engine checks, newest the one in use.
+  `CREATE TABLE flow_version (
+    version  INTEGER PRIMARY KEY,
+    flow     TEXT NOT NULL,
+    saved_by TEXT NOT NULL,
+    saved_at TEXT NOT NULL
+  );`,
 ]

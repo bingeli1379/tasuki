@@ -40,6 +40,15 @@ export interface Session {
   createdAt: string
 }
 
+// One save of the flow settings (D91). The store keeps them as given; the engine checks them.
+export interface FlowVersion {
+  version: number
+  flow: unknown
+  // The name of whoever saved it, copied at the time; empty when nobody signs in.
+  savedBy: string
+  savedAt: string
+}
+
 export interface ApiToken {
   id: string
   userId: string
@@ -48,7 +57,7 @@ export interface ApiToken {
   createdAt: string
 }
 
-// The engine's own state: Runs, the global pause, and who may sign in with what. A plugin role, like the tracker (D78).
+// The engine's own state: Runs, the global pause, the flow settings, and who may sign in with what. A plugin role, like the tracker (D78).
 // The store stamps every time from the Clock.
 export interface StorePort {
   // Throws RunConflict when the target already has a live Run (invariant 1).
@@ -77,6 +86,12 @@ export interface StorePort {
   setPaused(paused: boolean): Promise<void>
   // The newest Run of each target, where that Run ended in outcome.
   latestRunsEndedIn(outcome: Outcome): Promise<Run[]>
+
+  // Undefined until the first save.
+  latestFlow(): Promise<FlowVersion | undefined>
+  // Compare-and-set on the version latestFlow gave, undefined before the first save. Throws
+  // FlowConflict when another save came in between. Versions count up from 1.
+  saveFlow(expected: number | undefined, flow: unknown, savedBy: string): Promise<FlowVersion>
 
   // Throws InvalidInput when the userId, the username or the externalId is taken.
   createAccount(account: NewAccount): Promise<Account>

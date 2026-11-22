@@ -1,7 +1,7 @@
 import { createStatusMap, type TrackerPort } from '@tasuki/core'
 import { describeTrackerContract } from '@tasuki/testkit'
 import { existsSync } from 'node:fs'
-import { describe, it } from 'vite-plus/test'
+import { describe, expect, it } from 'vite-plus/test'
 import { createClient, createFetch, JiraHttpError } from './client'
 import { parseOptions } from './options'
 import { createJiraTracker } from './tracker'
@@ -23,27 +23,42 @@ const configured = [
 ].every((k) => env[k])
 
 if (configured) {
-  describeTrackerContract('jira-cloud', () => {
-    const options = parseOptions({
-      baseUrl: env['JIRA_BASE_URL'],
-      email: env['JIRA_EMAIL'],
-      apiToken: env['JIRA_API_TOKEN'],
-      project: env['JIRA_TEST_PROJECT'],
-      issueTypes: { item: env['JIRA_TEST_ITEM_TYPE'], task: env['JIRA_TEST_TASK_TYPE'] },
-      dependencyLinkType: env['JIRA_TEST_LINK_TYPE'],
+  const options = parseOptions({
+    baseUrl: env['JIRA_BASE_URL'],
+    email: env['JIRA_EMAIL'],
+    apiToken: env['JIRA_API_TOKEN'],
+    project: env['JIRA_TEST_PROJECT'],
+    issueTypes: { item: env['JIRA_TEST_ITEM_TYPE'], task: env['JIRA_TEST_TASK_TYPE'] },
+    dependencyLinkType: env['JIRA_TEST_LINK_TYPE'],
+  })
+  const jiraFetch = createFetch(options)
+  const jira = createClient(jiraFetch)
+  // Logical status -> Jira status id, as JSON.
+  const mapping = {
+    item: JSON.parse(String(env['JIRA_TEST_ITEM_STATUSES'])) as Record<string, string>,
+    task: JSON.parse(String(env['JIRA_TEST_TASK_STATUSES'])) as Record<string, string>,
+  }
+  const ctx = {
+    clock: { now: () => new Date() },
+    configDir: '',
+    dataDir: '',
+    statuses: createStatusMap(mapping),
+  }
+
+  describe('jira-cloud listStatuses', () => {
+    it('lists, per kind, the statuses its issue type can be in, by id', async () => {
+      const tracker = createJiraTracker(ctx, options, jira, jiraFetch)
+      for (const kind of ['item', 'task'] as const) {
+        const listed = await tracker.listStatuses?.(kind)
+        expect(listed?.map((s) => s.key)).toEqual(
+          expect.arrayContaining(Object.values(mapping[kind])),
+        )
+        expect(listed?.every((s) => s.name !== '')).toBe(true)
+      }
     })
-    const jiraFetch = createFetch(options)
-    const jira = createClient(jiraFetch)
-    const ctx = {
-      clock: { now: () => new Date() },
-      configDir: '',
-      dataDir: '',
-      // Logical status -> Jira status id, as JSON.
-      statuses: createStatusMap({
-        item: JSON.parse(String(env['JIRA_TEST_ITEM_STATUSES'])) as Record<string, string>,
-        task: JSON.parse(String(env['JIRA_TEST_TASK_STATUSES'])) as Record<string, string>,
-      }),
-    }
+  })
+
+  describeTrackerContract('jira-cloud', () => {
     const inner = createJiraTracker(ctx, options, jira, jiraFetch)
     const created: string[] = []
     const tracker: TrackerPort = {

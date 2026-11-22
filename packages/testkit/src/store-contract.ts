@@ -1,4 +1,5 @@
 import {
+  FlowConflict,
   InvalidInput,
   NotFound,
   RunConflict,
@@ -199,6 +200,34 @@ export function describeStoreContract(
       await store.setPaused(false)
       await store.setPaused(false)
       expect(await store.isPaused()).toBe(false)
+    })
+
+    it('the flow is unset until saved; each save is a version up, stamped and kept as given', async () => {
+      expect(await store.latestFlow()).toBeUndefined()
+      const flow = { workflow: { statuses: [{ id: 'refining' }] }, rules: [], note: null }
+      expect(await store.saveFlow(undefined, flow, 'Eli')).toEqual({
+        version: 1,
+        flow,
+        savedBy: 'Eli',
+        savedAt: at(T0),
+      })
+      now += 1000
+      await store.saveFlow(1, { rules: [] }, '')
+      expect(await store.latestFlow()).toEqual({
+        version: 2,
+        flow: { rules: [] },
+        savedBy: '',
+        savedAt: at(T0 + 1000),
+      })
+    })
+
+    it('a save from a version that is no longer the latest is a FlowConflict and writes nothing', async () => {
+      await expect(store.saveFlow(1, {}, 'Eli')).rejects.toBeInstanceOf(FlowConflict)
+      await store.saveFlow(undefined, { a: 1 }, 'Eli')
+      await store.saveFlow(1, { a: 2 }, 'Eli')
+      await expect(store.saveFlow(1, { a: 3 }, 'Kai')).rejects.toBeInstanceOf(FlowConflict)
+      await expect(store.saveFlow(undefined, { a: 3 }, 'Kai')).rejects.toBeInstanceOf(FlowConflict)
+      expect(await store.latestFlow()).toMatchObject({ version: 2, flow: { a: 2 } })
     })
 
     const newAccount = (userId: string, username = userId) => ({

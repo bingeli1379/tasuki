@@ -4,7 +4,8 @@
   // ${VAR} expands from the environment; a .env next to this file is loaded first.
   "version": 1,
 
-  // Where this instance keeps its state: tracker.db, runtime.db, logs/, workspaces/.
+  // Where this instance keeps its state: tracker.db, store.db (Runs, accounts and the flow
+  // settings), logs/, workspaces/.
   "dataDir": "./data",
 
   "server": { "host": "127.0.0.1", "port": 8787, "allowInsecure": false },
@@ -18,30 +19,10 @@
   // refPrefix: sqlite refs become TSK-1, TSK-2... Default "TSK".
   "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
 
-  // The item statuses, in board order. Omitted, it is the ten of state-machine.md.
-  // id is the logical name; name is shown (default: id in Title Case); key is the tracker's
-  // status (default: name, which only suits sqlite). handledBy: "person" puts an eye on the
-  // column; a rule watching it puts a radar there instead. outcomes are the buttons a person
-  // gets in the item detail: label -> the status it moves the item to.
-  // roles say which status code uses for what: entry (new items), done, failure (where a
-  // rule's failed and max_attempts go), taskReview (tasks can be edited there; needed by a
-  // split or rework rule), rework (moving there asks what to fix; needed by a rework rule).
-  // taskStatuses maps the five fixed task statuses. A split rule needs to-do and manual, an
-  // execute rule all five. Omitted, each maps to its display name.
-  // "workflow": {
-  //   "statuses": [
-  //     { "id": "refining" },
-  //     { "id": "ready-to-split", "name": "Ready to Split" },
-  //     { "id": "split-review", "handledBy": "person",
-  //       "outcomes": { "→ Refining": "refining", "→ In Progress": "in-progress" } },
-  //     { "id": "in-progress" },
-  //     { "id": "ai-review", "name": "AI Review" },
-  //     { "id": "blocked", "handledBy": "person" },
-  //     { "id": "done" }
-  //   ],
-  //   "roles": { "entry": "refining", "done": "done", "failure": "blocked",
-  //              "taskReview": "split-review" }
-  // },
+  // The statuses, the rules and the hold label are not in this file: they live in the store
+  // and are edited on the settings page (the gear on the board), for an admin or a
+  // maintainer. A store never saved to runs the default statuses with no rules, so the
+  // engine leaves every item alone until a rule is added there (D91).
 
   // Jira Cloud instead; put JIRA_EMAIL and JIRA_API_TOKEN in .env.
   // Every Jira value below is an id, not a name, and ids differ per project.
@@ -56,12 +37,8 @@
   //     "dependencyLinkType": "10000"                        // the "Blocks" issue link type
   //   }
   // },
-  // Jira needs a workflow with a key on every status: names do not match Jira status ids.
-  // "workflow": {
-  //   "statuses": [{ "id": "refining", "key": "10003" }, { "id": "done", "key": "10005" }],
-  //   "roles": { "entry": "refining", "done": "done", "failure": "refining" },
-  //   "taskStatuses": { "to-do": "10003", "manual": "10012" }
-  // },
+  // On Jira, pick each status's Jira status on the settings page; until every one is picked
+  // the board says so and no agent starts.
 
   // Agents are runner plugins, given the same way as the tracker. The fake runner stands in
   // for an agent so the engine can be tried without an LLM. A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or
@@ -69,7 +46,7 @@
   // `seconds`, [fake:manual] making the second one manual. Executing, it walks every task it
   // can to done and reports blocked_manual when only manual ones are left.
   //
-  // Point a rule's agent at "claude" to run the real CLI with this machine's login. It may
+  // Rules on the settings page pick one of these by name. Point one at "claude" to run the real CLI with this machine's login. It may
   // use the tasuki tools and allowedTools only; nobody is there to approve anything else.
   // It loads none of this machine's Claude settings: give it what it needs with "plugins",
   // "mcpServers" and "appendSystemPromptFile" (its standing instructions). A stage that needs
@@ -83,36 +60,6 @@
       },
     },
   },
-
-  // Without rules the engine leaves every item alone. See docs/config-and-rules.md.
-  "rules": [
-    {
-      "id": "split",
-      "watch": "ready-to-split",
-      // No claim: the item stays in ready-to-split, its card says Running, and only the lease
-      // keeps a second Run off it. "claim": "splitting" moves it there while the agent works.
-      "agent": "fake",
-      "mode": "split",
-      // failed and max_attempts go to blocked unless given here.
-      "on": { "succeeded": "split-review", "needs_input": "needs-answers" },
-    },
-    {
-      "id": "execute",
-      "watch": "in-progress",
-      // No claim: the item stays in in-progress and only the lease keeps a second Run off it.
-      "agent": "fake",
-      "mode": "execute",
-      "on": { "succeeded": "in-review", "needs_input": "blocked", "blocked_manual": "blocked" },
-    },
-    {
-      "id": "rework",
-      "watch": "ready-to-rework",
-      "agent": "fake",
-      "mode": "rework",
-      // Its new tasks go through split-review too; done ones are never reopened by an agent.
-      "on": { "succeeded": "split-review", "needs_input": "blocked" },
-    },
-  ],
 
   // Defaults. leaseSeconds: a Run nobody renews for this long is abandoned and its item
   // goes back to the watch status. poll: 5 seconds on sqlite, 30 on Jira.

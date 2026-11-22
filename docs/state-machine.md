@@ -1,11 +1,11 @@
 # State machine (item / task)
 
-狀態名是 config 裡的邏輯名（kebab-case）。顯示名是 Title Case（`ready-to-split` 顯示成 `Ready to Split`）。
-Jira / sqlite 的實際名稱靠 config 的 status mapping 對應，這份文件不管實際名稱。
+狀態名是流程設定裡的邏輯名（kebab-case）。顯示名是 Title Case（`ready-to-split` 顯示成 `Ready to Split`）。
+Jira / sqlite 的實際名稱靠流程設定的 status mapping 對應，這份文件不管實際名稱。
 
 名詞以 glossary.md 為準，欄位細節以 data-model.md 為準。
 
-下面的十站是預設流程。站可以在 config 的 `workflow` 自己列，程式只認角色不認名字（D78、D81）：`entry` 是 `refining`、`failure` 是 `blocked`。`ready-to-rework` 的「打回要先寫回饋」來自 rework 規則盯它，不是角色（D86）。這份文件寫到站名的地方，換了流程就讀成扮演那個角色的站。
+下面的十站是預設流程。站可以在設定頁的流程設定裡自己列（D91），程式只認角色不認名字（D78、D81）：`entry` 是 `refining`、`failure` 是 `blocked`。`ready-to-rework` 的「打回要先寫回饋」來自 rework 規則盯它，不是角色（D86）。這份文件寫到站名的地方，換了流程就讀成扮演那個角色的站。
 
 ## Item
 
@@ -48,9 +48,11 @@ stateDiagram-v2
 
 看板每欄標出這站誰處理（D68，D81 改名 `handledBy`）：
 
-- engine：有規則 `watch` 這個 status，從 config 算，沒掛規則就不標。
+- engine：有規則 `watch` 這個 status，從規則算，沒掛規則就不標。
 - 人：站設了 `handledBy: "person"`。預設流程是 `needs-answers`、`split-review`、`in-review`、`blocked`，沒有規則會把 item 移出這幾欄。`blocked` 雖然有自動接回，前提是人先把 manual task 做完。
 - 不標：兩者都沒有。預設流程是 `refining`（人自己在寫，不是在等確認）、claim status（卡片上已經有 Running）、`done`。
+
+卡片另外標兩種狀態：agent 正在跑時外框有繞圈的藍光與 Running；最新一次 Run 以 `failed` 或 `max_attempts` 把 item 送來、而且它還在那站時，外框變紅並標 Failed 或 Gave up after N tries，人移走或下一次 Run 開跑就不標（D93）。
 
 一站設了 `handledBy: "person"` 又被規則 watch 時，標 engine，因為 engine 會去撿。
 

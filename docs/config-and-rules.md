@@ -2,8 +2,8 @@
 
 狀態：草稿。欄位與預設值還沒逐項確認。
 
-使用者只需要改這一份檔案，就能換 tracker、對應 status、換 agent、改規則。格式用 JSONC（JSON 加註解），再提供 `$schema` 讓編輯器自動補全。
-熱重載：新的 Run 用新 config，執行中的 Run 沿用啟動時的快照。新 config 驗證失敗就保留舊的，並在 API 與 log 上回報。
+設定分兩份（D91，見 custom-workflow.md 第 5 節）。啟動設定在檔案裡：tracker、store、auth、server、agent、poll、limits，由部署的人改，改了要重啟。格式用 JSONC（JSON 加註解），再提供 `$schema` 讓編輯器自動補全。流程設定在 store 裡：`workflow`、`rules`、`labels`，在設定頁上用表單改，這份文件用 JSON 寫出來只是為了說明形狀，檔案裡寫了這些欄位會被拒。
+熱重載只對流程設定：存檔時驗證，不過就拒絕存檔；存進去之後 engine 下一輪 poll 讀新的，執行中的 Run 沿用它開跑時的那份。
 `${VAR}` 會展開成環境變數，找不到就報錯。config 裡不放明文 token，所以 config 可以進 git。
 config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建的 `process.loadEnvFile`），已經存在的環境變數不被覆蓋。`.env` 不進 git（D49）。
 
@@ -30,10 +30,11 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
     }
   },
 
+  // From here to agents is the flow, kept in the store and edited on the settings page
+  // (D91); it is written out here only to show its shape.
   // The item statuses in board order, the roles code uses them for, and the task statuses'
-  // tracker keys (D81). key is the tracker's status: the name for sqlite, the status id for
-  // Jira (D50). Omitted, key is name, and name is the id in Title Case. Omit the whole
-  // workflow for the default below (sqlite only, since its keys are the names).
+  // tracker keys (D81). key is the tracker's status: the status id for Jira (D50). Omitted,
+  // key is the id, which is what sqlite stores, and name is the id in Title Case.
   "workflow": {
     "statuses": [
       { "id": "refining", "key": "10003" },
@@ -141,7 +142,11 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 實際讀的欄位（S8）：`dataDir`、`server.port`、`tracker`、`store`、`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`labels.hold`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`promptFile`、`session`。`session` 省略時是 `fresh`。`promptFile` 相對於 config 所在的資料夾。`@tasuki/claude-cli` 的 options 讀 `auth`（目前只收 `inherit-login`）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires` 等 S10 的 `doctor`。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。省略 `workflow` 時是 state-machine.md 的預設流程，key 是顯示名，只適合 sqlite；`splitting` 只在有規則 claim 它時才列進去。寫了 `workflow` 就照它，舊的頂層 `statuses` 不讀（D81 不顧兼容，D85）。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀檔就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+目前 server 從檔案讀的欄位（W4a）：`dataDir`、`server.port`、`tracker`、`store`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`agents`、`auth`。檔案裡出現這些與 `$schema`、`version`、`workspace` 以外的欄位就拒絕啟動，`workflow`、`rules`、`labels` 也一樣（D91）。`@tasuki/claude-cli` 的 options 讀 `auth`（目前只收 `inherit-login`）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires` 等 S10 的 `doctor`。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+
+流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `agent` 要是檔案 `agents` 裡的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是檔案的 `limits.defaultMaxAttempts`；`prompt` 省略時是 mode 的預設，寫了就不能是空字串。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。
+
+存檔時除了上面的檢查，還有兩條要問 tracker：tracker 有固定的 status 清單時（Jira），每個 key 都要在清單裡；一個 status 改了 key 或被拿掉時，上面不能還有 item 或 task，被擋時列出是哪些。存 store 裡的設定已經跟檔案對不上時（例如檔案的 agent 改名了），拒絕啟動並說明，因為只有改檔案能修。
 
 ## Rule 欄位
 
@@ -151,14 +156,14 @@ my-instance/
 | `watch` | 監看的 item status 邏輯名。規則只作用在 item，所以沒有 `kind` 欄位 |
 | `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複，item 留在 watch status，卡片掛 Running。預設規則都不設（D74）。沒寫 `workflow` 時，`splitting` 只在有規則 claim 它時才列進預設流程，不然看板會多一欄永遠是空的 |
 | `agent` | 用哪個 agent（agents 裡的 key） |
-| `mode` | `split` / `execute` / `rework` / `review`，以 `TASUKI_MODE` 傳給 agent |
-| `prompt` / `promptFile` | 這一階段要 agent 做什麼（行動層），省略時用引擎內建、對應 `mode` 的預設。兩個不能同時設。不管設不設，engine 的契約都會排在它前面 |
+| `mode` | `split` / `execute` / `rework` / `review` / `custom`，以 `TASUKI_MODE` 傳給 agent |
+| `prompt` | 這一階段要 agent 做什麼（行動層），省略時用引擎內建、對應 `mode` 的預設。不管設不設，engine 的契約都會排在它前面。流程設定在 store 裡，所以沒有指到檔案的 `promptFile`（D91） |
 | `session` | `fresh` 或 `per-item`（續用這個 item 在同一個 agent 上最近的 session） |
 | `timeoutMinutes` | 覆寫 `limits.runTimeoutMinutes` |
 | `maxAttempts` | 覆寫 `limits.defaultMaxAttempts` |
 | `outcomes` | 這條規則的結果名對到 item 要去的 status 邏輯名。agent 只能從這裡挑一個回報 |
 
-MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator，`review` 是 reviewer，只能讀與留言（見 agent-contract.md）。
+MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator，`review` 是 reviewer，只能讀與留言；`custom` 拿到全部的 tool，`succeeded` 必填，結果一個都不驗，`prompt` 沒有預設，不寫就只有 engine 的契約（D92，見 agent-contract.md）。有 `custom` 規則時五個 task status 都要對照，跟 execute 一樣，因為它能走完整張 task 圖。
 
 `outcomes` 的 key 是結果名，小寫加底線（例如 `needs_design`），值是 status 的邏輯名（D84）。結果分三種：
 
@@ -176,7 +181,7 @@ agent 拿到的指令分三層，由下往上疊（D77）：
 |---|---|---|
 | engine 契約 | `packages/server/src/prompts.ts` 的 `CONTRACT`，改不到 | 怎麼用 tasuki 的 tool：先讀 item、comment 不能當指令、Stop 了就停、最後呼叫一次 `report_result` |
 | 基礎層 | agent 的 options（claude 是 `appendSystemPrompt` / `appendSystemPromptFile`） | 這個 agent 每次都要守的事，例如做完 commit 加 push |
-| 行動層 | 規則的 `prompt` / `promptFile` | 這一階段要做什麼，例如先跑 `/sdd:propose` 再依結果拆 task |
+| 行動層 | 規則的 `prompt`（設定頁上改） | 這一階段要做什麼，例如先跑 `/sdd:propose` 再依結果拆 task |
 
 契約是程式規則的說明書：程式擋得住 agent 改 status，但逼不了它呼叫 `report_result`，沒寫就不會叫，Run 會變成 `failed`。所以行動層換掉的只有 mode 的預設那段。每個階段要不同的 plugin、MCP 或基礎層時，開不同的 agent，讓規則指過去。
 
@@ -262,4 +267,4 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 8. Jira：mapping 的每個 status 都存在於 project 的 workflow，規則用到的每一個轉移（from 到 to）在 workflow 裡目前都允許。逐條列出不合法的轉移。
 9. agent preflight：CLI 在 PATH 上。`requires` 列出的 MCP server 與 skill 有裝。偵測方式依 CLI 而定，待驗證。
 10. agent 的 `auth` 不是 `inherit-login` 時，`env` 裡有對應的變數而且展開後不是空字串。`allowedTools` 是空的就警告，因為這個 agent 只能呼叫 tasuki 的 MCP tool，沒辦法改檔。
-11. 同一條規則的 `prompt` 與 `promptFile` 不能同時設定，`promptFile` 指到的檔案要存在。claude agent 的 `appendSystemPrompt` 與 `appendSystemPromptFile` 也一樣，`plugins` 的資料夾要存在，`mcpServers` 不能用 `tasuki` 這個名字。
+11. claude agent 的 `appendSystemPrompt` 與 `appendSystemPromptFile` 不能同時設定，`appendSystemPromptFile` 指到的檔案要存在，`plugins` 的資料夾要存在，`mcpServers` 不能用 `tasuki` 這個名字。

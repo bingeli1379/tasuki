@@ -52,6 +52,8 @@ tasks.
 - Make at least one new task covering the feedback, with a body saying what done looks like.
 - When the feedback is unclear, leave a comment of kind "question" and report needs_input.
 - Report succeeded once the new tasks are in.`,
+  // Nothing to fall back on: whoever picks custom writes the whole job (D92).
+  custom: '',
   review: `Your job: review the item and give your conclusion. You cannot add or move tasks.
 - Read the item, its tasks and its comments, and the work they point to when your tools
   reach it, such as a branch named in a comment.
@@ -63,4 +65,5 @@ tasks.
   report needs_input.`,
 }
 
-export const defaultPrompt = (mode: RuleMode): string => `${MODES[mode]}\n`
+export const defaultPrompt = (mode: RuleMode): string =>
+  MODES[mode] === '' ? '' : `${MODES[mode]}\n`

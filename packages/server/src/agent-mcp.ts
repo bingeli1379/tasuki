@@ -20,7 +20,8 @@ export interface AgentMcpDeps {
   store: StorePort
   run: Run
   // The rule that started the Run. Its mode picks the tools: splitters build the task graph,
-  // executors walk it, reviewers only read and comment (agent-contract.md, the tool table).
+  // executors walk it, reviewers only read and comment, custom gets all of it (agent-contract.md,
+  // the tool table).
   // Its outcomes are what the agent can report.
   rule: Rule
 }
@@ -61,7 +62,7 @@ export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps
     },
     async () => json(await listTasks(tracker, run.target)),
   )
-  if (mode === 'split' || mode === 'rework')
+  if (mode === 'split' || mode === 'rework' || mode === 'custom')
     server.registerTool(
       'create_task',
       {
@@ -130,7 +131,7 @@ export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps
       )
     },
   )
-  if (mode === 'execute')
+  if (mode === 'execute' || mode === 'custom')
     server.registerTool(
       'set_task_status',
       {

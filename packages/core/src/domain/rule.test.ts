@@ -122,6 +122,10 @@ describe('outcomeOf', () => {
     // review has no succeeded of its own, so one a rule declares means only what it says.
     ['review', 'succeeded', none, undefined],
     ['review', 'needs_input', none, 'the agent reported needs_input but asked no question'],
+    // custom is taken at its word, even where another mode would check (D92).
+    ['custom', 'succeeded', none, undefined],
+    ['custom', 'needs_input', none, undefined],
+    ['custom', 'done_for_now', none, undefined],
   ])('%s %s: %j is %s', (mode, verdict, evidence, reason) => {
     expect(outcomeOf(mode, verdict, clean, evidence)).toEqual(
       reason === undefined ? { outcome: verdict } : { outcome: 'failed', reason },

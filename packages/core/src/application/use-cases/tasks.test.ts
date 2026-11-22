@@ -146,7 +146,11 @@ describe('listBoard', () => {
               : [unit('X-2', { status: 'done' }), unit('X-3'), unit('Y-2', { parent: 'Y-1' })],
           ),
       }),
-      storeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
+      storeStub({
+        liveRuns: () => Promise.resolve([]),
+        isPaused: () => Promise.resolve(false),
+        latestRunsEndedIn: () => Promise.resolve([]),
+      }),
       workflow({ id: 'split-review' }),
       ['to-do', 'done'],
       [],
@@ -173,6 +177,7 @@ describe('listBoard', () => {
       }),
       storeStub({
         isPaused: () => Promise.resolve(false),
+        latestRunsEndedIn: () => Promise.resolve([]),
         liveRuns: () =>
           Promise.resolve(running ? [{ ...run, target: 'X-1', state: 'running' as const }] : []),
       }),
@@ -197,7 +202,11 @@ describe('listBoard', () => {
     })
     const board = await listBoard(
       trackerStub({ list: () => Promise.resolve([]) }),
-      storeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
+      storeStub({
+        liveRuns: () => Promise.resolve([]),
+        isPaused: () => Promise.resolve(false),
+        latestRunsEndedIn: () => Promise.resolve([]),
+      }),
       workflow(
         { id: 'refining' },
         { id: 'ready-to-split' },
