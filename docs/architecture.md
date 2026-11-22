@@ -236,14 +236,17 @@ packages/
   fake-runner/  runner plugin that stands in for an agent, for trying the engine without an LLM
   auth-builtin/ auth plugin: accounts kept in the store
   auth-http/    auth plugin: asks an external API
-  server/       composition root, REST, MCP facade (/agent-mcp), user MCP (/mcp), engine
-                (Poller and Run supervision), plugin loader, config loading, doctor (D95)
+  server/       composition root as a library: REST, MCP facade (/agent-mcp), user MCP (/mcp),
+                engine (Poller and Run supervision), plugin loader, config loading, doctor (D95),
+                the built board served at /
   web/          Vue 3 + Vite SPA
-  cli/          init, doctor, start
+  cli/          the `tasuki` bin: start, doctor, pause, resume, init; depends on every
+                built-in plugin and carries the built board (D98)
 examples/
   tracker-memory/  third-party tracker plugin, installed from packed tarballs outside the workspace
 scripts/
   verify-plugin-example.ts  packs core and testkit, installs them into a copy of the example, runs its contract
+  verify-cli-install.ts     packs the CLI with what it ships, installs it outside the workspace, drives `tasuki`
 ```
 
 一個技術一個套件，載入方式與契約見 plugins.md（D44）。store 預設是 `sqlite`，所以 Jira 模式下也要裝 `sqlite`，除非換成別的 store plugin（D88）。auth 的內建實作分成 `auth-builtin` 與 `auth-http`，不登入是省略 `auth`（D89）。

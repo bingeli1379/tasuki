@@ -953,3 +953,17 @@
   - S13 做完、進 S14 之前，作者自己把整個產品測一輪並調整。調整照 S7e 的方式插成切片，全部定了才進 S14。
 - 理由：發佈出去就收不回來，版本與名稱都會被別人裝走。集中在作者測過、調過之後，才不會發了一版又馬上推翻。本機裝得起來的部分還是在功能切片裡做，作者測的時候才是用真的安裝方式在測。
 - 重新檢視：有人要在 S14 之前先用某個套件時（例如有第三方要寫 plugin）。
+
+## D98 S12a：`tasuki` CLI、內建 plugin 跟著 CLI 裝、engine serve 看板
+
+- 背景：S12（2026-11-22）。原本一片包了 CLI 打包、container image、codex runner，`init` 怎麼做文件也沒定。全域裝的 CLI 有個載入問題：plugin 只從 config 所在的資料夾解析（plugins.md），使用者隨便開的 instance 資料夾裡沒有 `node_modules`，連 `@tasuki/sqlite` 都找不到。
+- 決定（作者同意）：
+  - S12 拆成四片：S12a CLI（`start`、`doctor`、`pause`、`resume`）、engine serve 看板、從 tarball 裝；S12b 互動式 `init`；S12c container image 加 claude 的 `api-key` 與 `oauth-token`；S12d codex runner，做到契約測試會過（作者沒有 Codex 帳號，真的跑掛在 plan.md 待驗證）。
+  - 新增 `packages/cli`（`@tasuki/cli`，bin 是 `tasuki`），只做參數解析。`server` 從可執行檔改成 library，匯出 `startEngine`、`runDoctor`、`pauseCommand`、`resumeCommand`。
+  - 內建 plugin 全部列在 CLI 的 `dependencies`，跟著 CLI 一起裝。loader 先從 config 的資料夾解析，找不到再從 engine 自己安裝的位置解析。config 旁邊裝了同名套件的話，用 config 旁邊那份。內建的沒有因此多拿到什麼，第三方放在 config 旁邊一樣找得到，D44 不變。
+  - engine 在 `/` serve 建好的看板（`createApp` 的 `webDir`）。CLI build 時把 `web/dist` 複製到自己的 `web/`，跟著 tarball 走；沒有 client 路由，不做 SPA fallback。開發時照舊由 Vite 在 5173 serve。
+  - `tasuki pause [--kill]` 與 `resume` 直接開 store 呼叫 `pauseEngine`、`resumeEngine`（D73 的同一組 use case），不打 REST。跑著的 engine 每一輪從 store 讀暫停旗標，`enforce` 每秒讀 cancel 要求，所以不需要連到 engine，有 auth 也不用登入。sqlite 開 DB 加 5 秒的 busy timeout，兩個 process 同時寫時等鎖，不直接丟 `SQLITE_BUSY`。
+- 理由：每個 instance 資料夾各裝一次內建 plugin，前台多一步、每個資料夾多一包 `node_modules`，plugin 帶的 core 也可能跟 CLI 的不同版。退回 engine 安裝位置只多一層 `createRequire`，npm 裝出來的樹裡 `@tasuki/server` 跟內建 plugin 是兄弟，workspace 裡則走到根目錄的 devDependencies，兩邊都不用多傳參數。
+- 實測：`pnpm verify:cli-install` 用 `pnpm pack` 打出 core、server、六個內建 plugin 與 cli 的 tarball，在暫存資料夾用 npm 裝起來（各套件互相要 `0.0.0`，registry 上沒有，用 `overrides` 指到 tarball），另一個只放 config（sqlite 加 fake-runner）的 instance 資料夾跑裝好的 `tasuki`：`doctor` 0 errors 0 warnings；`start` 之後 `/` 是看板、它的 script 拿得到；`pause --kill` 後 `GET /api/board` 回 `paused: true`，`resume` 後回 false。`pnpm test` 453 條、`pnpm check` 沒有錯誤、E2E 的 sqlite、auth、auth-http 共 19 條過（jira 沒跑，會清空 KAN）。D96 說留給 S12 的 `files` 也一起補了，這次的 tarball 有 `dist`。
+- 沒驗的：真的 `npm i -g`。registry 上沒有 `@tasuki/*`，全域安裝不吃 `overrides`，各套件的依賴解析不到，要等 S14 發佈後才驗得了。上面裝進資料夾的樹跟全域的差別只在外面多一層 `@tasuki/cli/node_modules`，從 `server` 往上解析一樣走得到。
+- 重新檢視：內建 plugin 要獨立升版、不想跟著 CLI 一起裝時。

@@ -48,7 +48,7 @@
 | S7a | task 詳情（內文與 comment，含 D67 的原因）、人改 task status（接手、交回、manual 做完）、在 `split-review` 編輯與刪除 task（已完成，D70） | 點開 task 看內容與原因；不用重拆就能修 task |
 | S7b | blocked 自動接回、規則 C rework、`in-review` 打回 `ready-to-rework` 的按鈕（已完成，D71） | manual 做完後 item 自己回 `in-progress`；打回後重拆、再進 `split-review` |
 | S7c | Stop（hard）、hold（soft）、人移走 item 視為接手、`RUN_CANCELLED`、soft 與 hard 的寬限升級（已完成，D72） | 按 Stop 後 Run 變 cancelled；貼 hold 後 engine 不碰它 |
-| S7d | 全域 pause 與 `pause --kill`（已完成，D73；CLI 指令跟 S12 一起） | 暫停後不再起新的 Run |
+| S7d | 全域 pause 與 `pause --kill`（已完成，D73；CLI 指令在 S12a，D98） | 暫停後不再起新的 Run |
 | S7e | 作者試用 S7 後的回饋：預設規則不用 claim status、刪除 item、人可以改回 done 的 task、人的操作留紀錄、看板與詳情的使用性、沒有回饋的 rework 不開跑（已完成，D74、D75） | 卡片留在原欄掛 Running；按錯能改回；詳情秒開、跟著看板更新 |
 | S8 | 真的 claude runner（plugin）、規則的 prompt 與 session、預設 prompt（MCP facade 與 run token 在 S4 就有了）（已完成，D76）。之後補了 prompt 三層與 agent 自帶 plugin、MCP（D77） | 在玩具 repo 上用真的 claude 跑一次 |
 | W1 | status 自訂與角色、`handledBy`、站上給人的 `outcomes`，還在檔案裡設定（已完成，D78、D81，custom-workflow.md） | config 加一站，看板多一欄，眼睛和雷達標對 |
@@ -60,7 +60,10 @@
 | W4b | 流程設定的修改歷史、回到任一版（已完成，D91、D94） | 看得到誰在什麼時候改了什麼，能回到前一版 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（已完成，D66、D95） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件（已完成，D96；真的 `npm publish` 在 S14） | 照文件寫出一個第三方 tracker 並通過契約測試 |
-| S12 | codex runner、CLI 打包（本機從 tarball 裝得起來）、container image（本機 build 得起來） | `init`、`doctor`、`start` 可用 |
+| S12a | `tasuki` CLI（`start`、`doctor`、`pause`、`resume`）、內建 plugin 跟著 CLI 裝、engine serve 看板、本機從 tarball 裝得起來（已完成，D98） | 只放一份 config 的資料夾裡 `tasuki start`，瀏覽器開 8787 就是看板 |
+| S12b | 互動式 `tasuki init`：選 tracker 與 agent，Jira 的 issue type、link type、status id 向 Jira 查好寫進 config 並附上名稱（D50） | 空資料夾 `tasuki init` 答完問題，直接 `tasuki start` 跑得起來 |
+| S12c | container image（本機 build，在 OrbStack 跑），claude-cli 加 `api-key` 與 `oauth-token`（`claude setup-token`）認證 | `docker run` 起來後用 token 真的派一次 claude |
+| S12d | codex runner，做到契約測試會過（作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |
 | S14 | 對外發佈：license、套件名稱查撞名（D23）、版本號與依賴範圍（D62、D96）、`npm publish`（core、testkit、內建 plugin、CLI）、container image 推到 registry、給使用者看的 README（含訂閱帳號與 API key 的條款）（D97） | 在一台乾淨的機器上從 npm 與 registry 裝起來，照 README 跑得起來 |
 

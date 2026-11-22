@@ -255,7 +255,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 
 ## 驗證（`doctor`）
 
-啟動時與 `doctor` 指令都跑同一組檢查，錯誤要指出是哪條規則、哪個欄位。`doctor` 目前是 server 的子指令（`node packages/server/dist/index.mjs doctor [--config <路徑>]`，S12 再包成 `tasuki doctor`），每一項都跑完、全部列出來，有 error 就 exit 1。啟動時檔案這邊的錯（1 到 7、9 到 11、第 12 條）拒絕啟動；第 8 條與 tracker 沒有的 status 只印出來，照樣啟動，因為流程要在設定頁改（D91、D95）。
+啟動時與 `doctor` 指令都跑同一組檢查，錯誤要指出是哪條規則、哪個欄位。`doctor` 是 CLI 的子指令（`tasuki doctor [--config <路徑>]`，D98），每一項都跑完、全部列出來，有 error 就 exit 1。啟動時檔案這邊的錯（1 到 7、9 到 11、第 12 條）拒絕啟動；第 8 條與 tracker 沒有的 status 只印出來，照樣啟動，因為流程要在設定頁改（D91、D95）。
 
 1 到 6 檢查的是存在 store 裡的流程，存檔時也跑同一套（D91）。
 

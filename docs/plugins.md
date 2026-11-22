@@ -59,7 +59,7 @@ export default definePlugin({
 
 ## config 怎麼指定
 
-config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），再用 `import()` 載入。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
+config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），找不到再從 engine 自己安裝的位置解析，再用 `import()` 載入。內建的 plugin 是 CLI 的依賴，全域裝 CLI 就一起裝好；第三方的裝在 config 旁邊，同名時 config 旁邊的優先（D98）。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
 
 ```jsonc
 "tracker": {
