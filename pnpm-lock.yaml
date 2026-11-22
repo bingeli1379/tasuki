@@ -290,9 +290,10 @@ importers:
       '@tasuki/core':
         specifier: workspace:*
         version: link:../core
-      vite-plus:
-        specifier: '*'
-        version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(@vue/language-core@3.3.14)(esbuild@0.27.7)(jiti@2.7.0)(playwright@1.65.1)(typescript@7.0.2)(vue-tsc@3.3.14(typescript@7.0.2))
+    devDependencies:
+      vitest:
+        specifier: 5.1.0
+        version: 5.1.0(@types/node@24.19.2)(@vitest/browser-preview@5.1.0)(@vitest/ui@5.1.0)(@voidzero-dev/vite-plus-core@1.6.0(@types/node@24.19.2)(@vue/language-core@3.3.14)(esbuild@0.27.7)(jiti@2.7.0)(typescript@7.0.2)(vue-tsc@3.3.14(typescript@7.0.2)))(@vue/language-core@3.3.14)(esbuild@0.27.7)(jiti@2.7.0)(typescript@7.0.2)(vue-tsc@3.3.14(typescript@7.0.2))
 
   packages/web:
     dependencies:

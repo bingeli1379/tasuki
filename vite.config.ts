@@ -10,6 +10,8 @@ export default defineConfig({
     ignorePatterns: ['docs/', 'CLAUDE.md', 'pnpm-lock.yaml'],
   },
   lint: {
+    // The example is a standalone package with its own install; scripts/verify-plugin-example.ts checks it.
+    ignorePatterns: ['examples/'],
     options: {
       typeAware: true,
       typeCheck: true,

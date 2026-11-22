@@ -1,7 +1,9 @@
 {
   "name": "@tasuki/testkit",
   "version": "0.0.0",
-  "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -15,7 +17,10 @@
   "dependencies": {
     "@tasuki/core": "workspace:*"
   },
+  "devDependencies": {
+    "vitest": "5.1.0"
+  },
   "peerDependencies": {
-    "vite-plus": "*"
+    "vitest": "*"
   }
 }
