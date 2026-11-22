@@ -125,6 +125,7 @@ S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整�
 - codex 真的叫模型時的行為（D101，作者沒有 Codex 帳號）：`exec` 模式下 `approval_policy="never"` 能不能直接呼叫 tasuki 的 MCP tool，還是要另外設 tool 的批准；`workspace-write` 的 sandbox 預設不給網路，agent 能不能 `git push`；`api-key` 用的 `CODEX_API_KEY` 是從官方 SDK 的原始碼讀到的，沒實際打過。headless 的參數、`thread.started` 的 session、resume 找不到時的訊息、`-c` 注入 http MCP 都已經用 0.169.0 實際驗過。claude 的部分已在 S8 與 S12c 驗過（D76、D100）。
 - Claude Code 的 Channels（MCP server 主動推事件進正在跑的 session）能不能給 `execute` 當比較快的 soft stop（D102）：它是 stdio、要 `--channels` 指名、還在 research preview，2.1.323 的 `--help` 裡沒有這個旗標，`claude -p` 底下收不收得到沒查。tasuki 的 facade 是 stateless 的 http，現在推不了。就算推到了，停不停 subagent 還是 orchestrator 自己決定，仍然是 soft。codex 有沒有類似的沒查。
 - `dispatch` 在 Jira 上（D102）：KAN 的 task workflow 允不允許 engine 走的 `to-do → in-progress`、`in-progress → done`、`in-progress → manual`、`to-do → manual`，用 `doctor` 對一份有 dispatch 規則的流程查；KAN 要多一個給 dispatch 盯的 item status，E2E 的 Jira 流程才能跑那一條。
+- agent 讀附件（D103）：真的 claude 收到 `read_attachment` 回的 image content 看不看得到圖、resource blob（PDF 這類）會不會讀；codex 兩種都沒查。
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
 - agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。claude 已在 S10 做成 `doctor` 第 9 條（D95）：stream-json 的 `init` 列出 `skills` 與帶 `status` 的 `mcp_servers`，不一定是第一行。codex 還沒查，codex agent 目前不收 `requires`（D101）。
 - 使用者 MCP 接 Codex（D57）：2026-11-16 用 codex-cli 0.169.0 驗過 `initialize` 與 `tools/list`（中間放 proxy 記錄請求），`tools/call` 沒驗，因為手上沒有 Codex 帳號，模型叫不起來。Claude Code 2.1.311 已實際呼叫 `create_item` 與 `list_board` 成功。

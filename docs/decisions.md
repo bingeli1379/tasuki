@@ -1030,3 +1030,16 @@
   - fake runner 在 dispatch 時從 task 自己的標題讀 `[fake:...]`，只回報，不碰 task。
 - 實測：`pnpm test` 490 條、`pnpm check` 沒有錯誤。engine 的整合測試多 8 條：沒有互相等待的 task 一起跑、其餘照順序、全 done 送 `in-review`；`needs_input` 轉 manual、item 進 `blocked`、人做完後接回；失敗兩次後第三輪轉 manual；Stop 只停那一張；人移走 task 或 item 時 soft cancel，而且 split 規則在 task 的 agent 還在時不認領；hold 停掉所有 task 的 agent；lease 過期送回 `to-do` 再跑 attempt 2；worker 只有讀與留言的 tool。E2E 的 sqlite 18 條過，多的一條是 `parallel` 站：在 split-review 把一張 task 改名成 `[fake:hang]`、送到 `parallel`、在 task 詳情按 Stop、標成 done，另一張由自己的 agent 做完，item 到 `In Review` 顯示 2/2。Jira 沒有跑：KAN 沒有 `parallel` 這個 status，E2E 的 Jira 流程把 dispatch 規則拿掉；Jira 的 task workflow 允不允許 `in-progress → done` 這類轉移，要用 doctor 對 KAN 查。
 - 重新檢視：Channels 能在 headless 用、要給 `execute` 加快 soft stop 時（plan.md 待驗證）；要讓 AI 審單張 task 時（目前 dispatch 不走 `in-review`）；要限制單張 item 的平行數時。
+
+## D103 agent 讀得到附件
+
+- 背景：S13 之後（2026-11-22）。facade 沒有讀附件的 tool，body 裡的圖片 agent 只看到 `attachment:<id>` 這串字，沒連進 body 的附件連存在都不知道。作者指出附件常常不放在 body，task 也會依賴 item 上的附件，agent 要拿到所有資訊才判斷得對。
+- 決定（需求是作者提的，tool 的形狀是這次定的，作者還沒看過）：
+  - facade 加 `list_attachments`（不帶參數，列出 item 與它每張 task 上的所有附件）與 `read_attachment`（`target`、`id`），每種 mode 都有。範圍跟 `list_comments` 一樣是 Run 那張 item 與它的 task，dispatch 的 worker 也讀得到 item 上的。
+  - 不把附件清單塞進 `get_item`、`list_tasks`：Jira 每張 issue 讀附件要一次 API，agent 常常列 task，每次多打 N 次。改成獨立一個 tool，engine 的契約寫明一開始要讀附件。
+  - 走 MCP，不把檔案放進 workspace：agent 的 `allowedTools` 預設全擋（D35），放進資料夾也打不開；MCP 是每個 runner 都接得到的那一條。
+  - `read_attachment` 依 mimeType 回：png、jpeg、gif、webp 回 image content，`text/*` 與 json、xml、yaml 回 text，其他回 base64 的 resource blob。附件上限 10MB，清單先列、要用才讀，大圖不會一開始就塞進對話。
+- 實測：engine 的整合測試一條：沒連進 body 的附件也列得出來，item 上的圖片回 image、task 上的文字檔回內容，別張 item 的附件讀不到。`pnpm test` 491 條、`pnpm check` 沒有錯誤。
+- 沒驗的：真的 claude 與 codex 收到 image content 與 resource blob 會怎麼處理（plan.md 待驗證）。
+- 重新檢視：agent 讀大附件的 token 成本成為問題時（例如圖片先縮圖）；要讓 agent 寫附件時。
+

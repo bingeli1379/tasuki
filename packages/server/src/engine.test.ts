@@ -668,6 +668,8 @@ describe('rule execute on a fake agent', () => {
     expect(names).toEqual([
       'get_item',
       'list_tasks',
+      'list_attachments',
+      'read_attachment',
       'list_comments',
       'add_comment',
       'set_task_status',
@@ -705,6 +707,8 @@ describe('rule execute on a fake agent', () => {
       'get_item',
       'list_tasks',
       'create_task',
+      'list_attachments',
+      'read_attachment',
       'list_comments',
       'add_comment',
       'set_task_status',
@@ -1012,7 +1016,15 @@ describe('rule dispatch: one Run per task (D102)', () => {
     await engine.settled()
 
     expect(seen).toEqual({
-      tools: ['add_comment', 'get_item', 'list_comments', 'list_tasks', 'report_result'],
+      tools: [
+        'add_comment',
+        'get_item',
+        'list_attachments',
+        'list_comments',
+        'list_tasks',
+        'read_attachment',
+        'report_result',
+      ],
       verdicts: ['succeeded', 'needs_input', 'failed'],
       item: ref(item),
     })
@@ -1125,6 +1137,8 @@ describe('rule review on a fake agent', () => {
     expect(names).toEqual([
       'get_item',
       'list_tasks',
+      'list_attachments',
+      'read_attachment',
       'list_comments',
       'add_comment',
       'report_result',
@@ -1750,10 +1764,60 @@ describe('the MCP facade for agents', () => {
       'get_item',
       'list_tasks',
       'create_task',
+      'list_attachments',
+      'read_attachment',
       'list_comments',
       'add_comment',
       'report_result',
     ])
+  })
+
+  it("lists every file on its item and tasks, linked or not, and reads them; not another item's", async () => {
+    const t = setup()
+    const ref = (u: WorkUnit | undefined): string => u?.ref ?? ''
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47])
+    let seen: { listed: unknown; image: unknown; note: unknown; other: boolean } | undefined
+    const [item, schema] = await t.approvedItem()
+    const other = await t.tracker.createItem({ title: 'Other', body: '', status: 'refining' })
+    const shot = await t.tracker.addAttachment(ref(item), {
+      filename: 'shot.png',
+      mimeType: 'image/png',
+      data: png,
+    })
+    const note = await t.tracker.addAttachment(ref(schema), {
+      filename: 'note.txt',
+      mimeType: 'text/plain',
+      data: new TextEncoder().encode('Use port 8080.'),
+    })
+    const secret = await t.tracker.addAttachment(other.ref, {
+      filename: 'secret.txt',
+      mimeType: 'text/plain',
+      data: new TextEncoder().encode('no'),
+    })
+    t.scripts.push(async (mcp, spec) => {
+      const read = (target: string, id: string) =>
+        mcp.callTool({ name: 'read_attachment', arguments: { target, id } })
+      seen = {
+        listed: JSON.parse(text(await mcp.callTool({ name: 'list_attachments', arguments: {} }))),
+        image: (await read(ref(item), shot.id)).content,
+        note: text(await read(ref(schema), note.id)),
+        other: (await read(other.ref, secret.id)).isError === true,
+      }
+      return report('failed')(mcp, spec)
+    })
+    const engine = t.engine([execute])
+    await engine.tick()
+    await engine.settled()
+
+    expect(seen).toEqual({
+      listed: [
+        expect.objectContaining({ target: ref(item), filename: 'shot.png' }),
+        expect.objectContaining({ target: ref(schema), filename: 'note.txt' }),
+      ],
+      image: [{ type: 'image', data: Buffer.from(png).toString('base64'), mimeType: 'image/png' }],
+      note: 'Use port 8080.',
+      other: true,
+    })
   })
 
   it('turns away a request without a live Run token', async () => {
