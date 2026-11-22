@@ -16,7 +16,7 @@ async function assertNoAgent({ tracker, store }: Deps, ref: Ref): Promise<void> 
   const task = await tracker.get(ref)
   if (task.kind !== 'task' || task.parent === undefined) throw new NotFound(`${ref} is not a task`)
   const item = task.parent
-  if ((await store.liveRuns()).some((r) => r.target === item))
+  if ((await store.liveRuns()).some((r) => r.item === item))
     throw new InvalidInput(`an agent is working on ${item}; stop it before changing ${ref}`)
 }
 
@@ -28,7 +28,7 @@ export async function updateTask(deps: Deps, input: UpdateItemInput): Promise<Wo
 // An item with an agent on it is not deleted: stop it first. Its Runs stay in the store
 // store as history.
 export async function deleteItem({ tracker, store }: Deps, ref: Ref): Promise<void> {
-  if ((await store.liveRuns()).some((r) => r.target === ref))
+  if ((await store.liveRuns()).some((r) => r.item === ref))
     throw new InvalidInput(`an agent is working on ${ref}; stop it before deleting`)
   await tracker.deleteItem(ref)
 }

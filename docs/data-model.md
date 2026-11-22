@@ -52,7 +52,8 @@ interface Attachment {                  // D61
 
 interface Run {                         // store only
   id: string
-  target: Ref
+  target: Ref                           // the item, or the task a dispatch rule runs
+  item: Ref                             // the item it works for: target itself, or the task's item (D102)
   rule: string
   agent: string
   attempt: number
@@ -171,12 +172,13 @@ CREATE INDEX attachment_by_target ON attachment(target, id);
 CREATE TABLE ref_counter (last INTEGER NOT NULL);
 ```
 
-store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，S7d 建了 `engine_state` 並重建 `run` 讓 `cancel_requested_by` 多收 `pause`，S8 加了 `session_id`，D82 加了 `from_status`、`to_status`，W3 拿掉 `log_path`（log 由 engine 命名，D88），見 `packages/sqlite/src/store-migrations.ts`；usage 的欄位等用到的切片再加）：
+store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，S7d 建了 `engine_state` 並重建 `run` 讓 `cancel_requested_by` 多收 `pause`，S8 加了 `session_id`，D82 加了 `from_status`、`to_status`，W3 拿掉 `log_path`（log 由 engine 命名，D88），S13 加了 `item`（D102），見 `packages/sqlite/src/store-migrations.ts`；usage 的欄位等用到的切片再加）：
 
 ```sql
 CREATE TABLE run (
   id                  TEXT PRIMARY KEY,
   target              TEXT NOT NULL,
+  item                TEXT NOT NULL,  -- target, or the item of a dispatched task (D102)
   rule                TEXT NOT NULL,
   agent               TEXT NOT NULL,
   attempt             INTEGER NOT NULL,

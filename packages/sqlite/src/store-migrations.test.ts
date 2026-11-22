@@ -49,6 +49,16 @@ describe('store migrations', () => {
     expect(indexes).toEqual(expect.arrayContaining(['one_live_run', 'run_by_target']))
   })
 
+  it('S13 gives every Run before it its target as the item it works for', () => {
+    const db = openDatabase(':memory:')
+    migrate(db, STORE_MIGRATIONS.slice(0, -1))
+    db.exec(`INSERT INTO run (id, target, rule, agent, attempt, workspace, state, lease_until,
+      started_at, last_activity_at) VALUES ('r1', 'T-1', 'split', 'fake', 1, '/w',
+      'running', 'x', 'y', 'z')`)
+    migrate(db, STORE_MIGRATIONS)
+    expect(db.prepare('SELECT target, item FROM run').get()).toEqual({ target: 'T-1', item: 'T-1' })
+  })
+
   it('dropping log_path for W3 keeps every Run', () => {
     const db = openDatabase(':memory:')
     migrate(

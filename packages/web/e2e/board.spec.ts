@@ -521,6 +521,75 @@ test('a blocked item carries on once its manual task is done, and finished work 
   await expect(card(/^In Review/)).toContainText('3/3 tasks', { timeout: 90_000 })
 })
 
+test('a dispatch rule runs each task on its own, and Stop on a task ends only that one', async ({
+  page,
+  request,
+}) => {
+  test.skip(test.info().project.name === 'jira', 'KAN has no status for the dispatch station')
+  test.setTimeout(180_000)
+  const title = `e2e dispatch ${Date.now()}`
+  const ref = await createThroughApi(request, title)
+  const split = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'refining', to: 'ready-to-split' },
+  })
+  expect(split.ok()).toBe(true)
+  await page.goto('/')
+  const card = (column: RegExp) =>
+    page.getByRole('region', { name: column }).getByRole('article', { name: title })
+  await expect(card(/^Split Review/)).toBeVisible({ timeout: 60_000 })
+  await expect(card(/^Split Review/).getByText('Running')).toHaveCount(0, { timeout: 30_000 })
+
+  // The fake worker hangs on the task whose title says so.
+  await page
+    .getByRole('region', { name: /^Split Review/ })
+    .getByRole('button', { name: title, exact: true })
+    .click()
+  const dialog = page.getByRole('dialog').first()
+  const task = page.getByRole('dialog').last()
+  await dialog.getByRole('listitem', { name: 'Task Prepare' }).getByRole('button').click()
+  await task.getByRole('button', { name: 'Edit' }).click()
+  await task.getByLabel('Title').fill('Prepare [fake:hang]')
+  await task.getByRole('button', { name: 'Save' }).click()
+  await expect(task.getByRole('heading', { name: 'Prepare [fake:hang]' })).toBeVisible()
+  await task.getByRole('button', { name: 'Close' }).click()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+
+  const moved = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'split-review', to: 'parallel' },
+  })
+  expect(moved.ok()).toBe(true)
+  await expect(card(/^Parallel/).getByText('Running')).toBeVisible({ timeout: 60_000 })
+  await page
+    .getByRole('region', { name: /^Parallel/ })
+    .getByRole('button', { name: title, exact: true })
+    .click()
+  await expect(dialog.getByRole('listitem', { name: /^Run dispatch attempt 1/ })).toContainText(
+    'Prepare [fake:hang]',
+  )
+  await dialog
+    .getByRole('listitem', { name: 'Task Prepare [fake:hang]' })
+    .getByRole('button')
+    .click()
+  await task.getByRole('button', { name: 'Stop' }).click()
+  // Stopped, the person has it: manual, and nothing put the item on hold.
+  await expect(task.getByRole('button', { name: 'Hand back' })).toBeVisible()
+  await expect(
+    task
+      .getByRole('article', { name: /^Comment by / })
+      .filter({ hasText: 'Stopped the agent and took it over: In Progress → Manual.' }),
+  ).toBeVisible()
+  await task.getByRole('button', { name: 'Mark done' }).click()
+  await expect(task.getByRole('button', { name: 'Hand back' })).toHaveCount(0)
+  await task.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog.getByText('On hold', { exact: true })).toHaveCount(0)
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(dialog).toBeHidden()
+
+  // Build waited for Prepare; its own agent does it, then the engine sends the item on.
+  await expect(card(/^In Review/)).toContainText('2/2 tasks', { timeout: 90_000 })
+})
+
 test('Stop ends a running agent and holds the item; released, it starts over', async ({
   page,
   request,

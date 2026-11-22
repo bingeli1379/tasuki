@@ -133,10 +133,12 @@ export function createMcpServer({ tracker, store, flow }: McpDeps): McpServer {
     'stop_run',
     {
       description:
-        'Stop the agent working on an item right now, and put the item on hold so none starts ' +
+        'Stop the agents working on an item right now, and put the item on hold so none starts ' +
         'again until you release it. Nothing on the item moves: its status and tasks stay as ' +
-        'the agent left them. Fails when no agent is running on it. Returns the item.',
-      inputSchema: { ref: z.string().describe('The item ref') },
+        'the agents left them. Given a task that a dispatch rule runs on its own, only that ' +
+        "task's agent stops and the task becomes manual: you took it over; the item's other " +
+        'tasks carry on. Fails when no agent is running on it. Returns the item or the task.',
+      inputSchema: { ref: z.string().describe('The item ref, or a task ref') },
     },
     async ({ ref }) => json(await stopRun({ tracker, store }, holdLabel, ref)),
   )
@@ -224,10 +226,11 @@ export function createMcpServer({ tracker, store, flow }: McpDeps): McpServer {
       description:
         'Read one task: its fields (body is markdown, `parent` is its item), blockedBy (the ' +
         'tasks of the same item it waits for), and its comments oldest first. Comments by the ' +
-        'engine say why the engine or an agent moved it. `version` is what update_task needs.',
+        'engine say why the engine or an agent moved it. `runs` are the agent runs a dispatch ' +
+        'rule started on it, newest first. `version` is what update_task needs.',
       inputSchema: { ref: z.string().describe('The task ref, e.g. TSK-13') },
     },
-    async ({ ref }) => json(await getTask(tracker, ref)),
+    async ({ ref }) => json(await getTask(tracker, store, ref)),
   )
   server.registerTool(
     'move_task',

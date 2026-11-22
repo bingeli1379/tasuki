@@ -466,13 +466,18 @@ onMounted(start)
                 </div>
               </template>
             </UModal>
-            <UButton
-              :icon="dark ? 'i-lucide-sun' : 'i-lucide-moon'"
-              :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
-              color="neutral"
-              variant="ghost"
-              @click="toggleTheme"
-            />
+            <UTooltip
+              :text="dark ? 'Switch to light mode' : 'Switch to dark mode'"
+              :delay-duration="100"
+            >
+              <UButton
+                :icon="dark ? 'i-lucide-sun' : 'i-lucide-moon'"
+                :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
+                color="neutral"
+                variant="ghost"
+                @click="toggleTheme"
+              />
+            </UTooltip>
             <UTooltip v-if="editsFlow" text="Settings" :delay-duration="100">
               <UButton
                 icon="i-lucide-settings"

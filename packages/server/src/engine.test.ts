@@ -769,6 +769,257 @@ describe('rule execute on a fake agent', () => {
   })
 })
 
+// M2: the engine runs each task an item's graph lets run as a Run of its own (D102).
+const dispatch: Rule = {
+  id: 'dispatch',
+  watch: 'in-progress',
+  agent: 'fake',
+  mode: 'dispatch',
+  maxAttempts: 2,
+  prompt: '',
+  session: 'fresh',
+  outcomes: {
+    succeeded: 'in-review',
+    blocked_manual: 'blocked',
+    needs_input: 'blocked',
+    ...toFailure,
+  },
+}
+
+describe('rule dispatch: one Run per task (D102)', () => {
+  // An approved item with these tasks; each lists the indexes of the ones it waits for.
+  const dispatchItem = async (
+    t: ReturnType<typeof setup>,
+    ...tasks: [string, number[]][]
+  ): Promise<WorkUnit[]> => {
+    const item = await t.tracker.createItem({
+      title: 'Login page',
+      body: '',
+      status: 'in-progress',
+    })
+    const made: WorkUnit[] = []
+    for (const [title, after] of tasks)
+      made.push(
+        await t.tracker.createTask(item.ref, {
+          title,
+          body: '',
+          status: 'to-do',
+          origin: 'splitter',
+          blockedBy: after.map((i) => made[i]?.ref ?? ''),
+        }),
+      )
+    return [item, ...made]
+  }
+  const ref = (u: WorkUnit | undefined): string => u?.ref ?? ''
+  const statusOf = async (t: ReturnType<typeof setup>, u: WorkUnit | undefined) =>
+    (await t.tracker.get(ref(u))).status
+
+  it('runs tasks that wait for nothing side by side, the rest after, then sends the item on', async () => {
+    const t = setup()
+    t.scripts.push(report('succeeded'), report('succeeded'), report('succeeded'))
+    const [item, schema, docs, endpoint] = await dispatchItem(
+      t,
+      ['Schema', []],
+      ['Docs', []],
+      ['Endpoint', [0]],
+    )
+    const engine = t.engine([dispatch], 5)
+    await engine.tick()
+    expect(t.started.map((s) => [s.target, s.mode])).toEqual([
+      [ref(schema), 'dispatch'],
+      [ref(docs), 'dispatch'],
+    ])
+    await engine.settled()
+    expect(await statusOf(t, endpoint)).toBe('to-do')
+    expect(await statusOf(t, item)).toBe('in-progress')
+
+    await engine.tick()
+    await engine.settled()
+    expect(t.started.map((s) => s.target)).toEqual([ref(schema), ref(docs), ref(endpoint)])
+    expect(await statusOf(t, endpoint)).toBe('done')
+
+    await engine.tick()
+    expect(await statusOf(t, item)).toBe('in-review')
+    expect((await t.store.runsFor(ref(item)))[0]).toMatchObject({
+      outcome: 'succeeded',
+      to: 'in-review',
+    })
+    expect((await t.tracker.comments(ref(item))).at(-1)?.body).toBe(
+      'Rule `dispatch`: every task is done. **In Progress** → **In Review**.',
+    )
+    expect((await t.tracker.comments(ref(schema))).at(-1)?.body).toBe(
+      'Rule `dispatch`, attempt 1: `succeeded`. **In Progress** → **Done**.\n\nsaid succeeded',
+    )
+  })
+
+  it('a task that needs a person becomes manual; the item waits in blocked and resumes after', async () => {
+    const t = setup()
+    t.scripts.push(ask)
+    const [item, schema] = await dispatchItem(t, ['Schema', []])
+    const engine = t.engine([dispatch])
+    await engine.tick()
+    await engine.settled()
+    expect(await statusOf(t, schema)).toBe('manual')
+    expect((await t.tracker.comments(ref(schema))).map((c) => [c.author, c.kind])).toContainEqual([
+      'agent',
+      'question',
+    ])
+
+    await engine.tick()
+    expect(await statusOf(t, item)).toBe('blocked')
+    expect((await t.store.runsFor(ref(item)))[0]?.outcome).toBe('blocked_manual')
+
+    const done = await t.app.request(`/api/tasks/${ref(schema)}/transition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: 'manual', to: 'done' }),
+    })
+    expect(done.status).toBe(200)
+    await engine.tick()
+    expect(await statusOf(t, item)).toBe('in-review')
+  })
+
+  it('a failed task goes back to to-do and runs again; past maxAttempts it becomes manual', async () => {
+    const t = setup()
+    t.scripts.push(report('failed'), report('failed'))
+    const [item, schema] = await dispatchItem(t, ['Schema', []])
+    const engine = t.engine([dispatch])
+    for (let round = 0; round < 3; round++) {
+      await engine.tick()
+      await engine.settled()
+    }
+    expect(t.started).toHaveLength(2)
+    expect(await statusOf(t, schema)).toBe('manual')
+    expect((await t.store.runsFor(ref(schema))).map((r) => [r.attempt, r.outcome])).toEqual([
+      [3, 'max_attempts'],
+      [2, 'failed'],
+      [1, 'failed'],
+    ])
+    expect((await t.tracker.comments(ref(schema))).at(-1)?.body).toBe(
+      'Rule `dispatch` gave up after 2 attempts. Moved **To Do** → **Manual**: a person has to look at it.',
+    )
+    await engine.tick()
+    expect(await statusOf(t, item)).toBe('blocked')
+  })
+
+  it('Stop on a task ends only its agent, and the person takes it over', async () => {
+    const t = setup()
+    t.scripts.push(hang, report('succeeded'))
+    const [item, schema, docs] = await dispatchItem(t, ['Schema', []], ['Docs', []])
+    const engine = t.engine([dispatch])
+    await engine.tick()
+    const stopped = await t.app.request(`/api/tasks/${ref(schema)}/stop`, { method: 'POST' })
+    expect(await stopped.json()).toMatchObject({ ref: ref(schema), status: 'manual' })
+    await engine.enforce()
+    await engine.settled()
+
+    expect(t.signals).toEqual(['SIGTERM'])
+    expect((await t.store.runsFor(ref(schema)))[0]).toMatchObject({
+      outcome: 'cancelled',
+      cancelMode: 'hard',
+      cancelRequestedBy: 'stop',
+    })
+    expect(await statusOf(t, docs)).toBe('done')
+    expect((await t.tracker.get(ref(item))).labels).toEqual([])
+    expect(
+      (await t.tracker.comments(ref(schema))).map((c) => [c.author, c.body.split('\n')[0]]),
+    ).toEqual([
+      ['human', 'Stopped the agent and took it over: **In Progress** → **Manual**.'],
+      [
+        'engine',
+        'Rule `dispatch`, attempt 1: `cancelled`, a person pressed Stop. The engine moved nothing.',
+      ],
+    ])
+    expect((await t.app.request(`/api/tasks/${ref(docs)}/stop`, { method: 'POST' })).status).toBe(
+      400,
+    )
+  })
+
+  it('a person moving a task or its item winds those agents down, and no other rule takes the item meanwhile', async () => {
+    const t = setup()
+    t.scripts.push(hang, hang)
+    const [item, schema, docs] = await dispatchItem(t, ['Schema', []], ['Docs', []])
+    const engine = t.engine([dispatch, split])
+    await engine.tick()
+    await t.tracker.transition(ref(docs), 'in-progress', 'manual')
+    await engine.tick()
+    expect((await t.store.runsFor(ref(docs)))[0]?.cancelRequestedBy).toBe('moved')
+    expect((await t.store.runsFor(ref(schema)))[0]?.cancelRequestedAt).toBeUndefined()
+
+    await t.tracker.transition(ref(item), 'in-progress', 'ready-to-split')
+    await engine.tick()
+    expect((await t.store.runsFor(ref(schema)))[0]?.cancelRequestedBy).toBe('moved')
+    // invariant 1: the split rule waits until the tasks' agents are gone.
+    expect(t.started).toHaveLength(2)
+  })
+
+  it('hold on the item winds down every agent on its tasks', async () => {
+    const t = setup()
+    t.scripts.push(hang, hang)
+    const [item, schema, docs] = await dispatchItem(t, ['Schema', []], ['Docs', []])
+    await t.engine([dispatch]).tick()
+    expect((await t.app.request(`/api/items/${ref(item)}/hold`, { method: 'PUT' })).status).toBe(
+      200,
+    )
+    for (const task of [schema, docs])
+      expect((await t.store.runsFor(ref(task)))[0]).toMatchObject({
+        cancelMode: 'soft',
+        cancelRequestedBy: 'hold',
+      })
+    const board = (await (await t.app.request('/api/board')).json()) as { running: string[] }
+    expect(board.running).toEqual([ref(item)])
+  })
+
+  it('after a lease expiry the task goes back to to-do, and attempt 2 runs', async () => {
+    const first = setup()
+    first.scripts.push(hang)
+    const [, schema] = await dispatchItem(first, ['Schema', []])
+    await first.engine([dispatch]).tick()
+
+    const second = setup(first.storeDb, first.trackerDb, first.now)
+    second.scripts.push(hang)
+    second.now.t += 121_000
+    await second.engine([dispatch]).tick()
+
+    expect((await second.store.runsFor(ref(schema))).map((r) => [r.attempt, r.outcome])).toEqual([
+      [2, undefined],
+      [1, 'abandoned'],
+    ])
+    expect((await second.tracker.comments(ref(schema))).at(-1)?.body).toBe(
+      'Rule `dispatch`, attempt 1: the agent stopped answering. Moved **In Progress** → **To Do** to try again.',
+    )
+  })
+
+  it('gives the worker read tools and comments on its task, nothing that moves anything', async () => {
+    const t = setup()
+    let seen: { tools: string[]; verdicts: unknown; item: string } | undefined
+    t.scripts.push(async (mcp, spec) => {
+      const { tools } = await mcp.listTools()
+      const schema = tools.find((x) => x.name === 'report_result')?.inputSchema
+      seen = {
+        tools: tools.map((x) => x.name).sort(),
+        verdicts: (schema?.properties?.['verdict'] as { enum?: string[] } | undefined)?.enum,
+        item: (
+          JSON.parse(text(await mcp.callTool({ name: 'get_item', arguments: {} }))) as WorkUnit
+        ).ref,
+      }
+      await mcp.callTool({ name: 'add_comment', arguments: { kind: 'note', body: 'On it.' } })
+      return report('succeeded')(mcp, spec)
+    })
+    const [item, schema] = await dispatchItem(t, ['Schema', []])
+    const engine = t.engine([dispatch])
+    await engine.tick()
+    await engine.settled()
+
+    expect(seen).toEqual({
+      tools: ['add_comment', 'get_item', 'list_comments', 'list_tasks', 'report_result'],
+      verdicts: ['succeeded', 'needs_input', 'failed'],
+      item: ref(item),
+    })
+    expect((await t.tracker.comments(ref(schema))).map((c) => c.body)).toContain('On it.')
+  })
+})
+
 describe('an outcome a rule adds to its mode', () => {
   it('is moved on unchecked: tasks left open do not stop needs_design', async () => {
     const t = setup()

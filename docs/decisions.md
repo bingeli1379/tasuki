@@ -1007,3 +1007,26 @@
 - 實測（codex-cli 0.169.0，沒登入，暫時的 `CODEX_HOME`）：用 build 好的 runner 帶真的參數跑真的 codex，沒有任何參數錯誤，第一行是 `thread.started`，session 有回報；log 有 `rmcp` 連不上的錯誤，表示注入的 http MCP 被讀進去了（故意指到連不到的 port）。resume 一個不存在的 id，codex 印 `no rollout found`，runner 開新的並回報新的 thread id。`codex mcp list --json` 讀 `-c` 注入的 server 是 `streamable_http`、`auth_status: bearer_token`。單元測試 10 條（含契約 4 條、process tree 的 terminate），claude-cli 加跑契約後 16 條。從 tarball 裝好的 `tasuki` 對只有 codex agent 的 config 跑 `doctor` 0 errors。`pnpm test` 471 條、`pnpm check` 沒有錯誤、`verify:plugin-example` 31 條過。
 - 沒驗的：真的叫模型（沒帳號），所以 MCP tool 在 `approval_policy="never"` 下會不會被擋、`workspace-write` 沒網路時能不能 `git push`、`CODEX_API_KEY` 實際能不能登入，都留在 plan.md 待驗證。
 - 重新檢視：有 Codex 帳號時；codex 出了逐個 tool 的權限設定時。
+
+## D102 S13 設計：`dispatch` mode，engine 照依賴圖一張 task 一個 Run
+
+- 背景：S13 開工前（2026-11-22）。D5 先做 M1、D9 寫明 M1 停不了單張 task、D36 把 task 層規則的形狀留到這時候。作者提出三種：一個 item 一個 agent 由它派 subagent、一個 task 一個 agent 由 engine 派、寫進 config 讓使用者選。
+- 決定（作者同意）：
+  - 兩種並存，規則的 `mode` 選：`execute` 照舊是一個 orchestrator（M1），新的 `dispatch` 由 engine 照 task 圖一張 task 起一個 Run（M2）。第三種就是這個二選一，不另外發明 config 語法。不用 D36 預留的 `kind: "task"` 規則：那種還要多一個「item 在哪站才算數」的條件，item 的出口也會散到兩條規則上。
+  - 認領：可跑的 task 是 `to-do` 或沒人負責的 `in-progress`，blockedBy 全部 `done`，照建立順序各起一個 Run，受 `maxConcurrentRuns` 限制，認領時 engine 把 task 移到 `in-progress`。item 底下還有存活的 task Run 時不認領 item 本身（不變量 1 改成以 target 計）。
+  - task Run 結束：`succeeded` 到 `done`，不走 `in-review`；`failed`、沒有 verdict、`abandoned` 回 `to-do`；`needs_input` 到 `manual`。attempt 以（task, rule）計，`failed` 也累計，到了 `maxAttempts` 轉 `manual`。task 出事都變成 `manual`，item 自然由 `blocked_manual` 進 `blocked`，不另開出口。
+  - item 的出口由 engine 判斷，沒有 agent：task 全 done 走 `succeeded`，沒有可跑的又剩 manual 走 `blocked_manual`。照 D38 `max_attempts` 的做法記一筆不起 process 的 Run，自動接回與卡片標示照舊讀最近一次 Run。
+  - worker 的 tool：`get_item`（讀所屬 item）、`list_tasks`、`list_comments`、`add_comment`（`target` 省略時是自己那張 task）、`report_result`。沒有 `set_task_status`，status 由 engine 照 verdict 移；verdict 固定是 `succeeded`、`needs_input`、`failed`。
+  - 停單張：task 詳情的 Stop 是 hard cancel 那張的 Run，task 轉 `manual`（人的操作，不違反不變量 6），不貼 `hold`。人把 task 移走是 soft，跟移走 item 一致。討論時講過 Jira 上移走 task 算 hard，寫文件時改成 soft，跟 D9 的 item 一樣。
+  - git 接力照 D10 留在 prompt：每張 task 做完自己 merge 回 `feature/<KEY>` 再 push，平行的各開 worktree，push 撞到就拉回來解，解不掉回報 `needs_input`。要整合的由 splitter 多開一張整合 task，engine 不知道它特別。
+- 理由：要 hard 停單張，process 就得在 engine 手上。MCP 是 agent 呼叫 engine，engine 插不進正在想事情的 orchestrator；Claude Code 的 Channels 能讓 MCP server 推事件進 session，但它是 stdio、research preview，就算推到了，停不停 subagent 還是 LLM 決定，仍是 soft。`execute` 留著給想讓 agent 自己指揮的人，不用為了 M2 拿掉。
+- 代價：engine 多一段排程與 task 層的 attempt；task 之間的接力全靠 git，agent 沒照 prompt merge 回去，下一張就看不到前一張的東西。
+- 實作（S13，2026-11-22）：
+  - Run 多一個 `item`：item 自己的 Run 是 target 本身，dispatch 的是 task 所屬的 item。看板的 Running、hold、item 的 Stop、改與刪 task 的檢查、不變量 1 都看它，不用每輪去 tracker 查 task 的 parent。store 的 migration 把舊的 Run 補成 `item = target`，testkit 的 store 契約多一條。
+  - core 的 `dispatch.ts` 放四件事：認領 task（`claimTasks`，由 `claimItems` 呼叫，跟其他規則共用 `maxConcurrentRuns`）、判斷 item 出口（`settleDispatched`，每輪在復原與接回之後、暫停檢查之前跑，因為它不起 agent）、task Run 結束（`finishTaskRun`）、lease 過期（`recoverTaskRun`）。
+  - 停單張走同一個 `stopRun`：ref 是 task 就只停它的 Run 並轉 `manual`，是 item 就照舊貼 hold、停掉它所有的 Run。REST 多一條 `POST /api/tasks/:ref/stop`，使用者 MCP 的 `stop_run` 收 task ref。task 詳情（REST 與 `get_task`）多了 `runs`，item 詳情的 `runs` 把 task 上存活的放前面，看板的 task 詳情有 Stop。
+  - prompt 多一個 `{{task.ref}}`。`dispatch` 的預設 prompt 叫 agent 開自己的 worktree、做完 merge 回 `feature/<item>` 再 push。
+  - 讀檔時 `dispatch` 規則不收 `claim` 與自己宣告的結果，設定頁選 Dispatch 時也不顯示這兩樣。doctor 第 8 條多列 dispatch 會走的 task 轉移。
+  - fake runner 在 dispatch 時從 task 自己的標題讀 `[fake:...]`，只回報，不碰 task。
+- 實測：`pnpm test` 490 條、`pnpm check` 沒有錯誤。engine 的整合測試多 8 條：沒有互相等待的 task 一起跑、其餘照順序、全 done 送 `in-review`；`needs_input` 轉 manual、item 進 `blocked`、人做完後接回；失敗兩次後第三輪轉 manual；Stop 只停那一張；人移走 task 或 item 時 soft cancel，而且 split 規則在 task 的 agent 還在時不認領；hold 停掉所有 task 的 agent；lease 過期送回 `to-do` 再跑 attempt 2；worker 只有讀與留言的 tool。E2E 的 sqlite 18 條過，多的一條是 `parallel` 站：在 split-review 把一張 task 改名成 `[fake:hang]`、送到 `parallel`、在 task 詳情按 Stop、標成 done，另一張由自己的 agent 做完，item 到 `In Review` 顯示 2/2。Jira 沒有跑：KAN 沒有 `parallel` 這個 status，E2E 的 Jira 流程把 dispatch 規則拿掉；Jira 的 task workflow 允不允許 `in-progress → done` 這類轉移，要用 doctor 對 KAN 查。
+- 重新檢視：Channels 能在 headless 用、要給 `execute` 加快 soft stop 時（plan.md 待驗證）；要讓 AI 審單張 task 時（目前 dispatch 不走 `in-review`）；要限制單張 item 的平行數時。

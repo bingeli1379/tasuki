@@ -18,6 +18,7 @@ import { moveTask } from './move-task'
 const run: Run = {
   id: 'r1',
   target: 'X-1',
+  item: 'X-1',
   rule: 'split',
   agent: 'a',
   attempt: 1,
@@ -249,11 +250,13 @@ describe('a person on a task', () => {
       dependencies: () => Promise.resolve([{ task: 'X-3', blockedBy: 'X-2' }]),
       comments: () => Promise.resolve([]),
     })
-    expect(await getTask(tracker, 'X-3')).toMatchObject({
+    const store = storeStub({ runsFor: () => Promise.resolve([]) })
+    expect(await getTask(tracker, store, 'X-3')).toMatchObject({
       task: { ref: 'X-3', blockedBy: ['X-2'] },
       comments: [],
+      runs: [],
     })
-    await expect(getTask(tracker, 'X-1')).rejects.toBeInstanceOf(NotFound)
+    await expect(getTask(tracker, store, 'X-1')).rejects.toBeInstanceOf(NotFound)
   })
 
   it('finishes a manual task and undoes a done one, logging each, but not under a live Run', async () => {
@@ -310,10 +313,13 @@ describe('a person on a task', () => {
     expect(deleted).toEqual(['X-3'])
 
     // An agent on another item does not matter.
-    live = [{ ...run, target: 'X-9' }]
+    live = [{ ...run, target: 'X-9', item: 'X-9' }]
     await deleteTask(deps, 'X-3')
     expect(deleted).toEqual(['X-3', 'X-3'])
 
+    // A dispatch rule running another task of the same item counts (D102).
+    live = [{ ...run, target: 'X-2', item: 'X-1' }]
+    await expect(deleteTask(deps, 'X-3')).rejects.toThrow('an agent is working on X-1')
     live = [{ ...run, target: 'X-1' }]
     const refused = 'an agent is working on X-1; stop it before changing X-3'
     await expect(updateTask(deps, edit)).rejects.toThrow(refused)

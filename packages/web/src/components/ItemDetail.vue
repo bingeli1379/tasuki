@@ -778,7 +778,10 @@ const authorOf = (c: Comment): string =>
                   >
                     <span class="flex items-center gap-2">
                       <span
-                        ><code class="font-mono">{{ r.rule }}</code>, attempt {{ r.attempt }}</span
+                        ><code class="font-mono">{{ r.rule }}</code>, attempt {{ r.attempt
+                        }}<template v-if="r.target !== detail.item.ref">
+                          on {{ taskTitle(r.target) }}</template
+                        ></span
                       >
                       <UBadge
                         :label="r.outcome ?? (r.cancelMode === undefined ? 'running' : 'stopping')"
@@ -787,7 +790,10 @@ const authorOf = (c: Comment): string =>
                         size="sm"
                       />
                     </span>
-                    <span v-if="r.from" class="flex flex-wrap items-center gap-1">
+                    <span
+                      v-if="r.from && r.target === detail.item.ref"
+                      class="flex flex-wrap items-center gap-1"
+                    >
                       <UBadge
                         :label="statusName(r.from)"
                         color="neutral"

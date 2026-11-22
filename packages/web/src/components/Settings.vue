@@ -76,6 +76,7 @@ interface FlowResponse {
 const MODE_TEXT: Record<RuleMode, { label: string; hint: string }> = {
   split: { label: 'Split', hint: 'Breaks the item into tasks' },
   execute: { label: 'Execute', hint: 'Works through the tasks' },
+  dispatch: { label: 'Dispatch', hint: 'One agent per task, run in parallel by the engine' },
   rework: { label: 'Rework', hint: 'Turns feedback into tasks' },
   review: { label: 'Review', hint: 'Reads and comments, then picks an outcome' },
   custom: { label: 'Custom', hint: 'Every tool, nothing checked: the prompt says it all' },
@@ -350,10 +351,12 @@ function addRule(): void {
   })
 }
 
-// The outcomes a rule shows: its mode's, the ones every rule has, then its own.
-const outcomeNames = (rule: RuleDraft): string[] => [
-  ...new Set([...MODE_OUTCOMES[rule.mode], ...ENGINE_OUTCOMES, ...Object.keys(rule.outcomes)]),
-]
+// The outcomes a rule shows: its mode's, the ones every rule has, then its own. A dispatch
+// rule's item ends only where the engine sends it from its tasks (D102).
+const outcomeNames = (rule: RuleDraft): string[] =>
+  rule.mode === 'dispatch'
+    ? [...MODE_OUTCOMES.dispatch]
+    : [...new Set([...MODE_OUTCOMES[rule.mode], ...ENGINE_OUTCOMES, ...Object.keys(rule.outcomes)])]
 const ownOutcome = (rule: RuleDraft, name: string): boolean =>
   !MODE_OUTCOMES[rule.mode].includes(name) && !ENGINE_OUTCOMES.includes(name)
 
@@ -372,6 +375,12 @@ function addOutcome(index: number, rule: RuleDraft): void {
 function setMode(rule: RuleDraft, mode: RuleMode): void {
   rule.mode = mode
   rule.session = mode === 'rework' ? 'per-item' : 'fresh'
+  if (mode === 'dispatch') {
+    rule.claim = ''
+    rule.outcomes = Object.fromEntries(
+      Object.entries(rule.outcomes).filter(([name]) => MODE_OUTCOMES.dispatch.includes(name)),
+    )
+  }
 }
 
 function dropOutcome(rule: RuleDraft, name: string): void {
@@ -655,6 +664,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                   />
                 </div>
                 <form
+                  v-if="r.mode !== 'dispatch'"
                   class="grid grid-cols-[1fr_auto] items-center gap-2 sm:grid-cols-3"
                   @submit.prevent="addOutcome(i, r)"
                 >
@@ -670,7 +680,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                 </form>
               </div>
               <div class="grid gap-2 sm:grid-cols-3">
-                <UFormField label="While working">
+                <UFormField v-if="r.mode !== 'dispatch'" label="While working">
                   <USelect
                     :model-value="r.claim || NONE"
                     :items="[{ label: 'Leave it where it is', value: NONE }, ...stationItems]"

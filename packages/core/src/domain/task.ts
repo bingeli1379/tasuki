@@ -13,6 +13,28 @@ export const isRunnable = (task: TaskNode, all: readonly TaskNode[]): boolean =>
   task.status === 'to-do' &&
   task.blockedBy.every((b) => all.find((t) => t.ref === b)?.status === 'done')
 
+// What a dispatch rule may start: a to-do task, or an in-progress one no live Run is on
+// (stale, invariant 3), whose blockers are all done.
+export const isDispatchable = (
+  task: TaskNode,
+  all: readonly TaskNode[],
+  live: ReadonlySet<Ref>,
+): boolean =>
+  isRunnable(
+    {
+      ...task,
+      status: task.status === 'in-progress' && !live.has(task.ref) ? 'to-do' : task.status,
+    },
+    all,
+  )
+
+// Where the engine moves a dispatched task when its Run ends with this outcome (D102).
+export const DISPATCH_MOVES: Readonly<Record<string, string>> = {
+  succeeded: 'done',
+  needs_input: 'manual',
+  failed: 'to-do',
+}
+
 // The task diagram in state-machine.md, as the agent may walk it. Only a person moves a
 // task out of manual, and done is final (invariant 4).
 export const AGENT_MOVES: Readonly<Record<string, readonly string[]>> = {

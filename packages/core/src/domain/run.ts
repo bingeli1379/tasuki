@@ -16,6 +16,8 @@ export type CancelReason = 'stop' | 'hold' | 'moved' | 'pause'
 export interface Run {
   id: string
   target: Ref
+  // The item it works for: the target itself, or the item of a task a dispatch rule runs.
+  item: Ref
   rule: string
   agent: string
   attempt: number
@@ -50,4 +52,12 @@ export interface Run {
 // resets it without the engine having to watch who moved it.
 export function nextAttempt(previous: Run | undefined): number {
   return previous?.outcome === 'abandoned' ? previous.attempt + 1 : 1
+}
+
+// A dispatched task that failed goes back to to-do rather than out of the station, so failed
+// counts too, or it would be tried for ever (D102).
+export function nextTaskAttempt(previous: Run | undefined): number {
+  return previous?.outcome === 'abandoned' || previous?.outcome === 'failed'
+    ? previous.attempt + 1
+    : 1
 }

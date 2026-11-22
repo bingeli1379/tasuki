@@ -31,7 +31,7 @@ export async function moveTask(
   if (task.kind !== 'task') throw new NotFound(`${input.ref} is not a task`)
   const refusal = personMoveRefusal(input.ref, input.from, input.to)
   if (refusal !== undefined) throw new InvalidInput(refusal)
-  if (input.from === 'done' && (await store.liveRuns()).some((r) => r.target === task.parent))
+  if (input.from === 'done' && (await store.liveRuns()).some((r) => r.item === task.parent))
     throw new InvalidInput(
       `an agent is working on ${task.parent}; reopen ${input.ref} once it is done`,
     )

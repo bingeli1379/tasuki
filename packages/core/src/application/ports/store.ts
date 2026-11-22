@@ -4,6 +4,7 @@ import type { Ref } from '../../domain/work-unit'
 
 export interface NewRun {
   target: Ref
+  item: Ref
   rule: string
   agent: string
   attempt: number

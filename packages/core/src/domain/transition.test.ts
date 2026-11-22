@@ -72,4 +72,23 @@ describe('ruleTransitions', () => {
     ])
     expect(moves([rule({})]).some((m) => m.startsWith('task'))).toBe(false)
   })
+
+  it('a dispatch rule claims a task, moves it by the verdict, and gives up on it (D102)', () => {
+    const dispatch = rule({
+      mode: 'dispatch',
+      watch: 'in-progress',
+      outcomes: { succeeded: 'in-review', blocked_manual: 'blocked' },
+    })
+    expect(
+      moves([dispatch])
+        .filter((m) => m.startsWith('task'))
+        .sort(),
+    ).toEqual([
+      'task in-progress -> done',
+      'task in-progress -> manual',
+      'task in-progress -> to-do',
+      'task to-do -> in-progress',
+      'task to-do -> manual',
+    ])
+  })
 })

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 import { MAX_ATTACHMENT_BYTES } from '../../domain/attachment'
+import type { Run } from '../../domain/run'
 import type { WorkUnit } from '../../domain/work-unit'
 import { storeStub } from '../../testing/store-stub'
 import { trackerStub } from '../../testing/tracker-stub'
@@ -22,6 +23,21 @@ const item: WorkUnit = {
   version: '1',
 }
 
+const onTask: Run = {
+  id: 'r1',
+  target: 'X-2',
+  item: 'X-1',
+  rule: 'dispatch',
+  agent: 'a',
+  attempt: 1,
+  workspace: '/w/X-1',
+  state: 'running',
+  produced: { questions: 0, tasks: 0 },
+  leaseUntil: '',
+  startedAt: '',
+  lastActivityAt: '',
+}
+
 describe('getItem', () => {
   it('returns the item with its comments, attachments, tasks and Runs', async () => {
     const task = (ref: string): WorkUnit => ({
@@ -40,7 +56,10 @@ describe('getItem', () => {
         children: () => Promise.resolve([task('X-2'), task('X-3')]),
         dependencies: () => Promise.resolve([{ task: 'X-3', blockedBy: 'X-2' }]),
       }),
-      storeStub({ runsFor: () => Promise.resolve([]) }),
+      storeStub({
+        runsFor: () => Promise.resolve([]),
+        liveRuns: () => Promise.resolve([onTask, { ...onTask, target: 'Y-2', item: 'Y-1' }]),
+      }),
       'X-1',
     )
     expect(detail).toEqual({
@@ -51,7 +70,8 @@ describe('getItem', () => {
         { ...task('X-2'), blockedBy: [] },
         { ...task('X-3'), blockedBy: ['X-2'] },
       ],
-      runs: [],
+      // A dispatch rule's live Run on one of its tasks shows with the item's own (D102).
+      runs: [onTask],
     })
   })
 

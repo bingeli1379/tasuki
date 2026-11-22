@@ -33,6 +33,7 @@ const unit = (ref: string, over: Partial<WorkUnit> = {}): WorkUnit => ({
 const run = (outcome: Outcome | undefined, over: Partial<Run> = {}): Run => ({
   id: 'r1',
   target: 'X-1',
+  item: 'X-1',
   rule: 'execute',
   agent: 'a',
   attempt: 1,

@@ -26,6 +26,8 @@ export interface Attachment {
 
 export interface Run {
   id: string
+  // The item, or one of its tasks when a dispatch rule runs them one by one (D102).
+  target: string
   rule: string
   attempt: number
   // Where the item was claimed from and where the engine moved it; older Runs have neither.
@@ -52,6 +54,8 @@ export interface TaskDetail {
   task: Task & { parent: string; body: string; version: string }
   // Oldest first; the engine's say why it or an agent moved the task.
   comments: Comment[]
+  // Newest first: the Runs a dispatch rule started on it.
+  runs: Run[]
 }
 
 export interface ItemDetail {
@@ -60,7 +64,7 @@ export interface ItemDetail {
   attachments: Attachment[]
   // Oldest first.
   tasks: Task[]
-  // Newest first.
+  // Newest first, the live ones on its tasks in front.
   runs: Run[]
 }
 

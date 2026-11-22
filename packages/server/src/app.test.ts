@@ -375,6 +375,7 @@ describe('tasks', () => {
 
     await store.createRun({
       target: item.ref,
+      item: item.ref,
       rule: 'execute',
       agent: 'fake',
       attempt: 1,
@@ -564,6 +565,7 @@ describe('the flow settings (D91)', () => {
       prompts: {
         split: defaultPrompt('split'),
         execute: defaultPrompt('execute'),
+        dispatch: defaultPrompt('dispatch'),
         rework: defaultPrompt('rework'),
         review: defaultPrompt('review'),
         custom: '',

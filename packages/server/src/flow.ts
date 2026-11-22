@@ -202,6 +202,16 @@ function parseRules(
     }
     for (const name of MODE_OUTCOMES[mode])
       if (outcomes[name] === undefined) fail(`${path}.outcomes.${name} is required in ${mode} mode`)
+    // The item never leaves watch while its tasks run, and only the engine picks its exit,
+    // from the tasks (D102).
+    if (mode === 'dispatch') {
+      if (claim !== undefined) fail(`${path}.claim: a dispatch rule keeps the item in watch`)
+      const own = Object.keys(outcomes).find(
+        (name) => !MODE_OUTCOMES.dispatch.includes(name) && !ENGINE_OUTCOMES.includes(name),
+      )
+      if (own !== undefined)
+        fail(`${path}.outcomes.${own}: a dispatch rule ends only on succeeded or blocked_manual`)
+    }
     if (Object.keys(outcomes).every((name) => ENGINE_OUTCOMES.includes(name)))
       fail(`${path}.outcomes must name at least one way for the agent to finish`)
     // Every rule can end on these; they go to the failure station unless it says otherwise.
@@ -265,6 +275,15 @@ export function parseFlow(raw: unknown, ctx: FlowContext): Flow {
   const missing = ['to-do', 'manual'].filter((s) => statuses.task?.[s] === undefined)
   if (splitter !== undefined && missing.length > 0)
     fail(`workflow.taskStatuses must map ${missing.join(', ')}: rule ${splitter.id} makes tasks`)
+  // The engine moves a dispatched task through these (D102).
+  const dispatcher = rules.find((r) => r.mode === 'dispatch')
+  const undispatched = ['to-do', 'in-progress', 'manual', 'done'].filter(
+    (s) => statuses.task?.[s] === undefined,
+  )
+  if (dispatcher !== undefined && undispatched.length > 0)
+    fail(
+      `workflow.taskStatuses must map ${undispatched.join(', ')}: rule ${dispatcher.id} runs tasks`,
+    )
   // An executing agent walks every task status, and a custom one may.
   const executor = rules.find((r) => r.mode === 'execute' || r.mode === 'custom')
   const unmapped = TASK_STATUSES.filter((s) => statuses.task?.[s] === undefined)

@@ -8,6 +8,7 @@ import {
   recoverRuns,
   resumeBlocked,
   resumeReleased,
+  settleDispatched,
   type Claimed,
   type Clock,
   type RunExit,
@@ -107,7 +108,8 @@ export function createEngine(deps: EngineDeps): Engine {
         workspace: run.workspace,
         mcp: { url: deps.mcpUrl, token },
         prompt: expandPrompt(`${CONTRACT}\n\n${rule.prompt}`, {
-          ref: run.target,
+          ref: run.item,
+          ...(run.target === run.item ? {} : { task: run.target }),
           runId: run.id,
           workspace: run.workspace,
           mode: rule.mode,
@@ -157,6 +159,12 @@ export function createEngine(deps: EngineDeps): Engine {
         // Before claiming, so an item resumed this round is picked up in the same round.
         await resumeBlocked({ tracker, store, named }, rules, holdLabel)
         await resumeReleased({ tracker, store, named }, rules, holdLabel)
+        // No agent behind it, so a paused engine still moves an item whose tasks are through.
+        await settleDispatched({ tracker, store, named }, rules, {
+          leaseSeconds: limits.leaseSeconds,
+          workspaceRoot: deps.workspaceRoot,
+          holdLabel,
+        })
         // Paused, the round still recovers and resumes: none of that starts a Run.
         if (await store.isPaused()) return
         const claimed = await claimItems({ tracker, store, named }, rules, {

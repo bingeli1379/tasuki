@@ -5,6 +5,7 @@ import type { StorePort } from '../ports/store'
 import type { TrackerPort } from '../ports/tracker'
 import { StatusConflict } from '../status-conflict'
 import { listTasks } from './list-tasks'
+import { finishTaskRun } from './dispatch'
 import { releaseTasks } from './release-tasks'
 
 export interface FinishDeps {
@@ -32,6 +33,7 @@ export async function finishRun(
   const run = await store.getRun(runId)
   // Recovery already gave up on it, and the item may be on its next attempt by now.
   if (run.outcome !== undefined) return run.outcome
+  if (rule.mode === 'dispatch') return finishTaskRun({ tracker, store }, rule, run, exit, logTail)
   // A person asked it to stop: whatever it reported, nothing moves (invariant 6).
   if (run.cancelRequestedAt !== undefined) {
     await store.finishRun(run.id, 'cancelled')

@@ -141,4 +141,7 @@ export const STORE_MIGRATIONS: readonly string[] = [
     saved_by TEXT NOT NULL,
     saved_at TEXT NOT NULL
   );`,
+  // S13 (D102): the item a Run works for, which for a dispatched task is not its target.
+  `ALTER TABLE run ADD COLUMN item TEXT NOT NULL DEFAULT '';
+  UPDATE run SET item = target;`,
 ]
