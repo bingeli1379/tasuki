@@ -57,7 +57,7 @@ engine 只看得到 orchestrator 這一個 process，看不到裡面的 subagent
 - `pause`（預設）：讓執行中的 Run 自然跑完。
 - `pause --kill`：對所有存活的 Run 送 hard cancel（`by = 'pause'`）。不貼 `hold`，恢復之後自己接著跑：停在 watch status 的直接被撿起，停在 claim status 的由 `resumeReleased` 送回 watch status（暫停中就先送回去等著）。
 
-暫停只擋認領。lease 復原、偵測 hold 與移走、自動接回、取消與寬限都照跑，它們不會開新的 Run，停掉反而讓 item 卡在半路。旗標存在 store，server 重開還是暫停的。看板上方有 Pause（含 Pause and stop all agents）與 Resume，暫停中顯示一條提示；使用者 MCP 是 `pause_engine`（`kill` 可選）與 `resume_engine`。CLI 的 `pause` 指令跟 S12 的 CLI 一起做，呼叫同一個 use case（D73）。
+暫停只擋認領。lease 復原、偵測 hold 與移走、自動接回、取消與寬限都照跑，它們不會開新的 Run，停掉反而讓 item 卡在半路。旗標存在 store，server 重開還是暫停的。看板上方有 Pause（含 Pause and stop all agents）與 Resume，暫停中顯示一條提示；使用者 MCP 是 `pause_engine`（`kill` 可選）與 `resume_engine`。CLI 是 `tasuki pause [--kill]` 與 `tasuki resume`，直接開 store 呼叫同一個 use case，不用連到 engine（D73、D98）。
 
 ## Lease 與當機復原
 

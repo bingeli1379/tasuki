@@ -59,6 +59,21 @@ describe('loadTracker', () => {
   })
 })
 
+describe('resolving', () => {
+  it('falls back to where the engine is installed when the config folder lacks the plugin', async () => {
+    const dir = configDirWith({})
+    const tracker = await loadTracker('@tasuki/sqlite', {}, dir, ctx(dir))
+    expect(typeof tracker.createItem).toBe('function')
+  })
+
+  it('takes the config folder copy over the one the engine came with', async () => {
+    const dir = configDirWith({
+      '@tasuki/fake-runner': "{ name: 'local', apiVersion: 1, runner: () => ({ mine: true }) }",
+    })
+    expect(await loadRunner('@tasuki/fake-runner', {}, dir, ctx(dir))).toEqual({ mine: true })
+  })
+})
+
 describe('loadRunner', () => {
   it('loads the fake runner from the config folder', async () => {
     const repoRoot = resolve(import.meta.dirname, '../../..')

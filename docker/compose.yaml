@@ -1,0 +1,15 @@
+# docker compose -f docker/compose.yaml up --build
+# ANTHROPIC_API_KEY comes from the shell or a .env next to this file.
+services:
+  tasuki:
+    build: ..
+    image: tasuki:local
+    ports:
+      - '127.0.0.1:8787:8787'
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:?set it to a Claude Console API key}
+    volumes:
+      - ./tasuki.config.jsonc:/instance/tasuki.config.jsonc:ro
+      - tasuki-data:/data
+volumes:
+  tasuki-data:

@@ -224,6 +224,7 @@ Jira 模式下 ticket 在 Jira，Run 在 store，兩邊靠 key 互指。tracker 
 - 前端：Vue 3 + Vite SPA，打包成靜態檔由 engine serve。不用 Nuxt，因為是 API 後面的管理介面，不需要 SSR。元件用 Nuxt UI（在純 Vue + Vite 底下用，不需要 Nuxt），見 D56。字型是 Bricolage Grotesque，用 `@fontsource-variable` 打包進 bundle，不連 Google Fonts，公司內網也能用（D79）。
 - repo：pnpm workspace。
 - 工具鏈：Vite+（`vp`），lint、format、type check、測試、build 都走它，見 D27、D28。`.vue` 的 template 型別檢查另外用 vue-tsc（配 `web` 自己的 TS 6），見 D58；git hook 走 `vp config` 與 `vp staged`，見 D53。library 用 `vp pack`（tsdown）打包。
+- CLI：`tasuki init` 的問答用 `@clack/prompts`，只在 `cli` 套件（D99）。
 
 ```
 packages/
@@ -236,14 +237,20 @@ packages/
   fake-runner/  runner plugin that stands in for an agent, for trying the engine without an LLM
   auth-builtin/ auth plugin: accounts kept in the store
   auth-http/    auth plugin: asks an external API
-  server/       composition root, REST, MCP facade (/agent-mcp), user MCP (/mcp), engine
-                (Poller and Run supervision), plugin loader, config loading, doctor (D95)
+  server/       composition root as a library: REST, MCP facade (/agent-mcp), user MCP (/mcp),
+                engine (Poller and Run supervision), plugin loader, config loading, doctor (D95),
+                the built board served at /
   web/          Vue 3 + Vite SPA
-  cli/          init, doctor, start
+  cli/          the `tasuki` bin: start, doctor, pause, resume, init; depends on every
+                built-in plugin and carries the built board (D98)
+Dockerfile      the container image: the CLI from its tarballs, plus the claude and codex CLIs (D100)
+docker/         compose.yaml and the config it mounts, an example to start from
 examples/
   tracker-memory/  third-party tracker plugin, installed from packed tarballs outside the workspace
 scripts/
   verify-plugin-example.ts  packs core and testkit, installs them into a copy of the example, runs its contract
+  pack-cli.ts               packs the CLI with what it ships and installs it into a folder
+  verify-cli-install.ts     installs the CLI outside the workspace with pack-cli.ts, drives `tasuki`
 ```
 
 一個技術一個套件，載入方式與契約見 plugins.md（D44）。store 預設是 `sqlite`，所以 Jira 模式下也要裝 `sqlite`，除非換成別的 store plugin（D88）。auth 的內建實作分成 `auth-builtin` 與 `auth-http`，不登入是省略 `auth`（D89）。

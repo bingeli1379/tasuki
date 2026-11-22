@@ -1,0 +1,216 @@
+import { API_VERSION, definePlugin, type Plugin, type RunExit, type RunSpec } from '@tasuki/core'
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
+import { createWriteStream } from 'node:fs'
+
+const SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'] as const
+type Sandbox = (typeof SANDBOXES)[number]
+
+interface CodexOptions {
+  // The CLI to run; tests point it at a stand-in.
+  command: string
+  model?: string
+  // What the agent's shell commands may touch. Codex has no per-tool list like claude's
+  // allowedTools, and nobody is there to approve anything, so this is the whole permission.
+  sandbox: Sandbox
+  // Passed to the spawned CLI only.
+  env: Record<string, string>
+  // false: the agent loads none of the machine's codex config.toml or rules, so a Run does the
+  // same on any machine; the login in CODEX_HOME is still used. true: it loads them.
+  inheritSettings: boolean
+}
+
+// The engine's environment holds the tracker's secrets (.env is loaded into it), and the agent
+// must never see them (agent-contract.md). CODEX_HOME is where the CLI keeps its login.
+const PASSED_ENV = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'TMPDIR',
+  'LANG',
+  'TERM',
+  'CODEX_HOME',
+]
+
+// The run token reaches the facade through this variable, so it is never on the command line.
+const TOKEN_ENV = 'TASUKI_MCP_TOKEN'
+
+// How the CLI says a resume id is unknown (codex-cli 0.169.0, exit code 1).
+const NO_SESSION = 'no rollout found for thread id'
+
+function parseOptions(raw: unknown): CodexOptions {
+  const o = (raw ?? {}) as Record<string, unknown>
+  const env = o['env'] ?? {}
+  if (
+    typeof env !== 'object' ||
+    env === null ||
+    Object.values(env).some((v) => typeof v !== 'string')
+  )
+    throw new Error('options.env must map names to strings')
+  const auth = o['auth'] ?? 'inherit-login'
+  if (auth === 'api-key') {
+    if (((env as Record<string, string>)['CODEX_API_KEY'] ?? '') === '')
+      throw new Error('options.auth api-key needs options.env.CODEX_API_KEY')
+  } else if (auth !== 'inherit-login')
+    throw new Error(
+      'options.auth must be inherit-login or api-key: a subscription login is the auth.json in CODEX_HOME',
+    )
+  if (o['allowedTools'] !== undefined)
+    throw new Error('options.allowedTools: codex has no per-tool list; set options.sandbox')
+  if (o['requires'] !== undefined)
+    throw new Error('options.requires: doctor cannot check a codex agent for it yet')
+  const sandbox = o['sandbox'] ?? 'workspace-write'
+  if (!SANDBOXES.includes(sandbox as Sandbox))
+    throw new Error(`options.sandbox must be ${SANDBOXES.join(', ')}`)
+  const model = o['model'] ?? undefined
+  if (model !== undefined && model !== null && typeof model !== 'string')
+    throw new Error('options.model must be a model name')
+  return {
+    command: typeof o['command'] === 'string' ? o['command'] : 'codex',
+    ...(typeof model === 'string' ? { model } : {}),
+    sandbox: sandbox as Sandbox,
+    env: env as Record<string, string>,
+    inheritSettings: o['inheritSettings'] === true,
+  }
+}
+
+// -c values are TOML; a JSON string is a valid TOML basic string.
+const config = (key: string, value: string): string[] => ['-c', `${key}=${JSON.stringify(value)}`]
+
+function codexArgs(options: CodexOptions, spec: RunSpec, resume: string | undefined): string[] {
+  return [
+    'exec',
+    '--json',
+    // The workspace is a plain folder until the agent clones into it.
+    '--skip-git-repo-check',
+    '--cd',
+    spec.workspace,
+    '--sandbox',
+    options.sandbox,
+    ...(options.model === undefined ? [] : ['--model', options.model]),
+    ...(options.inheritSettings ? [] : ['--ignore-user-config', '--ignore-rules']),
+    ...config('approval_policy', 'never'),
+    ...config('mcp_servers.tasuki.url', spec.mcp.url),
+    ...config('mcp_servers.tasuki.bearer_token_env_var', TOKEN_ENV),
+    ...(resume === undefined ? [] : ['resume', resume]),
+    // The prompt comes on stdin.
+    '-',
+  ]
+}
+
+function agentEnv(options: CodexOptions): Record<string, string> {
+  const env: Record<string, string> = {}
+  for (const key of PASSED_ENV) {
+    const v = process.env[key]
+    if (v !== undefined) env[key] = v
+  }
+  return Object.assign(env, options.env)
+}
+
+const plugin: Plugin = definePlugin({
+  name: '@tasuki/codex-cli',
+  apiVersion: API_VERSION,
+  runner: (_ctx, raw) => {
+    const options = parseOptions(raw)
+    return {
+      async doctor() {
+        const version = spawnSync(options.command, ['--version'], {
+          env: agentEnv(options),
+          encoding: 'utf8',
+        })
+        if (version.error !== undefined || version.status !== 0)
+          return [
+            {
+              level: 'error',
+              message: `${options.command} does not run: ${version.error?.message ?? `--version exited with ${String(version.status)}`}`,
+            },
+          ]
+        return []
+      },
+
+      start(spec) {
+        const log = createWriteStream(spec.logPath, { flags: 'a' })
+        const env = Object.assign(agentEnv(options), {
+          TASUKI_RUN_ID: spec.runId,
+          TASUKI_TARGET: spec.target,
+          TASUKI_MODE: spec.mode,
+          TASUKI_WORKSPACE: spec.workspace,
+          [TOKEN_ENV]: spec.mcp.token,
+        })
+        let child: ChildProcess | undefined
+        let stopped = false
+
+        const once = (resume: string | undefined) =>
+          new Promise<{ exit: RunExit; stderr: string }>((resolve) => {
+            let stderr = ''
+            let buffered = ''
+            // Its own process group, so terminate reaches whatever the CLI started too.
+            const proc = spawn(options.command, codexArgs(options, spec, resume), {
+              cwd: spec.workspace,
+              env,
+              detached: true,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            })
+            child = proc
+            proc.stdin.on('error', () => {})
+            proc.stdin.end(spec.prompt)
+            proc.stdout.on('data', (chunk: Buffer) => {
+              log.write(chunk)
+              spec.onActivity()
+              buffered += chunk.toString()
+              const lines = buffered.split('\n')
+              buffered = lines.pop() ?? ''
+              // Codex names the session itself, in the first event, rather than taking one.
+              for (const line of lines) {
+                if (!line.includes('thread.started')) continue
+                try {
+                  const event = JSON.parse(line) as { type?: string; thread_id?: unknown }
+                  if (event.type === 'thread.started' && typeof event.thread_id === 'string')
+                    spec.onSession(event.thread_id)
+                } catch {
+                  // Not an event line.
+                }
+              }
+            })
+            proc.stderr.on('data', (chunk: Buffer) => {
+              stderr += chunk.toString()
+              log.write(chunk)
+              spec.onActivity()
+            })
+            proc.on('error', (e) => {
+              log.write(`could not start ${options.command}: ${e.message}\n`)
+              resolve({ exit: { code: null, signal: null }, stderr })
+            })
+            proc.on('close', (code, signal) => resolve({ exit: { code, signal }, stderr }))
+          })
+
+        const exit = (async (): Promise<RunExit> => {
+          let result = await once(spec.resume)
+          // The session is gone (cleared, another machine): start over rather than fail,
+          // since the tracker holds what the agent needs (data-model.md).
+          if (!stopped && spec.resume !== undefined && result.stderr.includes(NO_SESSION))
+            result = await once(undefined)
+          await new Promise((resolve) => log.end(resolve))
+          return result.exit
+        })()
+
+        return {
+          exit,
+          terminate(signal) {
+            stopped = true
+            if (child?.pid === undefined || child.exitCode !== null || child.signalCode !== null)
+              return
+            try {
+              process.kill(-child.pid, signal)
+            } catch {
+              // Already gone.
+            }
+          },
+        }
+      },
+    }
+  },
+})
+
+export default plugin

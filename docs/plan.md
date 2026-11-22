@@ -48,7 +48,7 @@
 | S7a | task 詳情（內文與 comment，含 D67 的原因）、人改 task status（接手、交回、manual 做完）、在 `split-review` 編輯與刪除 task（已完成，D70） | 點開 task 看內容與原因；不用重拆就能修 task |
 | S7b | blocked 自動接回、規則 C rework、`in-review` 打回 `ready-to-rework` 的按鈕（已完成，D71） | manual 做完後 item 自己回 `in-progress`；打回後重拆、再進 `split-review` |
 | S7c | Stop（hard）、hold（soft）、人移走 item 視為接手、`RUN_CANCELLED`、soft 與 hard 的寬限升級（已完成，D72） | 按 Stop 後 Run 變 cancelled；貼 hold 後 engine 不碰它 |
-| S7d | 全域 pause 與 `pause --kill`（已完成，D73；CLI 指令跟 S12 一起） | 暫停後不再起新的 Run |
+| S7d | 全域 pause 與 `pause --kill`（已完成，D73；CLI 指令在 S12a，D98） | 暫停後不再起新的 Run |
 | S7e | 作者試用 S7 後的回饋：預設規則不用 claim status、刪除 item、人可以改回 done 的 task、人的操作留紀錄、看板與詳情的使用性、沒有回饋的 rework 不開跑（已完成，D74、D75） | 卡片留在原欄掛 Running；按錯能改回；詳情秒開、跟著看板更新 |
 | S8 | 真的 claude runner（plugin）、規則的 prompt 與 session、預設 prompt（MCP facade 與 run token 在 S4 就有了）（已完成，D76）。之後補了 prompt 三層與 agent 自帶 plugin、MCP（D77） | 在玩具 repo 上用真的 claude 跑一次 |
 | W1 | status 自訂與角色、`handledBy`、站上給人的 `outcomes`，還在檔案裡設定（已完成，D78、D81，custom-workflow.md） | config 加一站，看板多一欄，眼睛和雷達標對 |
@@ -60,7 +60,10 @@
 | W4b | 流程設定的修改歷史、回到任一版（已完成，D91、D94） | 看得到誰在什麼時候改了什麼，能回到前一版 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（已完成，D66、D95） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件（已完成，D96；真的 `npm publish` 在 S14） | 照文件寫出一個第三方 tracker 並通過契約測試 |
-| S12 | codex runner、CLI 打包（本機從 tarball 裝得起來）、container image（本機 build 得起來） | `init`、`doctor`、`start` 可用 |
+| S12a | `tasuki` CLI（`start`、`doctor`、`pause`、`resume`）、內建 plugin 跟著 CLI 裝、engine serve 看板、本機從 tarball 裝得起來（已完成，D98） | 只放一份 config 的資料夾裡 `tasuki start`，瀏覽器開 8787 就是看板 |
+| S12b | 互動式 `tasuki init`：選 tracker、agent、要不要登入，Jira 的 issue type 與 link type 向 Jira 查好寫進 config 並附上名稱（D50）；status 對照照舊在設定頁（已完成，D99） | 空資料夾 `tasuki init` 答完問題，直接 `tasuki start` 跑得起來 |
+| S12c | container image（本機 build，在 OrbStack 跑），claude-cli 加 `api-key` 與 `oauth-token` 認證（已完成，D100） | `docker run` 起來後用 token 真的派一次 claude |
+| S12d | codex runner 與 testkit 的 runner 契約，做到契約測試會過（已完成，D101；作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |
 | S14 | 對外發佈：license、套件名稱查撞名（D23）、版本號與依賴範圍（D62、D96）、`npm publish`（core、testkit、內建 plugin、CLI）、container image 推到 registry、給使用者看的 README（含訂閱帳號與 API key 的條款）（D97） | 在一台乾淨的機器上從 npm 與 registry 裝起來，照 README 跑得起來 |
 
@@ -119,11 +122,9 @@ S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整�
 
 - `claude -p` 用 `--resume` 接回一段快滿的對話時，會不會自己壓縮（auto-compact）。`session: per-item` 的規則接了很多次之後要靠它；不會的話，要讓 runner 在 token 用量太高時改開新對話，或同一張卡接了 N 次就重開（作者 2026-11-22 提出）。
 
-- `codex` 的 headless 指令：輸出格式、session resume、工具白名單、注入 MCP 設定的方式。`claude` 已在 S8 用 2.1.323 驗過（D76）：`-p --output-format stream-json --verbose`、`--session-id` 自訂 uuid、`--resume`（找不到時 exit 1）、`--mcp-config` 給 http server 帶 header、`--allowedTools` 的格式是 `mcp__<server>` 與 `Bash(git:*)`。
-- `claude` 與 `codex` 各自的 `api-key`、`oauth-token` 認證要吃哪個環境變數（D35）。claude-cli 目前只做 `inherit-login`。
-- codex 是否支援 http 版的 MCP；只支援 stdio 時要不要加一個轉到 REST 的 shim。claude 支援（D76）。
+- codex 真的叫模型時的行為（D101，作者沒有 Codex 帳號）：`exec` 模式下 `approval_policy="never"` 能不能直接呼叫 tasuki 的 MCP tool，還是要另外設 tool 的批准；`workspace-write` 的 sandbox 預設不給網路，agent 能不能 `git push`；`api-key` 用的 `CODEX_API_KEY` 是從官方 SDK 的原始碼讀到的，沒實際打過。headless 的參數、`thread.started` 的 session、resume 找不到時的訊息、`-c` 注入 http MCP 都已經用 0.169.0 實際驗過。claude 的部分已在 S8 與 S12c 驗過（D76、D100）。
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
-- agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。claude 已在 S10 做成 `doctor` 第 9 條（D95）：stream-json 的 `init` 列出 `skills` 與帶 `status` 的 `mcp_servers`，不一定是第一行。codex 還沒查。
+- agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。claude 已在 S10 做成 `doctor` 第 9 條（D95）：stream-json 的 `init` 列出 `skills` 與帶 `status` 的 `mcp_servers`，不一定是第一行。codex 還沒查，codex agent 目前不收 `requires`（D101）。
 - 使用者 MCP 接 Codex（D57）：2026-11-16 用 codex-cli 0.169.0 驗過 `initialize` 與 `tools/list`（中間放 proxy 記錄請求），`tools/call` 沒驗，因為手上沒有 Codex 帳號，模型叫不起來。Claude Code 2.1.311 已實際呼叫 `create_item` 與 `list_board` 成功。
 - Jira Cloud：API token 的 rate limit。transitions API 已在 S2 實際走過（D59）；ADF 轉換（marklassian 加自寫的反向）與 comment property 已在 S3 實際走過（D61）。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。

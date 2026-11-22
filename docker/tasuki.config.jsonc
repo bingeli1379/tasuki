@@ -1,0 +1,27 @@
+{
+  // The config for the container image: mounted at /instance, its state in the /data volume.
+  "version": 1,
+  "dataDir": "/data",
+
+  // Inside the container the engine has to listen on every address; compose.yaml publishes the
+  // port on the host's loopback only, which is what allowInsecure owns (D90). Reached from
+  // anywhere else, set auth and publicUrl instead.
+  "server": { "host": "0.0.0.0", "port": 8787, "allowInsecure": true },
+
+  "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
+
+  // There is no login to inherit in here: the agent signs in with an API key from the Claude
+  // Console. "oauth-token" with CLAUDE_CODE_OAUTH_TOKEN in env is also accepted
+  // (security-and-auth.md).
+  "agents": {
+    "claude": {
+      "plugin": "@tasuki/claude-cli",
+      "options": {
+        "auth": "api-key",
+        "env": { "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}" },
+        "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git:*)", "Bash(node:*)"],
+      },
+    },
+    "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } },
+  },
+}

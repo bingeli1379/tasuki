@@ -1,0 +1,31 @@
+{
+  "name": "@tasuki/cli",
+  "version": "0.0.0",
+  "private": true,
+  "bin": {
+    "tasuki": "./dist/index.mjs"
+  },
+  "files": [
+    "dist",
+    "web"
+  ],
+  "type": "module",
+  "scripts": {
+    "build": "vp pack && rm -rf web && cp -R ../web/dist web"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.9.0",
+    "@tasuki/auth-builtin": "workspace:*",
+    "@tasuki/auth-http": "workspace:*",
+    "@tasuki/claude-cli": "workspace:*",
+    "@tasuki/codex-cli": "workspace:*",
+    "@tasuki/core": "workspace:*",
+    "@tasuki/fake-runner": "workspace:*",
+    "@tasuki/jira-cloud": "workspace:*",
+    "@tasuki/server": "workspace:*",
+    "@tasuki/sqlite": "workspace:*"
+  },
+  "devDependencies": {
+    "@tasuki/web": "workspace:*"
+  }
+}

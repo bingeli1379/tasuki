@@ -10,12 +10,14 @@
     "test": "vp test",
     "e2e": "pnpm --filter @tasuki/web e2e",
     "prepare": "vp config --no-agent",
-    "verify:plugin-example": "vp run -r build && node scripts/verify-plugin-example.ts"
+    "verify:plugin-example": "vp run -r build && node scripts/verify-plugin-example.ts",
+    "verify:cli-install": "vp run -r build && node scripts/verify-cli-install.ts"
   },
   "devDependencies": {
     "@tasuki/auth-builtin": "workspace:*",
     "@tasuki/auth-http": "workspace:*",
     "@tasuki/claude-cli": "workspace:*",
+    "@tasuki/codex-cli": "workspace:*",
     "@tasuki/fake-runner": "workspace:*",
     "@tasuki/jira-cloud": "workspace:*",
     "@tasuki/sqlite": "workspace:*",

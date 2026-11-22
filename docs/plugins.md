@@ -11,7 +11,7 @@ tracker、store、runner、auth 四個角色都可以由第三方寫成 npm 套�
 - store 的 migration 由 plugin 自己帶，engine 不寫任何 SQL。
 - 一個技術一個套件：`sqlite`、`jira-cloud`、`claude-cli`、`codex-cli`。不按角色切，因為同一個技術可能同時提供多個角色。
 - `core` 是公開契約。plugin 只相依 `core`，不 import `server` 或其他 plugin。ports 與它們引用的型別都是公開 API，改簽名是 breaking change。
-- `testkit` 提供契約測試。內建與第三方的實作都要通過同一組。它跟 `core` 一起發佈到 npm，依賴同一個確切版本的 `core`，測試框架是 peer 的 `vitest`（D96）。
+- `testkit` 提供契約測試（tracker、store、runner）。內建與第三方的實作都要通過同一組。runner 的契約對著一支假的 CLI 跑，假 CLI 由 runner 自己提供，演 `succeed`、`hang`、`no-session` 三種行為（D101）。它跟 `core` 一起發佈到 npm，依賴同一個確切版本的 `core`，測試框架是 peer 的 `vitest`（D96）。
 - 第三方 plugin 把 `@tasuki/core` 寫成 `peerDependencies`，用 engine 那一份。engine 用 `instanceof` 認 port 丟的錯誤，plugin 自己帶一份的話 class 對不上（D96）。
 - plugin 宣告 `apiVersion`，engine 載入時檢查。
 - plugin 是受信任的程式碼，沒有沙箱，見 security-and-auth.md。
@@ -59,7 +59,7 @@ export default definePlugin({
 
 ## config 怎麼指定
 
-config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），再用 `import()` 載入。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
+config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），找不到再從 engine 自己安裝的位置解析，再用 `import()` 載入。內建的 plugin 是 CLI 的依賴，全域裝 CLI 就一起裝好；第三方的裝在 config 旁邊，同名時 config 旁邊的優先（D98）。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
 
 ```jsonc
 "tracker": {

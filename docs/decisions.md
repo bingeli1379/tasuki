@@ -953,3 +953,57 @@
   - S13 做完、進 S14 之前，作者自己把整個產品測一輪並調整。調整照 S7e 的方式插成切片，全部定了才進 S14。
 - 理由：發佈出去就收不回來，版本與名稱都會被別人裝走。集中在作者測過、調過之後，才不會發了一版又馬上推翻。本機裝得起來的部分還是在功能切片裡做，作者測的時候才是用真的安裝方式在測。
 - 重新檢視：有人要在 S14 之前先用某個套件時（例如有第三方要寫 plugin）。
+
+## D98 S12a：`tasuki` CLI、內建 plugin 跟著 CLI 裝、engine serve 看板
+
+- 背景：S12（2026-11-22）。原本一片包了 CLI 打包、container image、codex runner，`init` 怎麼做文件也沒定。全域裝的 CLI 有個載入問題：plugin 只從 config 所在的資料夾解析（plugins.md），使用者隨便開的 instance 資料夾裡沒有 `node_modules`，連 `@tasuki/sqlite` 都找不到。
+- 決定（作者同意）：
+  - S12 拆成四片：S12a CLI（`start`、`doctor`、`pause`、`resume`）、engine serve 看板、從 tarball 裝；S12b 互動式 `init`；S12c container image 加 claude 的 `api-key` 與 `oauth-token`；S12d codex runner，做到契約測試會過（作者沒有 Codex 帳號，真的跑掛在 plan.md 待驗證）。
+  - 新增 `packages/cli`（`@tasuki/cli`，bin 是 `tasuki`），只做參數解析。`server` 從可執行檔改成 library，匯出 `startEngine`、`runDoctor`、`pauseCommand`、`resumeCommand`。
+  - 內建 plugin 全部列在 CLI 的 `dependencies`，跟著 CLI 一起裝。loader 先從 config 的資料夾解析，找不到再從 engine 自己安裝的位置解析。config 旁邊裝了同名套件的話，用 config 旁邊那份。內建的沒有因此多拿到什麼，第三方放在 config 旁邊一樣找得到，D44 不變。
+  - engine 在 `/` serve 建好的看板（`createApp` 的 `webDir`）。CLI build 時把 `web/dist` 複製到自己的 `web/`，跟著 tarball 走；沒有 client 路由，不做 SPA fallback。開發時照舊由 Vite 在 5173 serve。
+  - `tasuki pause [--kill]` 與 `resume` 直接開 store 呼叫 `pauseEngine`、`resumeEngine`（D73 的同一組 use case），不打 REST。跑著的 engine 每一輪從 store 讀暫停旗標，`enforce` 每秒讀 cancel 要求，所以不需要連到 engine，有 auth 也不用登入。sqlite 開 DB 加 5 秒的 busy timeout，兩個 process 同時寫時等鎖，不直接丟 `SQLITE_BUSY`。
+- 理由：每個 instance 資料夾各裝一次內建 plugin，前台多一步、每個資料夾多一包 `node_modules`，plugin 帶的 core 也可能跟 CLI 的不同版。退回 engine 安裝位置只多一層 `createRequire`，npm 裝出來的樹裡 `@tasuki/server` 跟內建 plugin 是兄弟，workspace 裡則走到根目錄的 devDependencies，兩邊都不用多傳參數。
+- 實測：`pnpm verify:cli-install` 用 `pnpm pack` 打出 core、server、六個內建 plugin 與 cli 的 tarball，在暫存資料夾用 npm 裝起來（各套件互相要 `0.0.0`，registry 上沒有，用 `overrides` 指到 tarball），另一個只放 config（sqlite 加 fake-runner）的 instance 資料夾跑裝好的 `tasuki`：`doctor` 0 errors 0 warnings；`start` 之後 `/` 是看板、它的 script 拿得到；`pause --kill` 後 `GET /api/board` 回 `paused: true`，`resume` 後回 false。`pnpm test` 453 條、`pnpm check` 沒有錯誤、E2E 的 sqlite、auth、auth-http 共 19 條過（jira 沒跑，會清空 KAN）。D96 說留給 S12 的 `files` 也一起補了，這次的 tarball 有 `dist`。
+- 沒驗的：真的 `npm i -g`。registry 上沒有 `@tasuki/*`，全域安裝不吃 `overrides`，各套件的依賴解析不到，要等 S14 發佈後才驗得了。上面裝進資料夾的樹跟全域的差別只在外面多一層 `@tasuki/cli/node_modules`，從 `server` 往上解析一樣走得到。
+- 重新檢視：內建 plugin 要獨立升版、不想跟著 CLI 一起裝時。
+
+## D99 S12b：互動式 `tasuki init`
+
+- 背景：S12b（2026-11-22）。D50 說 Jira 的 id 由 `init` 查好寫進 config、附上名稱；config-and-rules.md 說 `init` 要帶一份預設的 `allowedTools`。其他行為文件沒寫。
+- 決定（作者同意）：
+  - 依序問 tracker（sqlite 或 Jira Cloud）、agents（claude、fake，可多選，至少一個）、要不要登入（不用或 `auth-builtin`）。`auth-http` 要填外部 API，不放進 init，自己改 config。
+  - 選 Jira 時問網址、email、API token（不顯示），打 `GET /rest/api/3/myself` 確認登得進去，不行就整組重問；再問 project key，`GET /rest/api/3/project/{key}` 不是 200 就重問。item 的 issue type 從 `subtask: false` 且 `hierarchyLevel` 是 0 的裡面挑（epic 在 1，排除），task 從 `subtask: true` 的裡面挑。link type 有叫 `Blocks` 的就直接用，沒有才列出來讓人挑。
+  - 寫出的 config 是 JSONC，id 旁邊用註解附上 Jira 上的名稱。email 與 token 只寫進旁邊的 `.env`（權限 600，同名的行會被換掉），config 裡寫 `${JIRA_EMAIL}`、`${JIRA_API_TOKEN}`（D49）。claude 的 `allowedTools` 帶範例檔那份。
+  - config 已經存在就拒絕，不覆蓋。`--config <路徑>` 指定寫到哪裡。
+  - Jira status 的對照不在 init 做，照舊在設定頁挑（W4a），因為它存在 store 裡、不在檔案裡。codex 等 S12d 再加。不做非互動的旗標版本，現在沒有腳本要呼叫它。
+  - 問答用 `@clack/prompts`（1.9.0，create-vite 用的同一套）：方向鍵選、空白鍵多選、token 以遮罩顯示、查 Jira 時有 spinner，Ctrl+C 任何一題都不寫檔就結束。先用 `node:readline` 手寫過一版，只有編號輸入，作者覺得太簡陋，換掉；方向鍵選單不是幾行程式寫得完的，所以加這個依賴。只在 `cli`，engine 不依賴它。
+  - `doctor` 的輸出上色（error 紅、warning 黃、總結 0 個 error 是綠），用 Node 內建的 `util.styleText`，不是 TTY 或設了 `NO_COLOR` 時照舊是純文字，格式不變。
+  - 找不到 config 時的錯誤訊息提示跑 `tasuki init`（config-and-rules.md 路徑一節）。
+- 實測：先用 readline 版，把答案 pipe 進去打 KAN（新的暫存資料夾，環境裡拿掉 `JIRA_*`）：查出 item `10009`（故事）、task `10007`（Subtask）、link `10000`（Blocks），`.env` 權限 `-rw-------`。接著同一個資料夾 `tasuki doctor` 0 errors，14 個 warning 都是 status 還沒在設定頁對照。換成 clack 後在 100 欄的 pty 裡用方向鍵與空白鍵走完 sqlite 加 claude 加 auth-builtin，寫出的 config 正確。單元測試 mock 掉 clack，4 條：sqlite 的 config 讓 `runDoctor` 回 0；Jira 錯的 token 與錯的 project 都會重問，寫出的 id、名稱註解、`.env` 內容與權限都對；取消時不寫檔；已經有 config 時不動它。
+- 重新檢視：第三方 tracker 也想在 init 問自己的問題時（要給 plugin 一個 init 的 hook）；有腳本要不互動地產生 config 時。
+
+## D100 S12c：container image、claude 的 `api-key` 與 `oauth-token`
+
+- 背景：S12c（2026-11-22）。architecture.md 說雲端是 container image、agent 用 API key，可是 claude-cli 只收 `inherit-login`，container 裡沒有登入可以沿用。D35 的待驗證是兩種認證各吃哪個環境變數。
+- 決定（作者同意）：
+  - claude-cli 的 `auth` 收 `inherit-login`、`api-key`、`oauth-token`。後兩種要求 `options.env` 裡有非空的 `ANTHROPIC_API_KEY` 或 `CLAUDE_CODE_OAUTH_TOKEN`（對過 code.claude.com/docs/en/authentication）。`-p` 底下 API key 的優先序在 OAuth token 前面，所以 `oauth-token` 的 `env` 裡帶了 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN` 就拒絕，不讓它默默改用 API 計費。變數照舊只從 `options.env` 進 agent（D35），engine 自己的環境不會漏過去。
+  - 根目錄的 `Dockerfile` 分兩段：build 段裝 workspace、`pnpm build`，再用 `scripts/pack-cli.ts` 從 tarball 把 CLI 裝到 `/opt/tasuki`，跟 npm 使用者拿到的是同一包。執行段是 `node:24.22.0-bookworm-slim`，裝 git、ssh client，以及全域的 `@anthropic-ai/claude-code@2.1.323`（D76 驗過的版本）與 `@openai/codex@0.169.0`，用 `node` 使用者跑，config 掛在 `/instance`，狀態在 `/data` volume。`verify-cli-install.ts` 也改成呼叫 `pack-cli.ts`，打包只有一份。
+  - `docker/compose.yaml` 與 `docker/tasuki.config.jsonc` 是範例：綁 `0.0.0.0` 加 `allowInsecure`，host 端只開在 `127.0.0.1`（security-and-auth.md 的 Docker 一條、D90）。agent 預設 `api-key`，照 security-and-auth.md「雲端部署的預設」與「`claude setup-token` 這類繞法不寫進官方文件」。`oauth-token` 照樣支援，選哪種是使用者的事。
+- 實測（OrbStack，arm64）：image build 成功，執行段 787MB 是兩個 CLI（claude 346MB、codex 403MB）加 npm 快取清掉之後的大小，tasuki 本身 33MB。fake runner 的 config 起來後 `/api/health` 與看板正常，container 裡 `tasuki doctor` 0 errors、`claude --version` 是 2.1.323、`codex --version` 是 0.169.0。接著作者用 `claude setup-token` 產的 token，config 寫 `oauth-token`：存一條 split 規則、把一張 item 移到 `ready-to-split`，claude 在 container 裡約 10 秒拆出兩張 task，Run `finished`、`succeeded`，item 到 `split-review`；Run log 的 `apiKeySource` 是 `none`，container 裡沒有別的登入，用的就是那個 token。`api-key` 沒有實際打過（作者沒有 Console 的 key），行為只靠單元測試與文件。
+- 過程中的事故：驗證完找殘留字串時，`grep` 沒排除 `docker/.env`，token 被印進了對話紀錄。作者已撤銷，`docker/.env` 清空。之後掃字串要先排除放 secret 的檔案。
+- 重新檢視：image 要推到 registry（S14）；兩個 CLI 要升版時（版本 pin 在 Dockerfile）；有人要跑 arm64 以外的平台時，要確認多平台 build。
+
+## D101 S12d：codex runner、testkit 的 runner 契約
+
+- 背景：S12d（2026-11-22）。D96 說 runner 的契約等第二個真的 runner 再長。作者沒有 Codex 帳號，只能做到契約測試會過（D98）。
+- 決定（作者同意）：
+  - `@tasuki/codex-cli` 跑 `codex exec --json --skip-git-repo-check --cd <workspace> --sandbox <sandbox>`，prompt 從 stdin 給（最後的參數是 `-`），`-c approval_policy="never"`，tasuki 的 MCP 用 `-c mcp_servers.tasuki.url=…` 與 `mcp_servers.tasuki.bearer_token_env_var="TASUKI_MCP_TOKEN"`，run token 放在那個環境變數，不出現在命令列。選項放在 `resume <id>` 前面，跟官方 TypeScript SDK（`@openai/codex-sdk` 0.169.0）的排法一樣。
+  - codex 不能事先指定 session id，runner 讀 `--json` 的第一個事件 `thread.started` 的 `thread_id` 再呼叫 `onSession`。RunnerPort 本來就是事後回報（`onSession`），core 不用改。resume 時 stderr 出現 `no rollout found for thread id`（exit 1）就開新的，跟 claude 一樣。
+  - options：`auth`（`inherit-login` 或 `api-key`，後者要 `env.CODEX_API_KEY`；codex 沒有 OAuth token 那種變數，訂閱就是 `CODEX_HOME` 的 `auth.json`）、`model`、`sandbox`（預設 `workspace-write`）、`env`、`inheritSettings`（預設 false，加 `--ignore-user-config --ignore-rules`，登入照樣讀 `CODEX_HOME`）。傳給 CLI 的環境變數是 claude 那份加上 `CODEX_HOME`。
+  - 給 codex `allowedTools` 直接拒絕載入，叫人改用 `sandbox`。另一種是把常見的 tool 名稱翻成 sandbox 等級，但那個對應是編出來的；默默忽略又會讓人以為擋住了。`requires` 也拒絕，因為還不知道怎麼偵測 codex 的 MCP server 與 skill；doctor 只檢查 `--version`。
+  - testkit 加 `describeRunnerContract`：成功時 exit 是 0、log 有內容、`onActivity` 與 `onSession` 有被呼叫；resume 的 session 不在時開新的並回報新的 id；`terminate` 之後 `exit` 會結束；CLI 不存在時 exit 沒有 code。每個 runner 提供一支假 CLI 演 `succeed`、`hang`、`no-session`，傳給 CLI 的參數仍由各自的測試驗。claude-cli 與 codex-cli 都跑這份。testkit 的 tsconfig 加上 node 的型別，對外的 `.d.ts` 沒有用到任何 `node:` 型別。
+  - CLI 的依賴、`pack-cli.ts`、init 的 agent 選單都加上 codex，init 寫 `"sandbox": "workspace-write"`。
+- 實測（codex-cli 0.169.0，沒登入，暫時的 `CODEX_HOME`）：用 build 好的 runner 帶真的參數跑真的 codex，沒有任何參數錯誤，第一行是 `thread.started`，session 有回報；log 有 `rmcp` 連不上的錯誤，表示注入的 http MCP 被讀進去了（故意指到連不到的 port）。resume 一個不存在的 id，codex 印 `no rollout found`，runner 開新的並回報新的 thread id。`codex mcp list --json` 讀 `-c` 注入的 server 是 `streamable_http`、`auth_status: bearer_token`。單元測試 10 條（含契約 4 條、process tree 的 terminate），claude-cli 加跑契約後 16 條。從 tarball 裝好的 `tasuki` 對只有 codex agent 的 config 跑 `doctor` 0 errors。`pnpm test` 471 條、`pnpm check` 沒有錯誤、`verify:plugin-example` 31 條過。
+- 沒驗的：真的叫模型（沒帳號），所以 MCP tool 在 `approval_policy="never"` 下會不會被擋、`workspace-write` 沒網路時能不能 `git push`、`CODEX_API_KEY` 實際能不能登入，都留在 plan.md 待驗證。
+- 重新檢視：有 Codex 帳號時；codex 出了逐個 tool 的權限設定時。

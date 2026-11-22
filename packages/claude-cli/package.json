@@ -2,6 +2,9 @@
   "name": "@tasuki/claude-cli",
   "version": "0.0.0",
   "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": {
@@ -14,5 +17,8 @@
   },
   "dependencies": {
     "@tasuki/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@tasuki/testkit": "workspace:*"
   }
 }

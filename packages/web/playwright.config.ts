@@ -249,7 +249,7 @@ const config: PlaywrightTestConfig = defineConfig({
     ...services,
     ...engines.flatMap((t) => [
       {
-        command: `node ${join(repoRoot, 'packages/server/dist/index.mjs')} --config ${engine(t.name, t.api, t.config)}`,
+        command: `node ${join(repoRoot, 'packages/cli/dist/index.mjs')} start --config ${engine(t.name, t.api, t.config)}`,
         url: `http://127.0.0.1:${t.api}/api/health`,
         cwd: repoRoot,
       },
