@@ -37,7 +37,7 @@ interface AuthPort {
 登入成功後 engine 發自己的 session token。
 
 - 看板用 cookie 帶 session：`HttpOnly`（前端 JavaScript 讀不到，XSS 偷不走）、`Secure`、`SameSite=Lax`。`Lax` 而不是 `Strict`，是為了從 Slack 或信件點連結進看板時還是登入狀態。
-- session 存在 runtime store，cookie 裡只放隨機值，DB 只存它的 hash。登出或過期就刪掉，server 端立刻失效，不靠 cookie 自己過期。
+- session 存在 store，cookie 裡只放隨機值，DB 只存它的 hash。登出或過期就刪掉，server 端立刻失效，不靠 cookie 自己過期。
 - CSRF：會改東西的請求（`POST`、`PUT`、`PATCH`、`DELETE`）檢查 `Origin` 必須等於 `server.publicUrl` 的 origin，對不上回 403。`SameSite=Lax` 已經擋掉大部分跨站請求，`Origin` 檢查補上同站子網域與舊瀏覽器的缺口。
 - 有效期由 `auth.session.ttl` 設定，吃時間長度（`"24h"`）或 `"never"`。預設 24 小時。
 - `never` 允許，但不建議：有登入的情況下 token 洩漏等於永久通行證。

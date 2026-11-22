@@ -4,11 +4,11 @@
 
 | store | 內容 | 後端 |
 |---|---|---|
-| tracker store | WorkUnit、Dependency、Comment、Attachment | sqlite 或 Jira，二選一，不同步 |
-| runtime store | Run、engine_state | 永遠是本機 sqlite |
+| tracker | WorkUnit、Dependency、Comment、Attachment | sqlite 或 Jira，二選一，不同步 |
+| store | Run、engine_state | 預設 sqlite，可換成別的 store plugin（D88） |
 
-兩邊只靠 `ref`（key）互相指，不做外鍵。Jira 模式下 ticket 全看 Jira，但 Run 沒地方放，所以本機一定有 runtime store。
-runtime store 被清掉的話，`blocked` 的 item 當成人工 blocked 處理，不會自動接回。
+兩邊只靠 `ref`（key）互相指，不做外鍵。Jira 模式下 ticket 全看 Jira，但 Run 沒地方放，所以一定有 store。
+store 被清掉的話，`blocked` 的 item 當成人工 blocked 處理，不會自動接回。
 
 ## Domain 型別
 
@@ -50,7 +50,7 @@ interface Attachment {                  // D61
   createdAt: string
 }
 
-interface Run {                         // runtime store only
+interface Run {                         // store only
   id: string
   target: Ref
   rule: string
@@ -71,7 +71,6 @@ interface Run {                         // runtime store only
   cancelRequestedBy?: string
   produced: { questions: number; tasks: number }
   usage?: { tokens: number; cost: number }
-  logPath: string
 }
 
 type Outcome =
@@ -172,7 +171,7 @@ CREATE INDEX attachment_by_target ON attachment(target, id);
 CREATE TABLE ref_counter (last INTEGER NOT NULL);
 ```
 
-runtime store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，S7d 建了 `engine_state` 並重建 `run` 讓 `cancel_requested_by` 多收 `pause`，S8 加了 `session_id`，D82 加了 `from_status`、`to_status`，見 `packages/server/src/runtime-store/migrations.ts`；usage 的欄位等用到的切片再加）：
+store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，S7d 建了 `engine_state` 並重建 `run` 讓 `cancel_requested_by` 多收 `pause`，S8 加了 `session_id`，D82 加了 `from_status`、`to_status`，W3 拿掉 `log_path`（log 由 engine 命名，D88），見 `packages/sqlite/src/store-migrations.ts`；usage 的欄位等用到的切片再加）：
 
 ```sql
 CREATE TABLE run (
@@ -199,8 +198,7 @@ CREATE TABLE run (
   produced_questions  INTEGER NOT NULL DEFAULT 0,
   produced_tasks      INTEGER NOT NULL DEFAULT 0,
   tokens              INTEGER,
-  cost                REAL,
-  log_path            TEXT NOT NULL
+  cost                REAL
 );
 
 -- invariant 1: at most one live Run per target

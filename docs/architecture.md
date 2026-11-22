@@ -32,8 +32,8 @@ flowchart LR
   end
 
   subgraph Driven["Driven adapters"]
-    ST["StoragePort: sqlite or jira-cloud"]
-    RT["RuntimeStorePort: local sqlite"]
+    ST["TrackerPort: sqlite or jira-cloud"]
+    RT["StorePort: sqlite"]
     RUN["RunnerPort: claude-cli, codex-cli"]
     AUTH["AuthPort: none, static, http"]
     CLK["Clock"]
@@ -57,19 +57,19 @@ flowchart LR
 - 狀態轉移、權限、驗證只寫在 use case 與 domain 一處，REST、MCP、Poller 進來都過同一關。
 - MCP 有兩個入口：MCP facade 給 engine 派出的 agent，帶 run token，只能碰被派的那張 item；使用者 MCP（`/mcp`）給使用者自己的 AI client，身分是使用者，能做的事跟看板一樣（D57）。
 - port 的介面定義在 application 層，adapter 去實作它。
-- 真正需要寫成程式介面的只有三個：Storage、Runner、Auth，它們也是 plugin 的三個角色（D44）。RuntimeStore 是 engine 內部的 port，不開放給 plugin。stage 是 config，model 是 agent 的參數，前端是 API 的 client。
+- 真正需要寫成程式介面的是 Tracker、Store、Runner、Auth，它們也是 plugin 的四個角色（D44、D88）。stage 是 config，model 是 agent 的參數，前端是 API 的 client。
 - 所有用到現在時間的地方都從 `Clock` 拿，不直接呼叫 `Date.now()`。
 
 ## Ports
 
 草稿，簽名之後以程式碼為準。adapter 的建構子注入 `Clock`，`createdAt`、`finishedAt`、`cancelRequestedAt` 這類時間由 adapter 蓋章，use case 只傳業務欄位。
 
-StoragePort 的每個方法各自生效，兩次呼叫之間沒有 transaction。Jira 做不到跨呼叫的原子性，所以 sqlite adapter 也不提供，use case 不能假設一連串寫入「全成功或全失敗」，中途失敗後重跑要能接著做（D47）。
+TrackerPort 的每個方法各自生效，兩次呼叫之間沒有 transaction。Jira 做不到跨呼叫的原子性，所以 sqlite adapter 也不提供，use case 不能假設一連串寫入「全成功或全失敗」，中途失敗後重跑要能接著做（D47）。
 
 `list` 可能比寫入晚幾秒才反映出來。Jira 的 `list` 走搜尋索引，實測建完 338ms 搜不到、1740ms 搜得到；`get` 與寫入本身是即時的。剛寫完的呼叫端要用寫入回傳的結果，不要馬上重新 `list`。Poller 下一輪自然會讀到，認領用的 compare-and-set 直接讀那張 issue，不受影響（D54）。
 
 ```ts
-interface StoragePort {
+interface TrackerPort {
   list(kind: Kind, statuses: readonly string[]): Promise<WorkUnit[]>  // one query for all of them
   get(ref: Ref): Promise<WorkUnit>            // throws NotFound
   children(item: Ref): Promise<WorkUnit[]>
@@ -99,10 +99,10 @@ interface Clock {
   now(): Date
 }
 
-// Lives in core (use cases need it), implemented in server; not a plugin role.
-// What S5 has; the comments are what later slices add.
-interface RuntimeStorePort {
-  createRun(r: NewRun): Promise<Run>          // throws RunConflict if target already has a live Run; the store assigns id and logPath
+// A plugin role like the tracker (D88); every store passes testkit's store contract.
+// The comments are what later slices add.
+interface StorePort {
+  createRun(r: NewRun): Promise<Run>          // throws RunConflict if target already has a live Run; the store assigns the id
   getRun(id: string): Promise<Run>
   renewLease(id: string, leaseSeconds: number): Promise<void>
   touch(id: string): Promise<void>            // lastActivityAt = now (D34)
@@ -129,7 +129,7 @@ interface RunSpec {
   mcp: { url: string; token: string }   // the MCP facade, bound to this Run
   prompt: string                     // the engine's contract and the rule's template, variables filled in
   resume?: string                    // session to pick up (per-item); the runner falls back to a new one
-  logPath: string                    // the runner writes the agent's output here
+  logPath: string                    // <dataDir>/logs/<runId>.log, named by the engine; the runner writes the agent's output here
   onActivity(): void                 // output seen: lastActivityAt (D34)
   onSession(id: string): void        // the session this Run is in, kept on the Run
 }
@@ -150,8 +150,8 @@ interface AuthPort {
 sequenceDiagram
     participant P as Poller
     participant U as Use cases
-    participant S as StoragePort
-    participant R as RuntimeStore
+    participant S as TrackerPort
+    participant R as StorePort
     participant X as RunnerPort
     participant A as Agent CLI
     participant M as MCP facade
@@ -184,19 +184,19 @@ sequenceDiagram
 
 ```mermaid
 flowchart LR
-  subgraph TS["Tracker store (sqlite or Jira)"]
+  subgraph TS["Tracker (sqlite or Jira)"]
     WU["WorkUnit"]
     DEP["Dependency"]
     CM["Comment"]
   end
-  subgraph RS["Runtime store (local sqlite, always)"]
+  subgraph RS["Store (sqlite)"]
     RUN["Run"]
     ES["engine_state"]
   end
   RUN -- "ref (key only, no FK)" --> WU
 ```
 
-Jira 模式下 ticket 在 Jira，Run 在本機，兩邊靠 key 互指。
+Jira 模式下 ticket 在 Jira，Run 在 store，兩邊靠 key 互指。tracker 與 store 是兩個 plugin、兩個檔案，各自可換。Run 的 log 不在 store，是 engine 那台機器上的檔案。
 
 ## 部署形態
 
@@ -221,20 +221,20 @@ Jira 模式下 ticket 在 Jira，Run 在本機，兩邊靠 key 互指。
 ```
 packages/
   core/         domain + application (ports live here), no I/O. The public contract for plugins
-  testkit/      contract tests that every tracker / runner / auth plugin has to pass
-  sqlite/       tracker plugin
+  testkit/      contract tests that every tracker / store / runner / auth plugin has to pass
+  sqlite/       tracker and store plugin
   jira-cloud/   tracker plugin
   claude-cli/   runner plugin
   codex-cli/    runner plugin
   fake-runner/  runner plugin that stands in for an agent, for trying the engine without an LLM
   auth/         none, static, http
   server/       composition root, REST, MCP facade (/agent-mcp), user MCP (/mcp), engine
-                (Poller and Run supervision), plugin loader, config loading, runtime store (sqlite)
+                (Poller and Run supervision), plugin loader, config loading
   web/          Vue 3 + Vite SPA
   cli/          init, doctor, start
 ```
 
-一個技術一個套件，載入方式與契約見 plugins.md（D44）。runtime store 是 engine 自己的狀態，不是 plugin，放在 `server`，所以 Jira 模式下 `sqlite` 套件不是必裝。`auth` 內建實作怎麼分套件還沒定，見 plugins.md。
+一個技術一個套件，載入方式與契約見 plugins.md（D44）。store 預設是 `sqlite`，所以 Jira 模式下也要裝 `sqlite`，除非換成別的 store plugin（D88）。`auth` 內建實作怎麼分套件還沒定，見 plugins.md。
 
 測試用的東西照「誰在用它」分兩種，不合成一包：
 
