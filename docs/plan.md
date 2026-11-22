@@ -59,9 +59,12 @@
 | W4a | 流程設定（站、角色、task status 對照、規則與 prompt、hold label）進 store，設定頁用表單（只給 `admin` 與 `maintainer`）、熱重載；agent、poll、limits 留在檔案（已完成，D91） | 在網頁上加一站、改規則的 prompt，下一輪就生效；存檔不合法時看到錯在哪 |
 | W4b | 流程設定的修改歷史、回到任一版（已完成，D91、D94） | 看得到誰在什麼時候改了什麼，能回到前一版 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（已完成，D66、D95） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
-| S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
-| S12 | codex runner、npm CLI 打包、container image | `init`、`doctor`、`start` 可用 |
+| S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件（已完成，D96；真的 `npm publish` 在 S14） | 照文件寫出一個第三方 tracker 並通過契約測試 |
+| S12 | codex runner、CLI 打包（本機從 tarball 裝得起來）、container image（本機 build 得起來） | `init`、`doctor`、`start` 可用 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |
+| S14 | 對外發佈：license、套件名稱查撞名（D23）、版本號與依賴範圍（D62、D96）、`npm publish`（core、testkit、內建 plugin、CLI）、container image 推到 registry、給使用者看的 README（含訂閱帳號與 API key 的條款）（D97） | 在一台乾淨的機器上從 npm 與 registry 裝起來，照 README 跑得起來 |
+
+S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整。調整照 S7e 的方式插成切片，全部定了才進 S14（D97）。所有對外發佈的事只放在 S14，前面的切片做到本機裝得起來為止。
 
 ## 測試策略
 
@@ -101,7 +104,7 @@
 6. （已定，D30、D76）splitter 遇到 item 底下已經有 task 時的冪等準則：engine 不判斷，預設 prompt 叫 agent 保留現有的 task、只補缺的。
 7. `Run` 是否要記 pid 或 process group，供 engine 重啟後清理殘留的 CLI process。
 8. （已定）UI 的細節範圍：kanban 直接改 status（S2）；task 在 `split-review` 能改 title、body 與刪除，blockedBy 不能改（D70）。
-9. license。
+9. license。S14 發佈前要定（D97）。
 10. webhook 驅動端。
 11. （已定，D69）不變量 3：Run 結束（`cancelled` 除外）或被 `abandoned` 時，engine 把殘留的 `in-progress` task 送回 `to-do`，每張留一則原因。
 12. （已定，D70，D74 改）engine 與 agent 不重開 `done` 的 task。人可以改回 `to-do` 或 `manual`，但只在 item 沒有存活的 Run 時。
@@ -125,4 +128,4 @@
 - Jira Cloud：API token 的 rate limit。transitions API 已在 S2 實際走過（D59）；ADF 轉換（marklassian 加自寫的反向）與 comment property 已在 S3 實際走過（D61）。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
-- Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。
+- Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。S14 寫 README 前要查（D97）。

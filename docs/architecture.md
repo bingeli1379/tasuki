@@ -240,13 +240,17 @@ packages/
                 (Poller and Run supervision), plugin loader, config loading, doctor (D95)
   web/          Vue 3 + Vite SPA
   cli/          init, doctor, start
+examples/
+  tracker-memory/  third-party tracker plugin, installed from packed tarballs outside the workspace
+scripts/
+  verify-plugin-example.ts  packs core and testkit, installs them into a copy of the example, runs its contract
 ```
 
 一個技術一個套件，載入方式與契約見 plugins.md（D44）。store 預設是 `sqlite`，所以 Jira 模式下也要裝 `sqlite`，除非換成別的 store plugin（D88）。auth 的內建實作分成 `auth-builtin` 與 `auth-http`，不登入是省略 `auth`（D89）。
 
 測試用的東西照「誰在用它」分兩種，不合成一包：
 
-- 測試 import 的放進 `testkit`。新的 port 契約（runner、auth）就在這裡加一組 `describeXxxContract`，不另開套件。它依賴測試框架，只能當 devDependency。
+- 測試 import 的放進 `testkit`。新的 port 契約（runner、auth）就在這裡加一組 `describeXxxContract`，不另開套件。它依賴測試框架（peer 的 `vitest`，不是 `vite-plus/test`，第三方才不用裝 Vite+），只能當 devDependency。`core` 與 `testkit` 會發佈到 npm，`examples/tracker-memory` 用發佈出去的形狀驗它們（D96）。
 - 給 config 載入的假 plugin 一個角色一包，和真的 plugin 並排，例如 `fake-runner`。它走跟真 plugin 同一條載入路徑（D44），runtime 不能帶到測試框架。tracker 有 `sqlite` 可以當假的用，不另做。
 - `core/src/testing` 的 stub 只給 core 自己的單元測試用。它不能搬進 `testkit`，因為 `testkit` 依賴 `core`，搬過去會循環依賴。
 
