@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vu
 import { ApiError, call, messageOf, sendJson, type Account, type AuthState, type Item } from './api'
 import AccountMenu from './components/AccountMenu.vue'
 import ItemDetail from './components/ItemDetail.vue'
+import Settings from './components/Settings.vue'
 import SignIn from './components/SignIn.vue'
 import { EDITOR_PROPS, EDITOR_TOOLBAR, MARKDOWN_OPTIONS, toStoredMarkdown } from './editor'
 import { previewText } from './markdown'
@@ -36,8 +37,21 @@ const stopping = ref<string[]>([])
 const loaded = ref(false)
 const holdLabel = ref('hold')
 const paused = ref(false)
+// Statuses keyed to something the tracker lacks: the engine starts nothing until they are
+// mapped on the settings page (D91).
+const unmatched = ref<string[]>([])
+const settingsOpen = ref(false)
+const editsFlow = computed(
+  () =>
+    auth.value?.mode === 'none' ||
+    (auth.value?.me !== undefined && auth.value.me.access !== 'member'),
+)
 const roles = ref<Roles>()
 const tasks = ref<Record<string, { done: number; total: number }>>({})
+// Items a Run sent off on failing or giving up, while they are still where it put them.
+const failed = ref<
+  Record<string, { outcome: 'failed' | 'max_attempts'; rule: string; attempts: number }>
+>({})
 const error = ref('')
 const open = ref(false)
 const title = ref('')
@@ -115,6 +129,8 @@ async function load(): Promise<void> {
       holdLabel: string
       roles: Roles
       paused: boolean
+      unmatched: string[]
+      failed: Record<string, { outcome: 'failed' | 'max_attempts'; rule: string; attempts: number }>
     }>('/api/board')
     columns.value = board.columns
     for (const [ref, mine] of recent) {
@@ -132,6 +148,8 @@ async function load(): Promise<void> {
     stopping.value = board.stopping
     holdLabel.value = board.holdLabel
     paused.value = board.paused
+    unmatched.value = board.unmatched
+    failed.value = board.failed
     roles.value = board.roles
     tasks.value = board.tasks
     error.value = ''
@@ -381,13 +399,6 @@ onMounted(start)
           </h1>
           <span class="flex items-center gap-2">
             <UButton
-              :icon="dark ? 'i-lucide-sun' : 'i-lucide-moon'"
-              :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
-              color="neutral"
-              variant="ghost"
-              @click="toggleTheme"
-            />
-            <UButton
               v-if="paused"
               label="Resume"
               color="neutral"
@@ -455,6 +466,23 @@ onMounted(start)
                 </div>
               </template>
             </UModal>
+            <UButton
+              :icon="dark ? 'i-lucide-sun' : 'i-lucide-moon'"
+              :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
+              color="neutral"
+              variant="ghost"
+              @click="toggleTheme"
+            />
+            <UTooltip v-if="editsFlow" text="Settings" :delay-duration="100">
+              <UButton
+                icon="i-lucide-settings"
+                aria-label="Settings"
+                color="neutral"
+                variant="ghost"
+                @click="settingsOpen = true"
+              />
+            </UTooltip>
+            <Settings v-if="editsFlow" v-model:open="settingsOpen" @saved="load" />
             <AccountMenu v-if="auth.mode !== 'none' && auth.me" :me="auth.me" :mode="auth.mode" />
           </span>
         </header>
@@ -466,6 +494,16 @@ onMounted(start)
             color="warning"
             variant="subtle"
             title="The engine is paused: no agent starts on any item until you resume it."
+            class="mb-4"
+          />
+          <UAlert
+            v-if="unmatched.length > 0"
+            color="warning"
+            variant="subtle"
+            :title="`${unmatched.length} ${unmatched.length === 1 ? 'status is' : 'statuses are'} not matched to the tracker yet, so no agent starts: ${unmatched.join(', ')}.`"
+            :actions="
+              editsFlow ? [{ label: 'Open settings', onClick: () => (settingsOpen = true) }] : []
+            "
             class="mb-4"
           />
 
@@ -527,6 +565,7 @@ onMounted(start)
                     'opacity-60': pending.includes(item.ref),
                     'agent-ring': running.includes(item.ref),
                     'agent-ring-stopping': stopping.includes(item.ref),
+                    'agent-failed': failed[item.ref] && !running.includes(item.ref),
                   }"
                   @dragstart="dragging = item"
                   @dragend="((dragging = undefined), (over = undefined))"
@@ -544,6 +583,24 @@ onMounted(start)
                           variant="subtle"
                           size="sm"
                         />
+                        <UTooltip
+                          v-if="failed[item.ref] && !running.includes(item.ref)"
+                          :text="`Rule ${failed[item.ref]?.rule} moved it here. Open it to see why.`"
+                          :delay-duration="100"
+                        >
+                          <UBadge
+                            :label="
+                              failed[item.ref]?.outcome === 'max_attempts'
+                                ? `Gave up after ${failed[item.ref]?.attempts} tries`
+                                : 'Failed'
+                            "
+                            icon="i-lucide-circle-x"
+                            color="error"
+                            variant="subtle"
+                            size="sm"
+                            class="relative z-10"
+                          />
+                        </UTooltip>
                         <UBadge
                           v-if="item.labels.includes(holdLabel)"
                           label="On hold"

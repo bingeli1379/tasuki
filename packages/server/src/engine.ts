@@ -3,22 +3,22 @@ import {
   detectOverrides,
   expandPrompt,
   finishRun,
+  itemStatusNames,
   recoverRuns,
   resumeBlocked,
   resumeReleased,
   type Claimed,
   type Clock,
-  type Rule,
   type RunExit,
   type RunHandle,
   type RunnerPort,
   type StorePort,
-  type StatusNames,
   type TrackerPort,
 } from '@tasuki/core'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { Limits } from './config'
+import type { LiveFlow } from './flow'
 import { CONTRACT } from './prompts'
 import type { RunTokens } from './run-tokens'
 
@@ -29,11 +29,9 @@ export interface EngineDeps {
   tracker: TrackerPort
   store: StorePort
   clock: Clock
-  rules: readonly Rule[]
-  // How a status reads in the comments the engine writes.
-  named: StatusNames
+  // Read once a round: a save of the flow takes effect on the next one (D91).
+  flow: LiveFlow
   limits: Limits
-  holdLabel: string
   workspaceRoot: string
   // Each Run's log is <logDir>/<run id>.log, on this machine whichever store holds the Run.
   logDir: string
@@ -57,7 +55,7 @@ export interface Engine {
 }
 
 export function createEngine(deps: EngineDeps): Engine {
-  const { tracker, store, clock, rules, limits, tokens, log = console.error } = deps
+  const { tracker, store, clock, limits, tokens, log = console.error } = deps
   const inFlight = new Set<Promise<void>>()
   // The agents this engine started that have not exited yet, by Run id.
   const agents = new Map<string, { handle: RunHandle; termAt?: number; killed?: boolean }>()
@@ -73,9 +71,12 @@ export function createEngine(deps: EngineDeps): Engine {
     return text.trimEnd().split('\n').slice(-TAIL_LINES).join('\n').slice(-TAIL_CHARS)
   }
 
-  async function start({ run, rule }: Claimed): Promise<{ done: Promise<void> }> {
+  async function start(
+    { run, rule }: Claimed,
+    named: ReturnType<typeof itemStatusNames>,
+  ): Promise<{ done: Promise<void> }> {
     const runner = deps.runners[rule.agent]
-    const token = tokens.issue(run.id)
+    const token = tokens.issue(run.id, rule)
     const renew = setInterval(
       () => {
         store.renewLease(run.id, limits.leaseSeconds).catch((e: unknown) => log(String(e)))
@@ -131,13 +132,7 @@ export function createEngine(deps: EngineDeps): Engine {
         agents.delete(run.id)
         clearInterval(renew)
         tokens.revoke(run.id)
-        await finishRun(
-          { tracker, store, named: deps.named },
-          rule,
-          run.id,
-          result,
-          await logTail(logPath),
-        )
+        await finishRun({ tracker, store, named }, rule, run.id, result, await logTail(logPath))
       }),
     }
   }
@@ -147,21 +142,26 @@ export function createEngine(deps: EngineDeps): Engine {
       if (ticking) return
       ticking = true
       try {
-        await recoverRuns({ tracker, store, clock, named: deps.named }, rules)
-        await detectOverrides({ tracker, store }, rules, deps.holdLabel)
+        // A station keyed to a status the tracker lacks would fail at the first move, so
+        // nothing runs until the settings page maps it (D91).
+        if (deps.flow.unmatched.length > 0) return
+        const { workflow, rules, holdLabel } = deps.flow.current()
+        const named = itemStatusNames(workflow)
+        await recoverRuns({ tracker, store, clock, named }, rules)
+        await detectOverrides({ tracker, store }, rules, holdLabel)
         // Before claiming, so an item resumed this round is picked up in the same round.
-        await resumeBlocked({ tracker, store, named: deps.named }, rules, deps.holdLabel)
-        await resumeReleased({ tracker, store, named: deps.named }, rules, deps.holdLabel)
+        await resumeBlocked({ tracker, store, named }, rules, holdLabel)
+        await resumeReleased({ tracker, store, named }, rules, holdLabel)
         // Paused, the round still recovers and resumes: none of that starts a Run.
         if (await store.isPaused()) return
-        const claimed = await claimItems({ tracker, store, named: deps.named }, rules, {
+        const claimed = await claimItems({ tracker, store, named }, rules, {
           maxConcurrentRuns: limits.maxConcurrentRuns,
           leaseSeconds: limits.leaseSeconds,
           workspaceRoot: deps.workspaceRoot,
-          holdLabel: deps.holdLabel,
+          holdLabel,
         })
         for (const c of claimed) {
-          const p = (await start(c)).done
+          const p = (await start(c, named)).done
             .catch((e: unknown) => log(`run ${c.run.id}: ${String(e)}`))
             .finally(() => inFlight.delete(p))
           inFlight.add(p)

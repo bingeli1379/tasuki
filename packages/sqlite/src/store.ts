@@ -1,4 +1,5 @@
 import {
+  FlowConflict,
   InvalidInput,
   NotFound,
   RunConflict,
@@ -8,6 +9,7 @@ import {
   type CancelMode,
   type CancelReason,
   type Clock,
+  type FlowVersion,
   type Outcome,
   type Run,
   type StorePort,
@@ -20,6 +22,15 @@ type Row = Record<string, unknown>
 
 const optional = <K extends string>(key: K, value: unknown): Partial<Record<K, string>> =>
   typeof value === 'string' ? ({ [key]: value } as Record<K, string>) : {}
+
+function toFlow(row: Row): FlowVersion {
+  return {
+    version: Number(row['version']),
+    flow: JSON.parse(String(row['flow'])),
+    savedBy: String(row['saved_by']),
+    savedAt: String(row['saved_at']),
+  }
+}
 
 function toRun(row: Row): Run {
   return {
@@ -195,6 +206,29 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
         )
         .all(outcome)
         .map(toRun)
+    },
+    async latestFlow() {
+      const row = db.prepare('SELECT * FROM flow_version ORDER BY version DESC LIMIT 1').get()
+      return row === undefined ? undefined : toFlow(row)
+    },
+    async saveFlow(expected, flow, savedBy) {
+      const row = db.prepare('SELECT MAX(version) AS v FROM flow_version').get()
+      const latest = typeof row?.['v'] === 'number' ? row['v'] : undefined
+      if (latest !== expected)
+        throw new FlowConflict('the flow was saved by someone else meanwhile')
+      const saved: FlowVersion = {
+        version: (expected ?? 0) + 1,
+        flow,
+        savedBy,
+        savedAt: clock.now().toISOString(),
+      }
+      db.prepare('INSERT INTO flow_version VALUES (?, ?, ?, ?)').run(
+        saved.version,
+        JSON.stringify(flow),
+        savedBy,
+        saved.savedAt,
+      )
+      return saved
     },
     async createAccount(a) {
       const userId = a.userId ?? randomUUID()

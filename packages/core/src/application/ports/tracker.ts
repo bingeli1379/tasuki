@@ -37,6 +37,12 @@ export interface NewAttachment {
   data: Uint8Array
 }
 
+// A status the tracker itself holds, that a station or task status can be keyed to.
+export interface TrackerStatus {
+  key: string
+  name: string
+}
+
 // Each call takes effect on its own; there is no transaction across calls (D47).
 export interface TrackerPort {
   // May lag behind writes by a few seconds: Jira serves it from a search index.
@@ -81,4 +87,7 @@ export interface TrackerPort {
   readAttachment(target: Ref, id: string): Promise<{ attachment: Attachment; data: Uint8Array }>
   // Throws NotFound when the id is not an attachment of target. Does not touch the version.
   deleteAttachment(target: Ref, id: string): Promise<void>
+  // The statuses units of this kind can be in. Left out by a tracker that takes any key,
+  // as sqlite does (D91).
+  listStatuses?(kind: Kind): Promise<TrackerStatus[]>
 }

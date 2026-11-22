@@ -7,6 +7,8 @@ import {
   addAccounts,
   createAccount,
   deleteAccount,
+  assertEditsFlow,
+  FlowConflict,
   Forbidden,
   listAccounts,
   needsSetup,
@@ -41,10 +43,9 @@ import {
   stopRun,
   updateItem,
   updateTask,
-  type Rule,
+  MODE_OUTCOMES,
+  type RuleMode,
   type StorePort,
-  type StatusMap,
-  type Workflow,
   type TrackerPort,
 } from '@tasuki/core'
 import { Hono, type Context } from 'hono'
@@ -52,7 +53,9 @@ import { bodyLimit } from 'hono/body-limit'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createAgentMcpServer } from './agent-mcp'
+import type { LiveFlow } from './flow'
 import { createMcpServer } from './mcp'
+import { defaultPrompt } from './prompts'
 import type { RunTokens } from './run-tokens'
 import type { LoginThrottle, SetupToken, SignIns } from './sign-ins'
 
@@ -76,10 +79,10 @@ export interface AppAuth {
 export interface AppDeps {
   tracker: TrackerPort
   store: StorePort
-  statuses: StatusMap
-  workflow: Workflow
-  rules: readonly Rule[]
-  holdLabel: string
+  // Read once per request, so a save shows on the next one (D91).
+  flow: LiveFlow
+  // The agent names the config file defines, the only ones a rule can use.
+  agents: readonly string[]
   tokens: RunTokens
   // Unset: nobody signs in, and every request acts as an admin.
   auth?: AppAuth
@@ -132,10 +135,8 @@ const text = (value: unknown): string => (typeof value === 'string' ? value : ''
 export function createApp({
   tracker: plainTracker,
   store,
-  statuses,
-  workflow,
-  rules,
-  holdLabel,
+  flow,
+  agents,
   tokens,
   auth,
   publicUrl,
@@ -157,6 +158,7 @@ export function createApp({
     // The board puts the card where it really is.
     if (e instanceof StatusConflict || e instanceof EditConflict)
       return c.json({ error: e.message, item: e.current }, 409)
+    if (e instanceof FlowConflict) return c.json({ error: e.message }, 409)
     return c.json({ error: e.message }, 500)
   })
   app.use(async (c, next) => {
@@ -348,12 +350,45 @@ export function createApp({
     await store.deleteApiToken(id)
     return c.json({ ok: true })
   })
-  app.get('/api/board', async (c) =>
-    c.json(await listBoard(tracker, store, workflow, statuses.mapped('task'), rules, holdLabel)),
-  )
+  // The settings page (D91): not in the user MCP, since an agent tricked by an item would
+  // otherwise rewrite the prompts (the D57 exception, as for accounts).
+  app.get('/api/flow', async (c) => {
+    assertEditsFlow(c.var.actor)
+    const modes = Object.keys(MODE_OUTCOMES) as RuleMode[]
+    return c.json({
+      ...flow.saved(),
+      agents,
+      defaultMaxAttempts: flow.context.defaultMaxAttempts,
+      prompts: Object.fromEntries(modes.map((m) => [m, defaultPrompt(m)])),
+      // null: any key works, and a station is keyed by its own id.
+      trackerStatuses:
+        tracker.listStatuses === undefined
+          ? null
+          : { item: await tracker.listStatuses('item'), task: await tracker.listStatuses('task') },
+    })
+  })
+  app.put('/api/flow', async (c) => {
+    assertEditsFlow(c.var.actor)
+    const body = await c.req.json<{ version?: unknown; flow?: unknown }>()
+    const version = typeof body.version === 'number' ? body.version : undefined
+    const saved = await flow.save({ tracker, store }, c.var.actor, version, body.flow)
+    return c.json({ version: saved.version })
+  })
+  app.get('/api/board', async (c) => {
+    const { workflow, rules, holdLabel } = flow.current()
+    const board = await listBoard(
+      tracker,
+      store,
+      workflow,
+      flow.statuses.mapped('task'),
+      rules,
+      holdLabel,
+    )
+    return c.json({ ...board, unmatched: flow.unmatched })
+  })
   app.post('/api/items', async (c) => {
     const body = await c.req.json<{ title?: unknown; body?: unknown }>()
-    const item = await createItem(tracker, workflow.roles.entry, {
+    const item = await createItem(tracker, flow.current().workflow.roles.entry, {
       title: typeof body.title === 'string' ? body.title : '',
       body: typeof body.body === 'string' ? body.body : '',
     })
@@ -364,7 +399,7 @@ export function createApp({
     if (typeof body.from !== 'string' || typeof body.to !== 'string')
       throw new InvalidInput('from and to are required')
     return c.json(
-      await moveItem(tracker, workflow, {
+      await moveItem(tracker, flow.current().workflow, {
         ref: c.req.param('ref'),
         from: body.from,
         to: body.to,
@@ -375,7 +410,7 @@ export function createApp({
     const body = await c.req.json<{ from?: unknown; feedback?: unknown }>()
     if (typeof body.from !== 'string') throw new InvalidInput('from is required')
     return c.json(
-      await requestRework(tracker, workflow, {
+      await requestRework(tracker, flow.current().workflow, {
         ref: c.req.param('ref'),
         from: body.from,
         feedback: typeof body.feedback === 'string' ? body.feedback : '',
@@ -391,13 +426,13 @@ export function createApp({
     return c.json({ ok: true })
   })
   app.post('/api/items/:ref/stop', async (c) =>
-    c.json(await stopRun({ tracker, store }, holdLabel, c.req.param('ref'))),
+    c.json(await stopRun({ tracker, store }, flow.current().holdLabel, c.req.param('ref'))),
   )
   app.put('/api/items/:ref/hold', async (c) =>
-    c.json(await holdItem({ tracker, store }, holdLabel, c.req.param('ref'))),
+    c.json(await holdItem({ tracker, store }, flow.current().holdLabel, c.req.param('ref'))),
   )
   app.delete('/api/items/:ref/hold', async (c) =>
-    c.json(await releaseItem(tracker, holdLabel, c.req.param('ref'))),
+    c.json(await releaseItem(tracker, flow.current().holdLabel, c.req.param('ref'))),
   )
   app.delete('/api/items/:ref', async (c) => {
     await deleteItem({ tracker, store }, c.req.param('ref'))
@@ -500,17 +535,15 @@ export function createApp({
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ tracker, store, statuses, workflow, rules, holdLabel }).connect(
-      transport,
-    )
+    await createMcpServer({ tracker, store, flow }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   // The facade for agents the engine started: only a live Run's token gets in.
   app.all('/agent-mcp', async (c) => {
     const token = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '')?.[1]
-    const runId = token === undefined ? undefined : tokens.resolve(token)
-    const run = runId === undefined ? undefined : await store.getRun(runId)
-    const rule = rules.find((r) => r.id === run?.rule)
+    const held = token === undefined ? undefined : tokens.resolve(token)
+    const run = held === undefined ? undefined : await store.getRun(held.runId)
+    const rule = held?.rule
     if (run?.state !== 'running' || rule === undefined)
       return c.json({ error: 'not a live run token' }, 401)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })

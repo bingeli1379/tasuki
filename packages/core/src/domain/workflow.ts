@@ -55,6 +55,13 @@ export const DEFAULT_WORKFLOW: Workflow = {
   roles: { entry: 'refining', failure: 'blocked' },
 }
 
+// The display name of a station that gives none: its id in Title Case.
+export const defaultStationName = (id: string): string =>
+  id
+    .split('-')
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+
 // How a status reads in a comment: its display name in bold, so a status never blends into
 // the sentence around it (D82). Comments live in the tracker, so this is markdown Jira shows
 // too.

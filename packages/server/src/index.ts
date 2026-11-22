@@ -1,17 +1,12 @@
 import { serve } from '@hono/node-server'
-import {
-  createStatusMap,
-  itemStatusNames,
-  needsSetup,
-  type Clock,
-  type RunnerPort,
-} from '@tasuki/core'
+import { needsSetup, unmatchedStatuses, type Clock, type RunnerPort } from '@tasuki/core'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createApp, type AppAuth } from './app'
 import { isLoopback, loadConfig } from './config'
 import { createEngine } from './engine'
+import { loadFlow } from './flow'
 import { loadAuth, loadRunner, loadStore, loadTracker } from './plugin-loader'
 import { createRunTokens } from './run-tokens'
 import { createLoginThrottle, createSetupToken, createSignIns } from './sign-ins'
@@ -23,16 +18,32 @@ try {
     options: { config: { type: 'string', default: 'tasuki.config.jsonc' } },
   })
   const config = loadConfig(values.config)
-  const statuses = createStatusMap(config.statuses)
-
-  const ctx = { clock: systemClock, configDir: config.configDir, dataDir: config.dataDir, statuses }
-  const store = await loadStore(config.store.plugin, config.store.options, config.configDir, ctx)
+  const base = { clock: systemClock, configDir: config.configDir, dataDir: config.dataDir }
+  // The store holds the flow, and the flow says how the tracker keys its statuses, so the
+  // store comes first; the mapping it hands plugins follows every save (D91). A store sees
+  // none of it.
+  const store = await loadStore(config.store.plugin, config.store.options, config.configDir, {
+    ...base,
+    statuses: {
+      toTracker: () => {
+        throw new Error('a store has no status mapping')
+      },
+      fromTracker: () => undefined,
+      mapped: () => [],
+    },
+  })
+  const flow = await loadFlow(store, {
+    agents: Object.keys(config.agents),
+    defaultMaxAttempts: config.limits.defaultMaxAttempts,
+  })
+  const ctx = { ...base, statuses: flow.statuses }
   const tracker = await loadTracker(
     config.tracker.plugin,
     config.tracker.options,
     config.configDir,
     ctx,
   )
+  flow.unmatched = await unmatchedStatuses(tracker, flow.current().statuses)
   const runners: Record<string, RunnerPort> = {}
   for (const [name, agent] of Object.entries(config.agents))
     runners[name] = await loadRunner(agent.plugin, agent.options, config.configDir, ctx)
@@ -70,10 +81,8 @@ try {
     fetch: createApp({
       tracker,
       store,
-      statuses,
-      workflow: config.workflow,
-      rules: config.rules,
-      holdLabel: config.holdLabel,
+      flow,
+      agents: Object.keys(config.agents),
       tokens,
       ...(auth === undefined ? {} : { auth }),
       ...(config.publicUrl === undefined ? {} : { publicUrl: config.publicUrl }),
@@ -86,10 +95,8 @@ try {
     tracker,
     store,
     clock: systemClock,
-    rules: config.rules,
-    named: itemStatusNames(config.workflow),
+    flow,
     limits: config.limits,
-    holdLabel: config.holdLabel,
     workspaceRoot: join(config.dataDir, 'workspaces'),
     logDir: join(config.dataDir, 'logs'),
     runners,
@@ -113,7 +120,21 @@ try {
     if (config.publicUrl !== undefined)
       console.log(`or open ${config.publicUrl}/?setup=${encodeURIComponent(setupToken)}`)
   }
-  console.log(`rules: ${config.rules.map((r) => r.id).join(', ') || 'none'}`)
+  console.log(
+    `flow: ${flow.saved().version === undefined ? 'the default, never saved' : `version ${flow.saved().version}`}`,
+  )
+  console.log(
+    `rules: ${
+      flow
+        .current()
+        .rules.map((r) => r.id)
+        .join(', ') || 'none'
+    }`,
+  )
+  if (flow.unmatched.length > 0)
+    console.log(
+      `not a status in the tracker: ${flow.unmatched.join(', ')}; no agent starts until the settings page maps them`,
+    )
   console.log(`tasuki listening on ${listening}`)
   if (config.publicUrl !== undefined) console.log(`public url: ${config.publicUrl}`)
 } catch (e) {

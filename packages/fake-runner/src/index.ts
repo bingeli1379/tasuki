@@ -55,10 +55,10 @@ const plugin: Plugin = definePlugin({
             let verdict =
               marker !== undefined && verdicts.includes(marker)
                 ? marker
-                : spec.mode === 'review'
+                : spec.mode === 'review' || spec.mode === 'custom'
                   ? (verdicts[0] ?? 'failed')
                   : 'succeeded'
-            if (spec.mode === 'review')
+            if (spec.mode === 'review' || spec.mode === 'custom')
               await call('add_comment', {
                 kind: 'note',
                 body: `The fake runner reviewed this and says ${verdict}.`,

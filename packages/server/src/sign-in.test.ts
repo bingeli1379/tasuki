@@ -21,10 +21,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
+import { createLiveFlow } from './flow'
 import { createRunTokens } from './run-tokens'
 import { createLoginThrottle, createSetupToken, createSignIns } from './sign-ins'
 
-const statuses = createStatusMap({ item: { refining: 'Refining', done: 'Done' } })
+const mapping = { item: { refining: 'Refining', done: 'Done' } }
+const statuses = createStatusMap(mapping)
 const workflow: Workflow = {
   statuses: [
     { id: 'refining', name: 'Refining', outcomes: [] },
@@ -60,10 +62,11 @@ function engine(
   const app = createApp({
     tracker,
     store,
-    statuses,
-    workflow,
-    rules: [],
-    holdLabel: 'hold',
+    flow: createLiveFlow(
+      { agents: [], defaultMaxAttempts: 3 },
+      { flow: { workflow, statuses: mapping, rules: [], holdLabel: 'hold' }, raw: {} },
+    ),
+    agents: [],
     tokens: createRunTokens(),
     auth: {
       port: (opts.port ?? createBuiltinAuth)(store),
@@ -216,6 +219,20 @@ describe('accounts', () => {
       json('PATCH', { access: 'maintainer' }, admin),
     )
     expect(await raised.json()).toMatchObject({ access: 'maintainer' })
+  })
+
+  it('an admin and a maintainer edit the flow; a member does not even read it (D91)', async () => {
+    const e = engine()
+    const { admin, amy, member } = await withMember(e)
+    const cookie = (c: string) => ({ headers: { Cookie: c } })
+    expect((await e.app.request('/api/flow', cookie(member))).status).toBe(403)
+    expect((await e.app.request('/api/flow', json('PUT', { flow: {} }, member))).status).toBe(403)
+    expect((await e.app.request('/api/flow', cookie(admin))).status).toBe(200)
+    await e.app.request(
+      `/api/accounts/${amy.userId}`,
+      json('PATCH', { access: 'maintainer' }, admin),
+    )
+    expect((await e.app.request('/api/flow', cookie(member))).status).toBe(200)
   })
 
   it('a person’s comments and actions carry their name', async () => {

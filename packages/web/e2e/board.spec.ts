@@ -608,3 +608,32 @@ test('a paused engine starts nothing; resumed, it picks the waiting item up', as
     page.getByRole('region', { name: /^Split Review/ }).getByRole('article', { name: title }),
   ).toBeVisible({ timeout: 90_000 })
 })
+
+test('an item a failed Run moved is marked until a person moves it on', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(180_000)
+  const title = `e2e fails [fake:failed] ${Date.now()}`
+  const ref = await createThroughApi(request, title)
+  const moved = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'refining', to: 'ready-to-split' },
+  })
+  expect(moved.ok()).toBe(true)
+  await page.goto('/')
+  const card = page.getByRole('region', { name: /^Blocked/ }).getByRole('article', { name: title })
+  await expect(card).toBeVisible({ timeout: 90_000 })
+  await expect(card.getByText('Failed', { exact: true })).toBeVisible()
+  await expect(card).toHaveClass(/agent-failed/)
+
+  const back = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'blocked', to: 'refining' },
+  })
+  expect(back.ok()).toBe(true)
+  const again = page
+    .getByRole('region', { name: /^Refining/ })
+    .getByRole('article', { name: title })
+  await reloadUntilVisible(page, again)
+  await expect(again.getByText('Failed', { exact: true })).toHaveCount(0)
+  await expect(again).not.toHaveClass(/agent-failed/)
+})

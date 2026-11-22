@@ -73,52 +73,54 @@ if (
   await emptyJiraProject()
 }
 
-// Rules split, execute and rework on the fake runner (S4, S6, S7b), and an AI review station
-// whose rule sends the item one of two ways (W2). Polling every 2 seconds keeps the Jira
-// run short; the agent takes 10, longer than the board needs to read itself again and show
-// it Running.
-const engineRules = {
+// Polling every 2 seconds keeps the Jira run short; the agent takes 10, longer than the board
+// needs to read itself again and show it Running.
+const engineFile = {
   poll: { intervalSeconds: 2 },
   agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 10 } } },
-  rules: [
-    {
-      id: 'split',
-      watch: 'ready-to-split',
-      claim: 'splitting',
-      agent: 'fake',
-      mode: 'split',
-      outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
-    },
-    {
-      id: 'execute',
-      watch: 'in-progress',
-      agent: 'fake',
-      mode: 'execute',
-      outcomes: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
-    },
-    {
-      id: 'rework',
-      watch: 'ready-to-rework',
-      claim: 'splitting',
-      agent: 'fake',
-      mode: 'rework',
-      outcomes: { succeeded: 'split-review', needs_input: 'blocked' },
-    },
-    {
-      id: 'ai-review',
-      watch: 'ai-review',
-      agent: 'fake',
-      mode: 'review',
-      outcomes: { approve: 'in-review', changes: 'ready-to-rework' },
-    },
-  ],
 }
+
+// Rules split, execute and rework on the fake runner (S4, S6, S7b), and an AI review station
+// whose rule sends the item one of two ways (W2). Flow settings live in the store (D91), so
+// flow.setup.ts saves them through the API before the board tests start.
+const rules = [
+  {
+    id: 'split',
+    watch: 'ready-to-split',
+    claim: 'splitting',
+    agent: 'fake',
+    mode: 'split',
+    outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
+  },
+  {
+    id: 'execute',
+    watch: 'in-progress',
+    agent: 'fake',
+    mode: 'execute',
+    outcomes: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
+  },
+  {
+    id: 'rework',
+    watch: 'ready-to-rework',
+    claim: 'splitting',
+    agent: 'fake',
+    mode: 'rework',
+    outcomes: { succeeded: 'split-review', needs_input: 'blocked' },
+  },
+  {
+    id: 'ai-review',
+    watch: 'ai-review',
+    agent: 'fake',
+    mode: 'review',
+    outcomes: { approve: 'in-review', changes: 'ready-to-rework' },
+  },
+]
 
 function engine(name: string, port: number, config: object): string {
   const file = join(dir, `${name}.config.jsonc`)
   writeFileSync(
     file,
-    JSON.stringify({ dataDir: `./${name}`, server: { port }, ...engineRules, ...config }),
+    JSON.stringify({ dataDir: `./${name}`, server: { port }, ...engineFile, ...config }),
   )
   return file
 }
@@ -148,7 +150,8 @@ const trackers = [
     name: 'sqlite',
     api: 8788,
     web: 5180,
-    config: { workflow: { statuses: stations, roles: DEFAULT_WORKFLOW.roles } },
+    config: {},
+    flow: { workflow: { statuses: stations, roles: DEFAULT_WORKFLOW.roles }, rules },
   },
   ...(withJira
     ? [
@@ -172,8 +175,8 @@ const trackers = [
                 dependencyLinkType: process.env['JIRA_TEST_LINK_TYPE'],
               },
             },
-            workflow: jiraWorkflow(),
           },
+          flow: { workflow: jiraWorkflow(), rules },
         },
       ]
     : []),
@@ -185,10 +188,7 @@ const signIn = {
   name: 'auth',
   api: 8790,
   web: 5182,
-  config: {
-    workflow: { statuses: stations, roles: DEFAULT_WORKFLOW.roles },
-    auth: { plugin: '@tasuki/auth-builtin' },
-  },
+  config: { auth: { plugin: '@tasuki/auth-builtin' } },
   testMatch: 'sign-in.spec.ts',
 }
 process.env['TASUKI_E2E_AUTH_DATA'] = join(dir, signIn.name)
@@ -200,7 +200,6 @@ const signInHttp = {
   api: 8791,
   web: 5183,
   config: {
-    workflow: { statuses: stations, roles: DEFAULT_WORKFLOW.roles },
     auth: {
       plugin: '@tasuki/auth-http',
       options: { url: `http://127.0.0.1:${SIGN_IN_SERVICE}/check` },
@@ -230,11 +229,22 @@ const config: PlaywrightTestConfig = defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env['CI'],
   reporter: process.env['CI'] ? 'github' : 'list',
-  projects: [...trackers, signIn, signInHttp].map((t) => ({
-    name: t.name,
-    use: { baseURL: `http://localhost:${t.web}`, browserName: 'chromium' },
-    ...('testMatch' in t ? { testMatch: t.testMatch } : { testIgnore: SIGN_IN_SPECS }),
-  })),
+  projects: [
+    // Each tracker's engine starts on the default flow; this saves the one its tests need.
+    ...trackers.map((t) => ({
+      name: `${t.name}-flow`,
+      testMatch: 'flow.setup.ts',
+      use: { baseURL: `http://localhost:${t.web}` },
+      metadata: { flow: t.flow },
+    })),
+    ...[...trackers, signIn, signInHttp].map((t) => ({
+      name: t.name,
+      use: { baseURL: `http://localhost:${t.web}`, browserName: 'chromium' as const },
+      ...('testMatch' in t
+        ? { testMatch: t.testMatch }
+        : { testIgnore: SIGN_IN_SPECS, dependencies: [`${t.name}-flow`] }),
+    })),
+  ],
   webServer: [
     ...services,
     ...engines.flatMap((t) => [
