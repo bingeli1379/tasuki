@@ -44,7 +44,7 @@ const split: Rule = {
   maxAttempts: 2,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'split-review', needs_input: 'needs-answers', ...toFailure },
+  outcomes: { succeeded: 'split-review', needs_input: 'needs-answers', ...toFailure },
 }
 
 // Rule B: no claim status, the lease alone keeps a second Run off the item.
@@ -56,7 +56,7 @@ const execute: Rule = {
   maxAttempts: 2,
   prompt: '',
   session: 'fresh',
-  on: {
+  outcomes: {
     succeeded: 'in-review',
     needs_input: 'blocked',
     blocked_manual: 'blocked',
@@ -74,7 +74,31 @@ const rework: Rule = {
   maxAttempts: 2,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'split-review', needs_input: 'blocked', ...toFailure },
+  outcomes: { succeeded: 'split-review', needs_input: 'blocked', ...toFailure },
+}
+
+// An AI review station: nothing of its own to check, so its rule names every way out.
+const review: Rule = {
+  id: 'ai-review',
+  watch: 'in-review',
+  agent: 'fake',
+  mode: 'review',
+  maxAttempts: 2,
+  prompt: '',
+  session: 'fresh',
+  outcomes: {
+    approve: 'done',
+    changes: 'ready-to-rework',
+    needs_input: 'blocked',
+    ...toFailure,
+  },
+}
+
+// execute with one more way out than its mode has: sending the item back to be designed.
+const executeOrDesign: Rule = {
+  ...execute,
+  id: 'execute-or-design',
+  outcomes: { ...execute.outcomes, needs_design: 'refining' },
 }
 
 // What a scripted agent does once started: it gets an MCP client already connected to the
@@ -157,8 +181,9 @@ function setup(
     storage,
     runtime,
     statuses,
-    workflow: DEFAULT_WORKFLOW,
-    rules: [split, execute, rework],
+    // What loadConfig derives from the rework rule.
+    workflow: { ...DEFAULT_WORKFLOW, roles: { ...DEFAULT_WORKFLOW.roles, rework: rework.watch } },
+    rules: [split, execute, rework, review, executeOrDesign],
     holdLabel: 'hold',
     tokens,
   })
@@ -365,16 +390,29 @@ describe('rule split on a fake agent', () => {
     expect((await t.storage.get(item.ref)).status).toBe('split-review')
   })
 
-  it('a split agent saying blocked_manual has nowhere to go, so it is failed', async () => {
+  it('a split agent cannot report blocked_manual, which its rule does not have: failed', async () => {
     const t = setup()
-    t.scripts.push(report('blocked_manual'))
+    let refused: string | undefined
+    t.scripts.push(async (mcp) => {
+      const res = await mcp.callTool({
+        name: 'report_result',
+        arguments: { verdict: 'blocked_manual', summary: 'Waiting on a person.' },
+      })
+      if (res.isError === true) refused = text(res)
+      return ok
+    })
     const item = await t.readyItem()
     const engine = t.engine()
     await engine.tick()
     await engine.settled()
 
+    expect(refused).toContain('verdict')
     expect((await t.storage.get(item.ref)).status).toBe('blocked')
-    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
+    const [run] = await t.runtime.runsFor(item.ref)
+    expect([run?.outcome, run?.verdict]).toEqual(['failed', undefined])
+    expect((await t.storage.comments(item.ref))[0]?.body).toContain(
+      'Why: the agent reported no verdict.',
+    )
   })
 
   it('a person moving the item while the agent works wins: cancelled, no status written (invariant 6)', async () => {
@@ -661,6 +699,31 @@ describe('rule execute on a fake agent', () => {
   })
 })
 
+describe('an outcome a rule adds to its mode', () => {
+  it('is moved on unchecked: tasks left open do not stop needs_design', async () => {
+    const t = setup()
+    t.scripts.push(report('needs_design'))
+    const [item] = await t.approvedItem()
+    const engine = t.engine([executeOrDesign])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item?.ref ?? '')).status).toBe('refining')
+    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('needs_design')
+  })
+
+  it('leaves the built-in ones checked as before', async () => {
+    const t = setup()
+    t.scripts.push(report('succeeded'))
+    const [item] = await t.approvedItem()
+    const engine = t.engine([executeOrDesign])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('failed')
+  })
+})
+
 describe('auto-resume (state-machine.md)', () => {
   // Executes what it can, then stops at the manual task.
   const stopAtManual: Script = async (mcp, spec) => {
@@ -716,6 +779,102 @@ describe('auto-resume (state-machine.md)', () => {
     await engine.settled()
     expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
     expect(t.started).toHaveLength(1)
+  })
+})
+
+describe('rule review on a fake agent', () => {
+  const reviewItem = (t: ReturnType<typeof setup>): Promise<WorkUnit> =>
+    t.storage.createItem({ title: 'Login page', body: '', status: 'in-review' })
+
+  it('only reads and comments, and can report only the outcomes its rule names', async () => {
+    const t = setup()
+    let names: string[] = []
+    let verdicts: unknown
+    t.scripts.push(async (client, spec) => {
+      const { tools } = await client.listTools()
+      names = tools.map((tool) => tool.name)
+      const schema = tools.find((tool) => tool.name === 'report_result')?.inputSchema
+      verdicts = (schema?.properties?.['verdict'] as { enum?: string[] } | undefined)?.enum
+      return report('approve')(client, spec)
+    })
+    await reviewItem(t)
+    const engine = t.engine([review])
+    await engine.tick()
+    await engine.settled()
+    expect(names).toEqual([
+      'get_item',
+      'list_tasks',
+      'list_comments',
+      'add_comment',
+      'report_result',
+    ])
+    expect(verdicts).toEqual(['approve', 'changes', 'needs_input', 'failed'])
+  })
+
+  it('moves the item where the reported outcome goes, with nothing to check', async () => {
+    const t = setup()
+    t.scripts.push(async (mcp, spec) => {
+      await mcp.callTool({
+        name: 'add_comment',
+        arguments: { kind: 'note', body: 'The error message leaks the user id.' },
+      })
+      return report('changes')(mcp, spec)
+    })
+    const item = await reviewItem(t)
+    const engine = t.engine([review])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.storage.get(item.ref)).status).toBe('ready-to-rework')
+    const [run] = await t.runtime.runsFor(item.ref)
+    expect([run?.verdict, run?.outcome, run?.from, run?.to]).toEqual([
+      'changes',
+      'changes',
+      'in-review',
+      'ready-to-rework',
+    ])
+    expect((await t.storage.comments(item.ref)).map((c) => c.body)).toEqual([
+      'The error message leaks the user id.',
+      expect.stringContaining('`changes`. **In Review** → **Ready to Rework**.'),
+    ])
+  })
+
+  it.each(['succeeded', 'done', 'max_attempts'])(
+    'refuses %s, which this rule does not name, so the run ends with no verdict',
+    async (verdict) => {
+      const t = setup()
+      let refused = false
+      t.scripts.push(async (mcp) => {
+        const res = await mcp.callTool({
+          name: 'report_result',
+          arguments: { verdict, summary: 'Ship it.' },
+        })
+        refused = res.isError === true
+        return ok
+      })
+      const item = await reviewItem(t)
+      const engine = t.engine([review])
+      await engine.tick()
+      await engine.settled()
+
+      expect(refused).toBe(true)
+      expect((await t.storage.get(item.ref)).status).toBe('blocked')
+      expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
+    },
+  )
+
+  it('still checks needs_input: no question, failed', async () => {
+    const t = setup()
+    t.scripts.push(report('needs_input'))
+    const item = await reviewItem(t)
+    const engine = t.engine([review])
+    await engine.tick()
+    await engine.settled()
+
+    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
+    expect((await t.storage.comments(item.ref))[0]?.body).toContain(
+      'Why: the agent reported needs_input but asked no question.',
+    )
   })
 })
 

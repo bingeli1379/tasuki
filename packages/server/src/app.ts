@@ -174,16 +174,19 @@ export function createApp({
     if (typeof body.expectedVersion !== 'string')
       throw new InvalidInput('expectedVersion is required')
     return c.json(
-      await updateTask(storage, workflow.roles.taskReview, {
-        ref: c.req.param('ref'),
-        expectedVersion: body.expectedVersion,
-        ...(typeof body.title === 'string' ? { title: body.title } : {}),
-        ...(typeof body.body === 'string' ? { body: body.body } : {}),
-      }),
+      await updateTask(
+        { storage, runtime },
+        {
+          ref: c.req.param('ref'),
+          expectedVersion: body.expectedVersion,
+          ...(typeof body.title === 'string' ? { title: body.title } : {}),
+          ...(typeof body.body === 'string' ? { body: body.body } : {}),
+        },
+      ),
     )
   })
   app.delete('/api/tasks/:ref', async (c) => {
-    await deleteTask(storage, workflow.roles.taskReview, c.req.param('ref'))
+    await deleteTask({ storage, runtime }, c.req.param('ref'))
     return c.json({ ok: true })
   })
   app.post('/api/tasks/:ref/comments', async (c) => {
@@ -242,11 +245,11 @@ export function createApp({
     const token = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '')?.[1]
     const runId = token === undefined ? undefined : tokens.resolve(token)
     const run = runId === undefined ? undefined : await runtime.getRun(runId)
-    const mode = rules.find((r) => r.id === run?.rule)?.mode
-    if (run?.state !== 'running' || mode === undefined)
+    const rule = rules.find((r) => r.id === run?.rule)
+    if (run?.state !== 'running' || rule === undefined)
       return c.json({ error: 'not a live run token' }, 401)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createAgentMcpServer({ storage, runtime, run, mode }).connect(transport)
+    await createAgentMcpServer({ storage, runtime, run, rule }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   return app

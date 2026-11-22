@@ -1,11 +1,11 @@
 import type { Ref } from './work-unit'
 
-export type Verdict = 'succeeded' | 'needs_input' | 'blocked_manual' | 'failed'
+// The name of one of the rule's outcomes, as the agent reported it (custom-workflow.md 3).
+export type Verdict = string
 
-export const VERDICTS: readonly Verdict[] = ['succeeded', 'needs_input', 'blocked_manual', 'failed']
-
-// cancelled, max_attempts and abandoned only ever come from the engine.
-export type Outcome = Verdict | 'max_attempts' | 'cancelled' | 'abandoned'
+// A verdict that passed the check, failed, or one only the engine reaches: max_attempts,
+// cancelled and abandoned.
+export type Outcome = string
 
 export type CancelMode = 'soft' | 'hard'
 

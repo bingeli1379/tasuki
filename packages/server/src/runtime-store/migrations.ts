@@ -67,4 +67,40 @@ export const RUNTIME_MIGRATIONS: readonly string[] = [
   // D82: where the item was claimed from and where the engine moved it, as they were then.
   `ALTER TABLE run ADD COLUMN from_status TEXT;
   ALTER TABLE run ADD COLUMN to_status TEXT;`,
+  // W2: a rule names its own outcomes, so outcome and verdict lose their fixed lists; the
+  // config checks them instead. Rebuilt as in S7d.
+  `CREATE TABLE run_next (
+    id                  TEXT PRIMARY KEY,
+    target              TEXT NOT NULL,
+    rule                TEXT NOT NULL,
+    agent               TEXT NOT NULL,
+    attempt             INTEGER NOT NULL,
+    workspace           TEXT NOT NULL,
+    state               TEXT NOT NULL CHECK (state IN ('running','finished')),
+    outcome             TEXT,
+    verdict             TEXT,
+    summary             TEXT,
+    lease_until         TEXT NOT NULL,
+    started_at          TEXT NOT NULL,
+    last_activity_at    TEXT NOT NULL,
+    finished_at         TEXT,
+    log_path            TEXT NOT NULL,
+    produced_questions  INTEGER NOT NULL DEFAULT 0,
+    produced_tasks      INTEGER NOT NULL DEFAULT 0,
+    cancel_requested_at TEXT,
+    cancel_mode         TEXT CHECK (cancel_mode IN ('soft','hard')),
+    cancel_requested_by TEXT CHECK (cancel_requested_by IN ('stop','hold','moved','pause')),
+    session_id          TEXT,
+    from_status         TEXT,
+    to_status           TEXT
+  );
+  INSERT INTO run_next SELECT id, target, rule, agent, attempt, workspace, state, outcome,
+    verdict, summary, lease_until, started_at, last_activity_at, finished_at, log_path,
+    produced_questions, produced_tasks, cancel_requested_at, cancel_mode, cancel_requested_by,
+    session_id, from_status, to_status
+    FROM run;
+  DROP TABLE run;
+  ALTER TABLE run_next RENAME TO run;
+  CREATE UNIQUE INDEX one_live_run ON run(target) WHERE state = 'running';
+  CREATE INDEX run_by_target ON run(target, started_at DESC);`,
 ]

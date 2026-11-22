@@ -9,8 +9,8 @@ export interface BoardColumn {
   displayName: string
   // Who handles it: engine when a rule watches the column, person when it waits for one.
   handledBy?: 'engine' | 'person'
-  // What a person can conclude here: button label -> the status the item goes to.
-  outcomes: Readonly<Record<string, string>>
+  // Where a person can send the item from here, the last the main choice.
+  outcomes: readonly string[]
   items: WorkUnit[]
 }
 

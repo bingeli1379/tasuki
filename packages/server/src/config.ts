@@ -1,10 +1,11 @@
 import {
   DEFAULT_WORKFLOW,
+  ENGINE_OUTCOMES,
+  MODE_OUTCOMES,
   TASK_STATUS_DISPLAY,
   TASK_STATUSES,
   type Roles,
   type Rule,
-  type RuleExit,
   type RuleMode,
   type RuleSession,
   type Station,
@@ -48,18 +49,10 @@ export interface Config {
 
 type Raw = Record<string, unknown>
 
-const MODES: readonly RuleMode[] = ['split', 'execute', 'rework']
+const MODES = Object.keys(MODE_OUTCOMES) as RuleMode[]
 const SESSIONS: readonly RuleSession[] = ['fresh', 'per-item']
-const EXITS: readonly RuleExit[] = [
-  'succeeded',
-  'needs_input',
-  'blocked_manual',
-  'failed',
-  'max_attempts',
-]
 
-const ROLES: readonly (keyof Roles)[] = ['entry', 'done', 'failure', 'taskReview', 'rework']
-const REQUIRED_ROLES: readonly (keyof Roles)[] = ['entry', 'done', 'failure']
+const ROLES: readonly (keyof Roles)[] = ['entry', 'failure']
 
 const isObject = (value: unknown): value is Raw =>
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -116,16 +109,16 @@ function parseWorkflow(
       throw new Error(
         `config ${path} (${id}).handledBy can only be person; a rule watching it makes it the engine's`,
       )
-    const outcomes = raw['outcomes'] ?? {}
-    if (!isObject(outcomes)) throw new Error(`config ${path} (${id}).outcomes must be an object`)
-    for (const [label, to] of Object.entries(outcomes))
-      if (label.trim() === '' || typeof to !== 'string')
-        throw new Error(`config ${path} (${id}).outcomes: each is a button label and a status`)
+    const outcomes: unknown = raw['outcomes'] ?? []
+    if (!Array.isArray(outcomes) || outcomes.some((to) => typeof to !== 'string'))
+      throw new Error(`config ${path} (${id}).outcomes must list statuses`)
+    if (new Set(outcomes).size !== outcomes.length)
+      throw new Error(`config ${path} (${id}).outcomes lists a status twice`)
     return {
       id,
       name,
       ...(handledBy === undefined ? {} : { handledBy }),
-      outcomes: outcomes as Record<string, string>,
+      outcomes: outcomes as string[],
     }
   })
   const owners = Object.entries(keys).filter(([, k], i, all) =>
@@ -136,14 +129,14 @@ function parseWorkflow(
       `config workflow.statuses: ${owners.map(([id]) => id).join(' and ')} share the tracker key ${owners[0]?.[1]}`,
     )
   for (const station of stations)
-    for (const [label, to] of Object.entries(station.outcomes)) {
+    for (const to of station.outcomes) {
       if (keys[to] === undefined)
         throw new Error(
-          `config workflow.statuses (${station.id}).outcomes.${label}: status "${to}" is not in workflow.statuses`,
+          `config workflow.statuses (${station.id}).outcomes: status "${to}" is not in workflow.statuses`,
         )
       if (to === station.id)
         throw new Error(
-          `config workflow.statuses (${station.id}).outcomes.${label} must go to another status`,
+          `config workflow.statuses (${station.id}).outcomes: ${to} must be another status`,
         )
     }
 
@@ -152,7 +145,7 @@ function parseWorkflow(
   for (const role of Object.keys(rawRoles))
     if (!ROLES.includes(role as keyof Roles))
       throw new Error(`config workflow.roles.${role}: not a role (${ROLES.join(', ')})`)
-  for (const role of REQUIRED_ROLES)
+  for (const role of ROLES)
     if (rawRoles[role] === undefined) throw new Error(`config workflow.roles.${role} is required`)
   for (const [role, id] of Object.entries(rawRoles))
     if (typeof id !== 'string' || keys[id] === undefined)
@@ -218,22 +211,26 @@ function parseRules(
     const mode = text('mode') as RuleMode
     if (!MODES.includes(mode))
       throw new Error(`config ${path}.mode must be one of ${MODES.join(', ')}`)
-    const on: Rule['on'] = {}
-    for (const [key, target] of Object.entries(isObject(raw['on']) ? raw['on'] : {})) {
-      if (!EXITS.includes(key as RuleExit))
-        throw new Error(`config ${path}.on.${key}: not an outcome a rule can move on`)
-      if (typeof target !== 'string') throw new Error(`config ${path}.on.${key} must be a status`)
-      on[key as RuleExit] = status(`on.${key}`, target)
+    const rawOutcomes = raw['outcomes'] ?? {}
+    if (!isObject(rawOutcomes)) throw new Error(`config ${path}.outcomes must be an object`)
+    const outcomes: Rule['outcomes'] = {}
+    for (const [name, target] of Object.entries(rawOutcomes)) {
+      // The agent reports these names, so they read like the built-in ones.
+      if (!/^[a-z][a-z0-9]*(_[a-z0-9]+)*$/.test(name))
+        throw new Error(`config ${path}.outcomes.${name}: a name such as needs_design`)
+      if (name === 'cancelled' || name === 'abandoned')
+        throw new Error(`config ${path}.outcomes.${name}: the item does not move on it`)
+      if (typeof target !== 'string')
+        throw new Error(`config ${path}.outcomes.${name} must be a status`)
+      outcomes[name] = status(`outcomes.${name}`, target)
     }
-    // blocked_manual cannot come from a split.
-    const needed: RuleExit[] =
-      mode === 'execute'
-        ? ['succeeded', 'needs_input', 'blocked_manual']
-        : ['succeeded', 'needs_input']
-    for (const key of needed)
-      if (on[key] === undefined) throw new Error(`config ${path}.on.${key} is required`)
-    // failed and max_attempts go to the failure station unless the rule says otherwise.
-    for (const key of ['failed', 'max_attempts'] as const) on[key] ??= failure
+    for (const name of MODE_OUTCOMES[mode])
+      if (outcomes[name] === undefined)
+        throw new Error(`config ${path}.outcomes.${name} is required in ${mode} mode`)
+    if (Object.keys(outcomes).every((name) => ENGINE_OUTCOMES.includes(name)))
+      throw new Error(`config ${path}.outcomes must name at least one way for the agent to finish`)
+    // Every rule can end on these; they go to the failure station unless it says otherwise.
+    for (const name of ENGINE_OUTCOMES) outcomes[name] ??= failure
     if (raw['prompt'] !== undefined && raw['promptFile'] !== undefined)
       throw new Error(`config ${path}: set prompt or promptFile, not both`)
     let prompt = defaultPrompt(mode)
@@ -253,7 +250,7 @@ function parseRules(
       agent,
       mode,
       maxAttempts: positive(raw, 'maxAttempts', defaultMaxAttempts, path),
-      on,
+      outcomes,
       prompt,
       session,
     }
@@ -300,14 +297,10 @@ export function loadConfig(path: string): Config {
   const server = (raw['server'] ?? {}) as Raw
   const tracker = pluginRef(raw['tracker'] ?? { plugin: '@tasuki/sqlite' }, 'tracker')
 
-  if (raw['statuses'] !== undefined)
-    throw new Error(
-      'config statuses moved into workflow: workflow.statuses and workflow.taskStatuses',
-    )
   const claimed = (Array.isArray(raw['rules']) ? raw['rules'] : []).map((r: unknown) =>
     isObject(r) ? r['claim'] : undefined,
   )
-  const { workflow, statuses } = parseWorkflow(raw['workflow'], claimed)
+  const { workflow: parsed, statuses } = parseWorkflow(raw['workflow'], claimed)
 
   const rawLimits = isObject(raw['limits']) ? raw['limits'] : {}
   const limits: Limits = {
@@ -332,20 +325,21 @@ export function loadConfig(path: string): Config {
 
   const rules = parseRules(
     raw['rules'],
-    workflow.statuses.map((s) => s.id),
+    parsed.statuses.map((s) => s.id),
     agents,
     limits.defaultMaxAttempts,
     configDir,
-    workflow.roles.failure,
+    parsed.roles.failure,
   )
-  // A person reviews what a splitting or reworking agent made at the taskReview station, and
-  // sends work back through the rework one.
-  const reviewed = rules.find((r) => r.mode === 'split' || r.mode === 'rework')
-  if (reviewed !== undefined && workflow.roles.taskReview === undefined)
-    throw new Error(`config workflow.roles.taskReview is required: rule ${reviewed.id} makes tasks`)
-  const reworker = rules.find((r) => r.mode === 'rework')
-  if (reworker !== undefined && workflow.roles.rework === undefined)
-    throw new Error(`config workflow.roles.rework is required: rule ${reworker.id} reworks`)
+  // Sending work back means leaving feedback for the rework rule's agent, so the station it
+  // watches is where the board asks for that feedback (D86).
+  const reworkAt = [...new Set(rules.filter((r) => r.mode === 'rework').map((r) => r.watch))]
+  if (reworkAt.length > 1)
+    throw new Error(`config rules: rework rules must watch one status, not ${reworkAt.join(', ')}`)
+  const workflow: Workflow =
+    reworkAt[0] === undefined
+      ? parsed
+      : { ...parsed, roles: { ...parsed.roles, rework: reworkAt[0] } }
   // The tasks a splitting or reworking agent can make start in one of these.
   const splitter = rules.find((r) => r.mode === 'split' || r.mode === 'rework')
   const missing = ['to-do', 'manual'].filter((s) => statuses.task?.[s] === undefined)

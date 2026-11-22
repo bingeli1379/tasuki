@@ -4,7 +4,6 @@ import {
   API_VERSION,
   definePlugin,
   isRunnable,
-  VERDICTS,
   type Plugin,
   type RunExit,
   type TaskNode,
@@ -13,13 +12,14 @@ import { setTimeout as sleep } from 'node:timers/promises'
 
 // A stand-in agent for trying the engine without an LLM. It talks to the MCP facade over
 // HTTP like a real agent CLI would, so it gets nothing a third-party runner could not.
-// A marker in the item's title picks what it does: [fake:needs_input] asks a question first,
-// [fake:failed], [fake:blocked_manual], [fake:hang] never finishes, and [fake:no_tasks]
-// claims success without making any. Anything else splits the item into two tasks, unless
-// it already has some, and succeeds; [fake:manual] makes the second one manual.
+// A marker in the item's title picks what it does: [fake:<verdict>] reports that verdict when
+// the rule has it ([fake:needs_input] asks a question first), [fake:hang] never finishes, and
+// [fake:no_tasks] claims success without making any. Anything else splits the item into two
+// tasks, unless it already has some, and succeeds; [fake:manual] makes the second one manual.
 // Executing, it walks every task it can run to done, then reports succeeded, or
 // blocked_manual when manual tasks are left. Reworking, it makes one task, Rework, carrying
-// the latest comment a person left.
+// the latest comment a person left. Reviewing, it leaves a note and reports the rule's first
+// outcome.
 const plugin: Plugin = definePlugin({
   name: '@tasuki/fake-runner',
   apiVersion: API_VERSION,
@@ -47,7 +47,22 @@ const plugin: Plugin = definePlugin({
             const marker = /\[fake:([a-z_]+)\]/.exec(title)?.[1]
             if (marker === 'hang') await new Promise(() => {})
             await sleep(seconds * 1000)
-            let verdict = VERDICTS.find((v) => v === marker) ?? 'succeeded'
+            // What the rule lets it report, read off the tool as a real agent would.
+            const { tools } = await client.listTools()
+            const schema = tools.find((t) => t.name === 'report_result')?.inputSchema
+            const verdicts =
+              (schema?.properties?.['verdict'] as { enum?: string[] } | undefined)?.enum ?? []
+            let verdict =
+              marker !== undefined && verdicts.includes(marker)
+                ? marker
+                : spec.mode === 'review'
+                  ? (verdicts[0] ?? 'failed')
+                  : 'succeeded'
+            if (spec.mode === 'review')
+              await call('add_comment', {
+                kind: 'note',
+                body: `The fake runner reviewed this and says ${verdict}.`,
+              })
             if (verdict === 'needs_input')
               await call('add_comment', {
                 kind: 'question',

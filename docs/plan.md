@@ -53,7 +53,7 @@
 | S7e | 作者試用 S7 後的回饋：預設規則不用 claim status、刪除 item、人可以改回 done 的 task、人的操作留紀錄、看板與詳情的使用性、沒有回饋的 rework 不開跑（已完成，D74、D75） | 卡片留在原欄掛 Running；按錯能改回；詳情秒開、跟著看板更新 |
 | S8 | 真的 claude runner（plugin）、規則的 prompt 與 session、預設 prompt（MCP facade 與 run token 在 S4 就有了）（已完成，D76）。之後補了 prompt 三層與 agent 自帶 plugin、MCP（D77） | 在玩具 repo 上用真的 claude 跑一次 |
 | W1 | status 自訂與角色、`handledBy`、站上給人的 `outcomes`，還在檔案裡設定（已完成，D78、D81，custom-workflow.md） | config 加一站，看板多一欄，眼睛和雷達標對 |
-| W2 | 規則宣告 `outcomes`（`on` 併進來）、`review` mode | 加一站 AI review，agent 依結果把 item 送到不同地方 |
+| W2 | 規則宣告 `outcomes`（`on` 併進來）、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約 | 行為不變，契約測試多一套 |
 | S9 | auth（`none`、`static`、`http`）、session cookie 與 CSRF、`/mcp` 的個人 API token、登入防暴力、`Host` 檢查（D60） | 登入畫面、ttl 過期、產生與撤銷 token、沒登入打 API 被拒 |
 | W4 | 流程設定進 store、設定頁、熱重載、修改歷史（要 S9 的 auth） | 在網頁上改規則和 prompt，下一輪就生效，看得到誰改了什麼 |

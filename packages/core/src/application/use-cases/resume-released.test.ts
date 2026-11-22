@@ -15,7 +15,7 @@ const split: Rule = {
   maxAttempts: 3,
   prompt: '',
   session: 'fresh',
-  on: { succeeded: 'split-review', needs_input: 'needs-answers' },
+  outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
 }
 
 const item = (labels: string[] = []): WorkUnit => ({

@@ -1,15 +1,24 @@
 import type { Outcome, Verdict } from './run'
 import { isRunnable, type TaskNode } from './task'
 
-export type RuleMode = 'split' | 'execute' | 'rework'
+export type RuleMode = 'split' | 'execute' | 'rework' | 'review'
+
+// What each mode itself means by an outcome, so the engine checks it before acting on it
+// (agent-contract.md). Every other outcome a rule declares is moved on as it is.
+export const MODE_OUTCOMES: Record<RuleMode, readonly string[]> = {
+  split: ['succeeded'],
+  execute: ['succeeded', 'blocked_manual'],
+  rework: ['succeeded'],
+  review: [],
+}
+
+// The outcomes every rule has without declaring them: config sends them to the failure
+// station unless the rule says otherwise.
+export const ENGINE_OUTCOMES: readonly string[] = ['needs_input', 'failed', 'max_attempts']
 
 // fresh: every Run starts a new agent session. per-item: a Run picks up the newest session
 // this agent had on the item (data-model.md).
 export type RuleSession = 'fresh' | 'per-item'
-
-// The outcomes a rule moves the item on. cancelled leaves it where it is; abandoned is
-// recovery's business.
-export type RuleExit = Exclude<Outcome, 'cancelled' | 'abandoned'>
 
 export interface Rule {
   id: string
@@ -19,7 +28,9 @@ export interface Rule {
   agent: string
   mode: RuleMode
   maxAttempts: number
-  on: Partial<Record<RuleExit, string>>
+  // Outcome name to the status the item moves to. cancelled leaves it where it is;
+  // abandoned is recovery's business, so neither is ever in here.
+  outcomes: Record<string, string>
   // The template given to the agent, before its variables are filled in.
   prompt: string
   session: RuleSession
@@ -40,10 +51,13 @@ export function expandPrompt(
   return template.replace(/\{\{\s*([a-z.]+)\s*\}\}/g, (all, name: string) => values[name] ?? all)
 }
 
-// Config fills in failed and max_attempts with the failure station when a rule leaves them out.
-export function exitFor(rule: Rule, outcome: RuleExit): string | undefined {
-  return rule.on[outcome]
+export function exitFor(rule: Rule, outcome: Outcome): string | undefined {
+  return Object.hasOwn(rule.outcomes, outcome) ? rule.outcomes[outcome] : undefined
 }
+
+// What the agent may report: every outcome of the rule but the one only the engine reaches.
+export const verdictsOf = (rule: Rule): string[] =>
+  Object.keys(rule.outcomes).filter((o) => o !== 'max_attempts')
 
 // The status the item is in while its Run is alive.
 export const runningStatus = (rule: Rule): string => rule.claim ?? rule.watch
@@ -61,14 +75,14 @@ export interface Evidence {
   produced: { tasks: number; questions: number }
 }
 
-// The agent's verdict is a claim; the engine checks it before acting on it
-// (agent-contract.md, the verdict table).
+// The agent's verdict is a claim; the engine checks the ones it knows the meaning of before
+// acting on it (agent-contract.md, the verdict table).
 export function outcomeOf(
   mode: RuleMode,
   verdict: Verdict | undefined,
   exit: RunExit,
   evidence: Evidence,
-): { outcome: Verdict; reason?: string } {
+): { outcome: Outcome; reason?: string } {
   if (exit.code !== 0)
     return {
       outcome: 'failed',
@@ -90,6 +104,7 @@ function refuse(
   { tasks, produced }: Evidence,
 ): string | undefined {
   const claim = `the agent reported ${verdict}`
+  if (verdict !== 'needs_input' && !MODE_OUTCOMES[mode].includes(verdict)) return undefined
   switch (verdict) {
     case 'succeeded': {
       if (mode === 'split' && tasks.length === 0) return `${claim} but the item has no tasks`
@@ -106,7 +121,7 @@ function refuse(
       const runnable = tasks.find((t) => isRunnable(t, tasks))
       return runnable !== undefined ? `${claim} but ${runnable.ref} can still run` : undefined
     }
-    case 'failed':
+    default:
       return undefined
   }
 }

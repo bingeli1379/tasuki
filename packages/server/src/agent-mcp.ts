@@ -7,8 +7,8 @@ import {
   reportResult,
   setTaskStatus,
   TASK_STATUSES,
-  VERDICTS,
-  type RuleMode,
+  verdictsOf,
+  type Rule,
   type Run,
   type RuntimeStorePort,
   type StoragePort,
@@ -19,9 +19,10 @@ export interface AgentMcpDeps {
   storage: StoragePort
   runtime: RuntimeStorePort
   run: Run
-  // The mode of the rule that started the Run: splitters build the task graph, executors
-  // walk it (agent-contract.md, the tool table).
-  mode: RuleMode
+  // The rule that started the Run. Its mode picks the tools: splitters build the task graph,
+  // executors walk it, reviewers only read and comment (agent-contract.md, the tool table).
+  // Its outcomes are what the agent can report.
+  rule: Rule
 }
 
 const json = (value: unknown): { content: { type: 'text'; text: string }[] } => ({
@@ -31,7 +32,8 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 // The MCP facade for an agent the engine started. Bound to one Run by its token, so every
 // tool works on that Run's item and nothing else; there is no tool that moves the item
 // (agent-contract.md).
-export function createAgentMcpServer({ storage, runtime, run, mode }: AgentMcpDeps): McpServer {
+export function createAgentMcpServer({ storage, runtime, run, rule }: AgentMcpDeps): McpServer {
+  const { mode } = rule
   const server = new McpServer({ name: 'tasuki-agent', version: '0.0.0' })
   // A person asked this Run to stop: its writes are refused so the agent winds down
   // (agent-contract.md). run is read afresh for every request.
@@ -59,7 +61,7 @@ export function createAgentMcpServer({ storage, runtime, run, mode }: AgentMcpDe
     },
     async () => json(await listTasks(storage, run.target)),
   )
-  if (mode !== 'execute')
+  if (mode === 'split' || mode === 'rework')
     server.registerTool(
       'create_task',
       {
@@ -157,9 +159,10 @@ export function createAgentMcpServer({ storage, runtime, run, mode }: AgentMcpDe
     {
       description:
         'Report how this run ended. Call it once, as the last thing you do. The engine checks ' +
-        'it and moves the item; you cannot move it yourself.',
+        'it and moves the item; you cannot move it yourself. Report failed when you cannot ' +
+        'go on, and needs_input after a question comment.',
       inputSchema: {
-        verdict: z.enum(VERDICTS as [string, ...string[]]),
+        verdict: z.enum(verdictsOf(rule) as [string, ...string[]]),
         summary: z
           .string()
           .describe(
@@ -169,7 +172,7 @@ export function createAgentMcpServer({ storage, runtime, run, mode }: AgentMcpDe
     },
     // Accepted but ignored once cancelled: the Run ends cancelled whatever it says.
     async (input) => {
-      if (run.cancelRequestedAt === undefined) await reportResult(runtime, run.id, input)
+      if (run.cancelRequestedAt === undefined) await reportResult(runtime, run.id, rule, input)
       return json({ ok: true })
     },
   )

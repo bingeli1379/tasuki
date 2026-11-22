@@ -186,9 +186,8 @@ CREATE TABLE run (
   session_id          TEXT,
   workspace           TEXT NOT NULL,
   state               TEXT NOT NULL CHECK (state IN ('running','finished')),
-  outcome             TEXT CHECK (outcome IN
-    ('succeeded','needs_input','blocked_manual','failed','max_attempts','cancelled','abandoned')),
-  verdict             TEXT CHECK (verdict IN ('succeeded','needs_input','blocked_manual','failed')),
+  outcome             TEXT,  -- a rule names its own outcomes, so config checks them, not a CHECK (D84)
+  verdict             TEXT,
   summary             TEXT,
   lease_until         TEXT NOT NULL,
   started_at          TEXT NOT NULL,

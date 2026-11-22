@@ -30,8 +30,8 @@ const recording = (): { storage: StoragePort; moves: string[][] } => {
 }
 
 const workflowOf = (ids: string[], rework?: string): Workflow => ({
-  statuses: ids.map((id) => ({ id, name: id.toUpperCase(), outcomes: {} })),
-  roles: { entry: 'refining', done: 'done', failure: 'done', ...(rework ? { rework } : {}) },
+  statuses: ids.map((id) => ({ id, name: id.toUpperCase(), outcomes: [] })),
+  roles: { entry: 'refining', failure: 'done', ...(rework ? { rework } : {}) },
 })
 const board = workflowOf(['refining', 'ready-to-split', 'done'])
 

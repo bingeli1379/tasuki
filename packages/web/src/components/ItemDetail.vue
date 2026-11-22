@@ -33,7 +33,7 @@ const props = defineProps<{
   initial?: Item | undefined
   // Changes whenever the board sees this item change (status, version, Run): read again.
   seen: string
-  columns: { status: string; displayName: string; outcomes: Record<string, string> }[]
+  columns: { status: string; displayName: string; outcomes: string[] }[]
   roles: Roles
 }>()
 const emit = defineEmits<{ updated: [item: Item]; move: [to: string]; deleted: [ref: string] }>()
@@ -324,10 +324,13 @@ async function remove(): Promise<void> {
   }
 }
 
-// What a person can conclude in the item's status, as the workflow lists it. Going to the
-// rework status asks what to fix first.
+// What a person can conclude in the item's status, as the workflow lists it, each button
+// named after where it goes (D82). Going to the rework status asks what to fix first.
 const outcomes = computed(() =>
-  Object.entries(props.columns.find((c) => c.status === item.value?.status)?.outcomes ?? {}),
+  (props.columns.find((c) => c.status === item.value?.status)?.outcomes ?? []).map((to) => ({
+    to,
+    label: `→ ${props.columns.find((c) => c.status === to)?.displayName ?? to}`,
+  })),
 )
 
 async function decide(to: string): Promise<void> {
@@ -569,8 +572,8 @@ const authorOf = (c: Comment): string =>
                   <!-- The last outcome is the way forward, so it is the solid one. -->
                   <span v-if="outcomes.length > 0" class="flex gap-2">
                     <UButton
-                      v-for="([label, to], i) in outcomes"
-                      :key="label"
+                      v-for="({ to, label }, i) in outcomes"
+                      :key="to"
                       :label="label"
                       size="sm"
                       :color="i === outcomes.length - 1 ? 'primary' : 'neutral'"
@@ -815,8 +818,7 @@ const authorOf = (c: Comment): string =>
             v-if="openTask"
             v-model:open="taskOpen"
             :task-ref="openTask"
-            :item-status="detail.item.status"
-            :task-review="roles.taskReview"
+            :agent-working="detail.runs[0]?.state === 'running'"
             :task-title="taskTitle"
             @changed="load"
           />
