@@ -797,8 +797,8 @@
   - auth plugin 只回答身分（`userId`、`displayName`）。access 存在 store，用 `userId` 對，不管帳號是誰管的，指派都在看板上做。
   - access 三種：`admin` 管帳號、改設定、用系統；`maintainer` 改設定、用系統；`member` 只用系統。設定頁在 W4，在那之前 `maintainer` 與 `member` 實際上一樣。命名跟 workflow 的 role 分開，叫 access。
   - 內建兩個 auth plugin：`@tasuki/auth-builtin`（帳號與 scrypt 密碼 hash 在 store，admin 在看板上建帳號）與 `@tasuki/auth-http`（登入頁的帳密轉給外部 API）。不登入是省略 `auth`，每個請求當成 `admin`。`static` 拿掉。config 跟其他角色一樣寫 `plugin` 加 `options`，`auth.kind` 拿掉。
-  - 外部帳號第一次登入建成 `member`。停用的帳號 session 與 token 立刻失效；外部帳號只能停用。最後一個 `admin` 不能降級或停用。
-  - 第一個 admin 用 setup token：store 沒有啟用中的 `admin` 時，啟動 log 印一次性 token，builtin 用它建第一個帳號，http 登入後用它升級自己。token 只在記憶體，有 admin 就作廢。
+  - 外部帳號第一次登入建成 `member`（D90 改：admin 先加才能登入）。停用的帳號 session 與 token 立刻失效；外部帳號只能停用（D90 改：都能刪）。最後一個 `admin` 不能降級或停用。
+  - 第一個 admin 用 setup token：store 沒有啟用中的 `admin` 時，啟動 log 印一次性 token，builtin 用它建第一個帳號，http 登入後用它升級自己（D90 改：token 加外部帳密直接建）。token 只在記憶體，有 admin 就作廢。
   - session ttl 預設 7 天。session 記著發出時的 ttl，跟現在的設定不同就失效，所以改 ttl 會讓之前的 cookie 全部失效。
   - 防暴力：同一個帳號連錯 5 次以內不延遲，第 6 次起 1 秒、2 秒、4 秒加倍到 30 秒。
   - S9 拆成 S9a（builtin、access、帳號管理、session、CSRF、`Host`、防暴力、個人 API token）與 S9c（http、開放非 loopback）。原本的 S9b（API token）併進 S9a：作者平常用 Claude Code 接 `/mcp`，設了 auth 卻還沒有 token 的話 `/mcp` 整個 401。
@@ -814,3 +814,29 @@
   - 改 ttl 要在驗證時比對而不是啟動時清，因為 W4 之後 ttl 會在執行中被改。
 - 實測：`pnpm test` 387 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite、jira、auth 共 25 條全過。把「5 次不延遲」改成 4、把「ttl 不同就失效」拿掉，server 測試各有一條會紅。
 - 重新檢視：需要比 `member` 更小的權限（唯讀、只看部分 item）時；公司只提供 OIDC 或 SAML 時；W4 做設定頁時確認 `maintainer` 能改的範圍。
+
+## D90 外部帳號要先加、帳號可刪、`auth-http` 的 options、`allowInsecure` 的範圍、setup 連結
+
+- 背景：S9c 動工前與實作中（2026-11-22）。作者問過能不能拿掉 setup token、讓第一個打開網頁的人直接建 admin，討論後維持 D89。做完後作者指出帳號應該能刪，外部帳號也一樣：加進來這個動作就是同意他登入，外部系統對誰都會說帳密對。
+- 決定：
+  - 推翻 D89 的「外部帳號第一次登入建成 `member`」：外部帳號要 `admin` 先用 username 加進來，名單上沒有的人登入跟密碼錯一樣。帳號頁可以一次貼一串 username，一行一個，統一一個 access，已經在的跳過並列出。
+  - 第一次登入把外部的 `userId` 綁到帳號的 `external_id`，之後用它找人；已經綁定的 username 換成另一個外部 `userId` 就進不來。tasuki 自己的 `userId` 由 store 產生。
+  - 兩種模式的帳號都能刪，連同 session 與個人 API token。自己不能刪自己，最後一個啟用中的 `admin` 不能刪。comment 上的名字是寫入時複製的，刪了照樣顯示。
+  - 第一個 admin 兩種模式都在登入頁一次填 token、username、密碼；http 把帳密交給外部系統驗，通過就建成 `admin`。名單一開始是空的，原本「先登入再升級」走不通。
+  - 加人不進使用者 MCP，維持 D57 的例外。帳號頁加篩選框；帳號列表與看板都沒有虛擬滾動。
+  - 按了之後的回饋出現在按的地方：列表裡的確認（刪帳號）展開在那一列底下，跟刪附件、重設密碼一樣；按鈕觸發的錯誤一律用 toast。對話框頂端的錯誤框只留給「載入失敗」。刪 item、刪 task 的確認照舊在頂端，因為它們的按鈕本來就在頂端（作者指出列表很長時，頂端的確認與錯誤要捲回去才看得到）。
+  - `auth-http` 的 options：`url` 必填，`headers`、`timeoutSeconds`（預設 10）選填，一般人不用設。4xx 是帳密不對；5xx、逾時、連不上丟錯，登入回 500，不讓「驗證服務壞了」看起來像「密碼錯」。`displayName` 沒給就用 username，每次登入用外部的名字覆蓋 store 裡的。
+  - `allowInsecure: true` 同時豁免「非 loopback 要 auth」與「非 loopback 要 https 的 `publicUrl`」。
+  - 有 `publicUrl` 時，啟動 log 多印 `<publicUrl>/?setup=<token>`，登入頁自動帶入 token 再從網址列拿掉。
+  - 綁單一個非 loopback 位址時，agent 用那個位址連 `/agent-mcp`，`Host` 檢查只對 `/agent-mcp` 多認它。
+- 理由：
+  - 留著 setup token：搶到 admin 的人可以建 item，規則一命中，agent 就帶著 Bash、git token 在那台機器上跑，發現時已經來不及。Gitea 讓第一個打開的人安裝，被搶只丟一個 git server；這裡丟的是一台會自己動手的機器。連結讓 token 的成本降到點一下。
+  - `allowInsecure` 兩條都豁免：security-and-auth.md 的 Docker 範例是 container 綁 `0.0.0.0`、從 `http://localhost` 打開，照字面要求 https 的 `publicUrl`，那個範例根本起不來。兩條檢查保護的都是「網路上的人碰得到」，`allowInsecure` 本來就是使用者說「我知道，port 只開在本機」。
+  - 只在有 `publicUrl` 時印連結：看板在 S12 之前由 vite 另外跑，engine 不知道它在哪個 port，印錯的網址比不印糟。
+  - `/agent-mcp` 只多認綁定的位址，不讓看板也認：瀏覽器直接用 IP 打 http 會讓密碼走明文，繞過 proxy；agent 用 run token，跟瀏覽器無關。
+  - 外部帳號先加：外部系統只回答帳密對不對，公司裡任何人都會通過；誰能用 tasuki 應該是 admin 決定的事。刪除因此等於從名單拿掉，不會像 D89 那樣刪了又自動建回來。
+  - 綁 `external_id`：公司回收離職者的 username 再發給新人時，新人不會接到前一個人的 access。只用 username 對的話少一欄，但這個洞是靜默的。
+  - 加人不走 MCP：外部帳號加人不用密碼，D57 例外原本的理由不成立，但使用者的 AI 會讀 item，item 是 prompt injection 的入口，AI 手上有加人與改 access 的 tool 就能被拿去開後門。貼一整欄 username 比叫 AI 加還快。
+  - 不做虛擬滾動：幾百個帳號的 `<li>` 瀏覽器畫得動，難的是找人，所以加篩選框。看板 Done 欄只會越來越長，又有拖拉，另外處理。
+- 實測：`pnpm test` 400 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite、jira、auth、auth-http 共 26 條全過。把 `publicUrl` 的 host 從允許清單拿掉，server 測試會紅一條；拿掉「已綁定的 username 不能換人」的檢查，core 測試會紅一條。手動起 server：綁 `0.0.0.0` 沒有 auth 時拒絕啟動，有 auth 與 `publicUrl` 時印出連結、只認 `publicUrl` 的 `Host`。
+- 重新檢視：S12 server 自己 serve 看板時，沒有 `publicUrl` 也能印連結；公司的驗證 API 不是 JSON 或不是 `POST` 時。

@@ -55,7 +55,7 @@
 | W2 | 規則宣告 `outcomes`（`on` 併進來）、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約（已完成，D88） | 行為不變，契約測試多一套 |
 | S9a | `auth-builtin`、access 與帳號管理、setup token、session cookie 與 CSRF、登入防暴力、`Host` 檢查、`/mcp` 的個人 API token（已完成，D60、D89） | 用 log 裡的 setup token 建第一個 admin、建帳號、改 access、ttl 過期或改 ttl 被踢回登入頁、沒登入打 API 被拒；產生 token 貼進 Claude Code，撤銷後 401 |
-| S9c | `auth-http`、開放非 loopback 綁定（`publicUrl`、`allowInsecure`）（D89） | 用外部帳號登入、第一次登入是 member、admin 升級他 |
+| S9c | `auth-http`、開放非 loopback 綁定（`publicUrl`、`allowInsecure`）（已完成，D89、D90） | setup 連結建第一個 admin；admin 貼一串 username 加人，名單上的人用外部帳號登入，刪掉的進不來 |
 | W4 | 流程設定進 store、設定頁（只給 `admin` 與 `maintainer`）、熱重載、修改歷史（要 S9 的 auth） | 在網頁上改規則和 prompt，下一輪就生效，看得到誰改了什麼 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
@@ -106,6 +106,8 @@
 12. （已定，D70，D74 改）engine 與 agent 不重開 `done` 的 task。人可以改回 `to-do` 或 `manual`，但只在 item 沒有存活的 Run 時。
 13. config 的 JSON Schema 怎麼產生。D28 的 `isolatedDeclarations` 要求每個 export 有明確型別，zod 這類 schema 物件很難滿足，所以傾向型別手寫。要補 `$schema` 給編輯器用時再決定（手寫、或從型別產生）。
 14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。team-managed 的 workflow 可以用 `POST /workflows/update` 改，S2 設定 KAN 時用過（D59）。Jira 看板的欄位也要一起檢查：`doctor` 用公開的 `GET /rest/agile/1.0/board/{id}/configuration` 比對，tasuki 用到的 status 沒有出現在任何一欄就警告（那些卡片在 Jira 看板上會看不到），欄位順序跟 state-machine.md 不同也提示。公開 API 不能改看板欄位，所以順序對不上時問使用者要不要「試著」自動排：用 Jira 網頁自己用的內部 API `PUT /rest/greenhopper/1.0/rapidviewconfig/columns`（2026-11-20 在 KAN 的 team-managed 看板上試過，回 500 但順序已經存進去），排完重讀一次確認；失敗或結果不對，就退回列出正確順序請使用者自己拖。內部 API 沒有文件、隨時會變，不能當成唯一的路。
+
+15. 看板大量 item 的效能：Done 欄只會越來越長，看板與 `list_board` 目前整包讀回、沒有虛擬滾動，卡片又能拖拉。要不要分頁、收合或虛擬滾動，還沒定（S9c 討論時提出）。
 
 ## 待驗證（動手前對現行文件確認）
 
