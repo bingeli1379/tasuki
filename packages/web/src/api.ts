@@ -64,6 +64,31 @@ export interface ItemDetail {
   runs: Run[]
 }
 
+export type Access = 'admin' | 'maintainer' | 'member'
+
+export interface Account {
+  userId: string
+  username: string
+  displayName: string
+  access: Access
+  disabled: boolean
+  createdAt: string
+}
+
+export interface AuthState {
+  // none: nobody signs in; builtin: tasuki keeps the accounts; external: another system does.
+  mode: 'none' | 'builtin' | 'external'
+  needsSetup: boolean
+  me?: Account
+}
+
+export interface ApiToken {
+  id: string
+  name: string
+  expiresAt?: string
+  createdAt: string
+}
+
 export class ApiError extends Error {
   constructor(
     readonly status: number,
@@ -76,6 +101,9 @@ export class ApiError extends Error {
 export async function call<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init)
   const data: unknown = await res.json()
+  // The session ended (its ttl, sign-out elsewhere, a disabled account): back to the sign-in
+  // page. Not for signing in itself, whose 401 is a wrong password.
+  if (res.status === 401 && !path.startsWith('/api/auth/')) location.reload()
   if (!res.ok) throw new ApiError(res.status, data as { error?: string })
   return data as T
 }

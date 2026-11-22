@@ -12,7 +12,18 @@ export default defineConfig({
       colorMode: true,
       icon: {
         clientBundle: {
-          icons: ['i-lucide-radar', 'i-lucide-eye', 'i-lucide-sun', 'i-lucide-moon'],
+          icons: [
+            'i-lucide-radar',
+            'i-lucide-eye',
+            'i-lucide-sun',
+            'i-lucide-moon',
+            'i-lucide-copy',
+            'i-lucide-check',
+            'i-lucide-circle-user',
+            'i-lucide-key-round',
+            'i-lucide-user-check',
+            'i-lucide-user-x',
+          ],
         },
       },
     }),

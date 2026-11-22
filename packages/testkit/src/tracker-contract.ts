@@ -230,6 +230,30 @@ export function describeTrackerContract(name: string, setup: () => Promise<Track
       expect(comments[0]).toEqual(human)
     })
 
+    it('keeps the signed-in person a human comment was written by', async () => {
+      const item = await newItem('author-name')
+      const note = await fixture.tracker.addComment({
+        target: item.ref,
+        author: 'human',
+        authorName: 'Eli Ye',
+        kind: 'note',
+        body: 'mine',
+      })
+      await fixture.tracker.addComment({
+        target: item.ref,
+        author: 'human',
+        authorName: 'Eli Ye',
+        kind: 'system',
+        body: 'Put on hold.',
+      })
+      expect(note).toMatchObject({ author: 'human', authorName: 'Eli Ye', kind: 'note' })
+      const comments = await fixture.tracker.comments(item.ref)
+      expect(comments.map((c) => [c.authorName, c.kind, c.body])).toEqual([
+        ['Eli Ye', 'note', 'mine'],
+        ['Eli Ye', 'system', 'Put on hold.'],
+      ])
+    })
+
     it('comments and attachments leave the version alone', async () => {
       const item = await newItem('version')
       await fixture.tracker.addComment({

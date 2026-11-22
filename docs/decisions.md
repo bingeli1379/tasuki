@@ -68,6 +68,7 @@
 ## D15 auth 是 port，local 預設不登入
 - 決定：`none` / `static` / `http` 三種，session ttl 可設，預設 24 小時。非 loopback 且沒有 auth 時拒絕啟動，除非 `allowInsecure`。
 - 理由：見 security-and-auth.md 的威脅模型。作者曾問是否過嚴，保留，退一步是改成警告。
+- 後續：三種 kind 與 24 小時的預設被 D89 改掉。
 
 ## D16 status 命名
 - 決定：item 是 `refining`、`ready-to-split`、`splitting`、`needs-answers`、`split-review`、`in-progress`、`in-review`、`needs-rework`、`blocked`、`done`。task 是 `to-do`、`in-progress`、`in-review`、`manual`、`done`。
@@ -408,6 +409,7 @@
   - 以帳號計數而不是 IP，不用信任 proxy 帶的 header；不鎖帳號，避免任何人都能把別人鎖在外面。
   - 作者確認目前不需要分權限。
 - 重新檢視：有使用者需要唯讀或只能看部分 item 的角色時；要支援多 instance 時（失敗計數要搬出記憶體）；有人要求 engine 直接對外提供 HTTPS 時。
+- 後續：「不做角色與權限」、`static` 的 scrypt 密碼、24 小時的 ttl、失敗一次就延遲，被 D89 推翻。其他照舊。
 
 ## D61 S3：item 詳情、編輯、markdown、comment 與附件
 - 範圍：作者決定 S3 除了看內容與留言，也做編輯 title 與 body、markdown、附件（上傳、下載、貼進 body）。詳情用置中的 modal。
@@ -787,3 +789,28 @@
 - 沒做的：custom-workflow.md 驗收條件 6 的「假 store plugin 換掉 sqlite、engine 照常跑」。契約已經讓第二個實作有東西可以對，真的第二個實作等 postgres。
 - 實測：`pnpm test` 353 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite 與 jira 共 24 條全過。故意把排序的 `rowid DESC` 改成 `ASC`，store 契約有兩條會紅。
 - 重新檢視：W4 把流程設定加進 `StorePort` 時，看契約會不會大到第三方寫不動（D78 的重新檢視條件）。
+
+## D89 身分與權限分開，三種 access
+
+- 背景：S9 動工前討論（2026-11-22）。作者要部署給公司用，希望有人能在網頁上管帳號、管流程設定，D60 的「登入就有完整權限」不夠。
+- 決定：
+  - auth plugin 只回答身分（`userId`、`displayName`）。access 存在 store，用 `userId` 對，不管帳號是誰管的，指派都在看板上做。
+  - access 三種：`admin` 管帳號、改設定、用系統；`maintainer` 改設定、用系統；`member` 只用系統。設定頁在 W4，在那之前 `maintainer` 與 `member` 實際上一樣。命名跟 workflow 的 role 分開，叫 access。
+  - 內建兩個 auth plugin：`@tasuki/auth-builtin`（帳號與 scrypt 密碼 hash 在 store，admin 在看板上建帳號）與 `@tasuki/auth-http`（登入頁的帳密轉給外部 API）。不登入是省略 `auth`，每個請求當成 `admin`。`static` 拿掉。config 跟其他角色一樣寫 `plugin` 加 `options`，`auth.kind` 拿掉。
+  - 外部帳號第一次登入建成 `member`。停用的帳號 session 與 token 立刻失效；外部帳號只能停用。最後一個 `admin` 不能降級或停用。
+  - 第一個 admin 用 setup token：store 沒有啟用中的 `admin` 時，啟動 log 印一次性 token，builtin 用它建第一個帳號，http 登入後用它升級自己。token 只在記憶體，有 admin 就作廢。
+  - session ttl 預設 7 天。session 記著發出時的 ttl，跟現在的設定不同就失效，所以改 ttl 會讓之前的 cookie 全部失效。
+  - 防暴力：同一個帳號連錯 5 次以內不延遲，第 6 次起 1 秒、2 秒、4 秒加倍到 30 秒。
+  - S9 拆成 S9a（builtin、access、帳號管理、session、CSRF、`Host`、防暴力、個人 API token）與 S9c（http、開放非 loopback）。原本的 S9b（API token）併進 S9a：作者平常用 Claude Code 接 `/mcp`，設了 auth 卻還沒有 token 的話 `/mcp` 整個 401。
+  - 實作時定的：setup token 除了印在 log，也寫進 `<dataDir>/setup-token`（像 Jenkins），E2E 與 container 都讀得到。`Secure` cookie 只在 https 時加。管帳號與 API token 只在看板，不進使用者 MCP（D57 的例外，密碼不該進 AI 的對話紀錄）。Jira 上人寫的 comment 把登入者的名字放進 comment property。密碼至少 8 個字元、不設組合規則；NIST SP 800-63B-4 對只有密碼的登入要求 15 個字元，作者試用後選擇維持 8。builtin 的帳號不另設顯示名，看到的就是帳號名，少一格表單也不會有「改不了名字」的問題；外部帳號照用外部系統給的顯示名（員編與真名常常不同）。
+  - 人的名字不是一個個 use case 傳進去的：server 每個登入的請求用 `AsyncLocalStorage` 記著是誰，交給 use case 的 tracker 包一層，`human` 的 comment 自動帶上 `authorName`。use case 不用改簽名，engine 自己寫的 comment 跑在請求外，不會被蓋上名字。
+  - `Host` 與 `Origin` 檢查不登入時也做，DNS rebinding 與跨站 `POST` 在不登入時最危險。`auth-builtin` 的工廠多拿到 `store`（`AuthContext`）。
+- 理由：
+  - 身分跟權限分開，換 auth plugin（以後的 OIDC、LDAP）不用碰權限；帳號放 store，接自己的 DB 就是換 store plugin（D88）。
+  - `static` 把帳號寫在 config，又在網頁上管 access，兩邊會打架。builtin 取代它，也就不需要產生 hash 的 CLI。
+  - 叫 `builtin` 不叫 `local`：業界較常用 local，但字面容易讀成「本機」，跟不登入的本機用途混在一起（作者選的）。外部的以協定命名，名字本身就代表外部。
+  - 第一個 admin 不讓「第一個打開網頁的人」當，綁在非 loopback 時誰先搶到就是誰的；不用 CLI，container 看 log 比 exec 進去容易。
+  - `auth-http` 不是 SSO，密碼會經過 tasuki。作者的公司情境是登入頁打公司帳密、tasuki 去問公司的 API，所以先做它；公司只開 OIDC 時另做 plugin。
+  - 改 ttl 要在驗證時比對而不是啟動時清，因為 W4 之後 ttl 會在執行中被改。
+- 實測：`pnpm test` 387 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite、jira、auth 共 25 條全過。把「5 次不延遲」改成 4、把「ttl 不同就失效」拿掉，server 測試各有一條會紅。
+- 重新檢視：需要比 `member` 更小的權限（唯讀、只看部分 item）時；公司只提供 OIDC 或 SAML 時；W4 做設定頁時確認 `maintainer` 能改的範圍。

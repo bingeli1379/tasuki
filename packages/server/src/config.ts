@@ -31,6 +31,13 @@ export interface Limits {
   hardGraceSeconds: number
 }
 
+export interface AuthConfig extends PluginRef {
+  // As written, e.g. "7d" or "never": a session issued under another value is over (D89).
+  ttl: string
+  // Unset for never.
+  ttlSeconds?: number
+}
+
 export interface Config {
   configDir: string
   dataDir: string
@@ -47,6 +54,8 @@ export interface Config {
   holdLabel: string
   agents: Record<string, PluginRef>
   rules: Rule[]
+  // Unset: nobody signs in (security-and-auth.md).
+  auth?: AuthConfig
 }
 
 type Raw = Record<string, unknown>
@@ -177,6 +186,21 @@ function pluginRef(value: unknown, path: string): PluginRef {
   if (!isObject(value) || typeof value['plugin'] !== 'string')
     throw new Error(`config ${path}.plugin must be a package name`)
   return { plugin: value['plugin'], options: value['options'] ?? {} }
+}
+
+const UNIT_SECONDS = { m: 60, h: 3600, d: 86400 } as const
+
+function parseAuth(value: unknown): AuthConfig | undefined {
+  if (value === undefined) return undefined
+  const ref = pluginRef(value, 'auth')
+  const session = isObject(value) && isObject(value['session']) ? value['session'] : {}
+  const ttl = session['ttl'] ?? '7d'
+  if (ttl === 'never') return { ...ref, ttl }
+  const match = typeof ttl === 'string' ? /^([1-9]\d*)([mhd])$/.exec(ttl) : null
+  if (typeof ttl !== 'string' || match === null)
+    throw new Error('config auth.session.ttl must be a length such as 30m, 24h, 7d, or "never"')
+  const unit = match[2] as keyof typeof UNIT_SECONDS
+  return { ...ref, ttl, ttlSeconds: Number(match[1]) * UNIT_SECONDS[unit] }
 }
 
 // The checks doctor also runs on rules (config-and-rules.md, 1 to 5 and 11).
@@ -376,5 +400,6 @@ export function loadConfig(path: string): Config {
     holdLabel,
     agents,
     rules,
+    ...(raw['auth'] === undefined ? {} : { auth: parseAuth(raw['auth']) as AuthConfig }),
   }
 }

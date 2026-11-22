@@ -105,4 +105,30 @@ export const STORE_MIGRATIONS: readonly string[] = [
   CREATE INDEX run_by_target ON run(target, started_at DESC);`,
   // W3: the engine names a Run's log file itself; a store on another machine cannot see it.
   `ALTER TABLE run DROP COLUMN log_path;`,
+  // S9 (D89): accounts with their access, sessions and personal API tokens, by hash only.
+  `CREATE TABLE account (
+    user_id       TEXT PRIMARY KEY,
+    username      TEXT NOT NULL UNIQUE,
+    display_name  TEXT NOT NULL,
+    access        TEXT NOT NULL CHECK (access IN ('admin','maintainer','member')),
+    password_hash TEXT,
+    disabled_at   TEXT,
+    created_at    TEXT NOT NULL
+  );
+  CREATE TABLE session (
+    token_hash TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES account(user_id),
+    ttl        TEXT NOT NULL,
+    expires_at TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE api_token (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES account(user_id),
+    name       TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX api_token_by_user ON api_token(user_id);`,
 ]

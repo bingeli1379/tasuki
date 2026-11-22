@@ -1,5 +1,7 @@
 import {
   API_VERSION,
+  type AuthContext,
+  type AuthPort,
   type Plugin,
   type PluginContext,
   type RunnerPort,
@@ -22,7 +24,7 @@ async function step<T>(plugin: string, what: string, run: () => T | Promise<T>):
 
 // Plugins resolve from the config's folder, the way a project resolves its own dependencies.
 // Any failure refuses to start (D48).
-async function load<R extends 'tracker' | 'store' | 'runner'>(
+async function load<R extends 'tracker' | 'store' | 'runner' | 'auth'>(
   name: string,
   configDir: string,
   role: R,
@@ -76,4 +78,14 @@ export async function loadRunner(
 ): Promise<RunnerPort> {
   const runner = await load(name, configDir, 'runner')
   return step(name, 'create runner', () => runner(ctx, options))
+}
+
+export async function loadAuth(
+  name: string,
+  options: unknown,
+  configDir: string,
+  ctx: AuthContext,
+): Promise<AuthPort> {
+  const auth = await load(name, configDir, 'auth')
+  return step(name, 'create auth', () => auth(ctx, options))
 }

@@ -7,7 +7,7 @@ tracker、store、runner、auth 四個角色都可以由第三方寫成 npm 套�
 ## 確認的方向
 
 - plugin 是 in-process 的 npm 套件，與 engine 同一個 process。不做獨立 process 加協定的版本。
-- 四個角色：tracker（對應 TrackerPort）、store（StorePort，engine 自己的狀態：Run 與暫停旗標）、runner（RunnerPort）、auth（AuthPort）。一個套件可以提供一個以上的角色，內建的 `sqlite` 同時是 tracker 與 store（D88）。
+- 四個角色：tracker（對應 TrackerPort）、store（StorePort，engine 自己的狀態：Run、暫停旗標、帳號、session、個人 API token）、runner（RunnerPort）、auth（AuthPort，只回答身分；帳號的 access、session、個人 API token 在 store，D89）。一個套件可以提供一個以上的角色，內建的 `sqlite` 同時是 tracker 與 store（D88）。
 - store 的 migration 由 plugin 自己帶，engine 不寫任何 SQL。
 - 一個技術一個套件：`sqlite`、`jira-cloud`、`claude-cli`、`codex-cli`。不按角色切，因為同一個技術可能同時提供多個角色。
 - `core` 是公開契約。plugin 只相依 `core`，不 import `server` 或其他 plugin。ports 與它們引用的型別都是公開 API，改簽名是 breaking change。
@@ -81,5 +81,5 @@ config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解�
 2. `doctor` 怎麼把檢查委派給 plugin（Jira 的 workflow 轉移檢查、CLI preflight 都是 plugin 才知道的事）。
 3. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。程式目前要求完全相等。
 4. 第三方套件的命名慣例。
-5. `auth` 的三個內建實作怎麼分套件。
+5. （已定，D89）`auth` 的內建實作是 `@tasuki/auth-builtin` 與 `@tasuki/auth-http` 兩個套件；不登入是省略 `auth`，不是一個套件。builtin 讀寫 store 裡的帳號與密碼 hash，所以 `auth` 工廠拿到的 `ctx` 多一個 `store`（`AuthContext`）。
 6. plugin 的錯誤怎麼回報成 `system` comment 或 log，哪些資訊不能外洩（secret）。

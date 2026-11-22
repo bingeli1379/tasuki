@@ -9,7 +9,7 @@
 - engine：Poller、規則比對、Run 管理（lease、取消、復原）、結果驗證與轉移。
 - plugin：tracker、store、runner、auth 四個角色都可以由第三方套件擴充。內建的 sqlite、Jira Cloud、claude-cli、codex-cli 走同一條路（D44，見 plugins.md）。
 - MCP facade（http）。
-- REST API、auth（none、static、http）。
+- REST API、auth（不登入、`auth-builtin`、`auth-http`）與 access（`admin`、`maintainer`、`member`）。
 - 前端：kanban（讀取與拖拉移動）、item 詳情（task、comment、Run）、Run log、Stop 按鈕。
 - CLI：`init`、`doctor`、`start`。
 - 預設規則與預設 prompt。
@@ -18,7 +18,6 @@
 ## 刻意不做
 
 - engine 內建任何 git、GitHub、GitLab 功能，包含自動開 MR（見 workspace-and-git.md）。
-- 角色與權限（RBAC）。登入就有完整權限（D60）。
 
 ## 還沒決定要不要做
 
@@ -55,8 +54,9 @@
 | W1 | status 自訂與角色、`handledBy`、站上給人的 `outcomes`，還在檔案裡設定（已完成，D78、D81，custom-workflow.md） | config 加一站，看板多一欄，眼睛和雷達標對 |
 | W2 | 規則宣告 `outcomes`（`on` 併進來）、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約（已完成，D88） | 行為不變，契約測試多一套 |
-| S9 | auth（`none`、`static`、`http`）、session cookie 與 CSRF、`/mcp` 的個人 API token、登入防暴力、`Host` 檢查（D60） | 登入畫面、ttl 過期、產生與撤銷 token、沒登入打 API 被拒 |
-| W4 | 流程設定進 store、設定頁、熱重載、修改歷史（要 S9 的 auth） | 在網頁上改規則和 prompt，下一輪就生效，看得到誰改了什麼 |
+| S9a | `auth-builtin`、access 與帳號管理、setup token、session cookie 與 CSRF、登入防暴力、`Host` 檢查、`/mcp` 的個人 API token（已完成，D60、D89） | 用 log 裡的 setup token 建第一個 admin、建帳號、改 access、ttl 過期或改 ttl 被踢回登入頁、沒登入打 API 被拒；產生 token 貼進 Claude Code，撤銷後 401 |
+| S9c | `auth-http`、開放非 loopback 綁定（`publicUrl`、`allowInsecure`）（D89） | 用外部帳號登入、第一次登入是 member、admin 升級他 |
+| W4 | 流程設定進 store、設定頁（只給 `admin` 與 `maintainer`）、熱重載、修改歷史（要 S9 的 auth） | 在網頁上改規則和 prompt，下一輪就生效，看得到誰改了什麼 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
 | S12 | codex runner、npm CLI 打包、container image | `init`、`doctor`、`start` 可用 |

@@ -23,6 +23,27 @@ describe('loadConfig', () => {
     expect(config.statuses.task?.['to-do']).toBe('To Do')
   })
 
+  it('has no auth unless one is set, and a session lasts 7 days by default', () => {
+    expect(loadConfig(write('{}')).auth).toBeUndefined()
+    const auth = loadConfig(write('{ "auth": { "plugin": "@tasuki/auth-builtin" } }')).auth
+    expect(auth).toEqual({
+      plugin: '@tasuki/auth-builtin',
+      options: {},
+      ttl: '7d',
+      ttlSeconds: 7 * 86400,
+    })
+  })
+
+  it('takes a ttl in minutes, hours or days, or never, and nothing else', () => {
+    const ttl = (value: string) =>
+      loadConfig(write(JSON.stringify({ auth: { plugin: 'x', session: { ttl: value } } }))).auth
+    expect(ttl('90m')?.ttlSeconds).toBe(5400)
+    expect(ttl('24h')?.ttlSeconds).toBe(86400)
+    expect(ttl('never')).toEqual({ plugin: 'x', options: {}, ttl: 'never' })
+    for (const bad of ['7', '0d', '1w', '1.5h'])
+      expect(() => ttl(bad)).toThrow('config auth.session.ttl')
+  })
+
   it('leaves splitting off the default mapping unless a rule claims it', () => {
     expect(loadConfig(write('{}')).statuses.item?.['splitting']).toBeUndefined()
     const claiming = write(

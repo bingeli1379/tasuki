@@ -1,3 +1,4 @@
+import type { AuthPort } from './ports/auth'
 import type { Clock } from './ports/clock'
 import type { RunnerPort } from './ports/runner'
 import type { StorePort } from './ports/store'
@@ -26,12 +27,20 @@ export type RunnerFactory = (
   options: unknown,
 ) => RunnerPort | Promise<RunnerPort>
 
+// auth-builtin keeps its accounts in the engine's store.
+export interface AuthContext extends PluginContext {
+  store: StorePort
+}
+
+export type AuthFactory = (ctx: AuthContext, options: unknown) => AuthPort | Promise<AuthPort>
+
 export interface Plugin {
   name: string
   apiVersion: number
   tracker?: TrackerFactory
   store?: StoreFactory
   runner?: RunnerFactory
+  auth?: AuthFactory
 }
 
 export function definePlugin(plugin: Plugin): Plugin {

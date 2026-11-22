@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import type { Roles } from '@tasuki/core'
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
-import { ApiError, call, messageOf, sendJson, type Item } from './api'
+import { ApiError, call, messageOf, sendJson, type Account, type AuthState, type Item } from './api'
+import AccountMenu from './components/AccountMenu.vue'
 import ItemDetail from './components/ItemDetail.vue'
+import SignIn from './components/SignIn.vue'
 import { EDITOR_PROPS, EDITOR_TOOLBAR, MARKDOWN_OPTIONS, toStoredMarkdown } from './editor'
 import { previewText } from './markdown'
 
@@ -23,6 +25,9 @@ const HANDLED_BY = {
   },
   person: { icon: 'i-lucide-eye', color: 'text-warning', hint: 'Waiting for a person' },
 } as const
+
+const auth = ref<AuthState>()
+const signedIn = computed(() => auth.value?.mode === 'none' || auth.value?.me !== undefined)
 
 const columns = ref<Column[]>([])
 // Refs an agent is working on right now, and of those the ones told to stop.
@@ -146,6 +151,7 @@ const wrote = (): void => {
   lastWrite = Date.now()
 }
 function reload(): void {
+  if (!signedIn.value) return
   if (document.hidden || dragging.value || pending.value.length > 0) return
   if (Date.now() - lastWrite < REFRESH_MS) return
   void load()
@@ -338,266 +344,291 @@ function toggleTheme(e: MouseEvent): void {
   else document.startViewTransition(apply)
 }
 
-onMounted(load)
+async function start(): Promise<void> {
+  try {
+    auth.value = await call<AuthState>('/api/auth/state')
+  } catch (e) {
+    error.value = messageOf(e)
+    auth.value = { mode: 'none', needsSetup: false }
+  }
+  if (signedIn.value) await load()
+}
+
+function enter(me: Account): void {
+  if (auth.value) auth.value = { ...auth.value, needsSetup: false, me }
+  void load()
+}
+
+onMounted(start)
 </script>
 
 <template>
   <UApp>
-    <div class="flex min-h-screen flex-col bg-muted">
-      <header class="flex items-center justify-between px-6 pt-5 pb-3">
-        <h1
-          class="flex items-center gap-3 text-2xl font-extrabold tracking-tight text-highlighted"
-          style="font-stretch: 78%"
-        >
-          <span aria-hidden="true" class="block h-6 w-2.5 -skew-x-[28deg] rounded-[3px] bg-sash" />
-          Tasuki
-        </h1>
-        <span class="flex items-center gap-2">
-          <UButton
-            :icon="dark ? 'i-lucide-sun' : 'i-lucide-moon'"
-            :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
-            color="neutral"
-            variant="ghost"
-            @click="toggleTheme"
-          />
-          <UButton
-            v-if="paused"
-            label="Resume"
-            color="neutral"
-            variant="outline"
-            @click="setPaused('resume')"
-          />
-          <UDropdownMenu
-            v-else
-            :content="{ align: 'end' }"
-            :ui="{ itemLeadingIcon: 'size-4' }"
-            :items="[
-              { label: 'Pause', onSelect: () => setPaused('pause') },
-              {
-                label: 'Pause and stop all agents',
-                color: 'error',
-                onSelect: () => setPaused('kill'),
-              },
-            ]"
+    <SignIn v-if="auth && !signedIn" :state="auth" @signed-in="enter" />
+    <template v-else-if="auth">
+      <div class="flex min-h-screen flex-col bg-muted">
+        <header class="flex items-center justify-between px-6 pt-5 pb-3">
+          <h1
+            class="flex items-center gap-3 text-2xl font-extrabold tracking-tight text-highlighted"
+            style="font-stretch: 78%"
           >
+            <span
+              aria-hidden="true"
+              class="block h-6 w-2.5 -skew-x-[28deg] rounded-[3px] bg-sash"
+            />
+            <!-- On a phone the sash alone, so the buttons fit on one line. -->
+            <span class="sr-only sm:not-sr-only">Tasuki</span>
+          </h1>
+          <span class="flex items-center gap-2">
             <UButton
-              label="Pause"
+              :icon="dark ? 'i-lucide-sun' : 'i-lucide-moon'"
+              :aria-label="dark ? 'Switch to light mode' : 'Switch to dark mode'"
+              color="neutral"
+              variant="ghost"
+              @click="toggleTheme"
+            />
+            <UButton
+              v-if="paused"
+              label="Resume"
               color="neutral"
               variant="outline"
-              trailing-icon="i-lucide-chevron-down"
+              @click="setPaused('resume')"
             />
-          </UDropdownMenu>
-          <UModal v-model:open="open" title="New item" :ui="{ content: 'sm:max-w-3xl' }">
-            <UButton label="New item" />
-            <template #body>
-              <!-- Only the title is a form, so Enter there creates the item; the editor toolbar
-                 buttons would submit a form around them. -->
-              <div class="flex flex-col gap-4">
-                <form @submit.prevent="create">
-                  <UFormField label="Title" required>
-                    <UInput v-model="title" required autofocus class="w-full" />
-                  </UFormField>
-                </form>
-                <div class="flex flex-col gap-1">
-                  <span class="text-sm font-medium">Body</span>
-                  <UEditor
-                    v-slot="{ editor }"
-                    v-model="body"
-                    content-type="markdown"
-                    :markdown="MARKDOWN_OPTIONS"
-                    :image="false"
-                    :mention="false"
-                    :editor-props="EDITOR_PROPS"
-                    class="rounded-md border border-default"
-                    :ui="newItemEditorUi"
-                  >
-                    <UEditorToolbar
-                      :editor="editor"
-                      :items="EDITOR_TOOLBAR"
-                      class="border-b border-default px-2 py-1"
-                    />
-                  </UEditor>
-                </div>
-                <UButton
-                  label="Create"
-                  :loading="saving"
-                  :disabled="title.trim() === ''"
-                  class="self-end"
-                  @click="create"
-                />
-              </div>
-            </template>
-          </UModal>
-        </span>
-      </header>
-
-      <main class="flex flex-1 flex-col px-6 pt-2 pb-6">
-        <UAlert v-if="error" color="error" variant="subtle" :title="error" class="mb-4" />
-        <UAlert
-          v-if="paused"
-          color="warning"
-          variant="subtle"
-          title="The engine is paused: no agent starts on any item until you resume it."
-          class="mb-4"
-        />
-
-        <p v-if="!loaded && !error" class="flex items-center gap-2 text-sm text-muted">
-          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
-          Loading the board…
-        </p>
-        <div
-          ref="boardEl"
-          class="scrollbar-always flex flex-1 items-stretch gap-4 overflow-x-auto p-1 pb-4"
-          @dragover="edgeScroll"
-        >
-          <section
-            v-for="column in columns"
-            :key="column.status"
-            :aria-labelledby="`column-${column.status}`"
-            class="flex w-72 shrink-0 flex-col gap-2 rounded-2xl p-2.5 transition-[background-color,box-shadow] duration-200"
-            :class="target === column.status ? 'bg-primary/10 ring-2 ring-primary' : 'bg-(--lane)'"
-            @dragenter.prevent="over = column.status"
-            @dragleave="leave($event, column.status)"
-            @dragover.prevent
-            @drop.prevent="drop(column.status)"
-          >
-            <h2
-              class="flex items-center justify-between px-1.5 pt-1 pb-1 text-[15px] font-semibold"
+            <UDropdownMenu
+              v-else
+              :content="{ align: 'start' }"
+              :ui="{ itemLeadingIcon: 'size-4' }"
+              :items="[
+                { label: 'Pause', onSelect: () => setPaused('pause') },
+                {
+                  label: 'Pause and stop all agents',
+                  color: 'error',
+                  onSelect: () => setPaused('kill'),
+                },
+              ]"
             >
-              <span class="flex items-center gap-1.5">
-                <UTooltip
-                  v-if="column.handledBy"
-                  :text="HANDLED_BY[column.handledBy].hint"
-                  :delay-duration="100"
-                >
-                  <span
-                    role="img"
-                    :aria-label="HANDLED_BY[column.handledBy].hint"
-                    class="flex cursor-help"
-                  >
-                    <UIcon
-                      :name="HANDLED_BY[column.handledBy].icon"
-                      class="size-4"
-                      :class="HANDLED_BY[column.handledBy].color"
-                    />
-                  </span>
-                </UTooltip>
-                <span :id="`column-${column.status}`">{{ column.displayName }}</span>
-              </span>
-              <span class="text-sm font-medium text-dimmed">{{ column.items.length }}</span>
-            </h2>
-            <TransitionGroup name="card" tag="div" class="flex flex-col gap-2">
-              <article
-                v-for="item in column.items"
-                :key="item.ref"
-                :aria-label="item.title"
-                :draggable="!pending.includes(item.ref)"
-                class="card-frame rounded-[calc(var(--radius-xl)+1.5px)] p-[1.5px] transition-colors duration-150"
-                :class="{
-                  'opacity-60': pending.includes(item.ref),
-                  'agent-ring': running.includes(item.ref),
-                  'agent-ring-stopping': stopping.includes(item.ref),
-                }"
-                @dragstart="dragging = item"
-                @dragend="((dragging = undefined), (over = undefined))"
-              >
-                <div
-                  class="relative rounded-xl bg-default p-3 shadow-[0_1px_2px_rgb(22_26_46/0.06)]"
-                >
-                  <div class="flex items-center justify-between">
-                    <p class="flex items-center gap-2 text-xs text-muted">
-                      <span class="font-medium text-dimmed">{{ item.ref }}</span>
-                      <UBadge
-                        v-if="running.includes(item.ref)"
-                        :label="stopping.includes(item.ref) ? 'Stopping' : 'Running'"
-                        :color="stopping.includes(item.ref) ? 'error' : 'primary'"
-                        variant="subtle"
-                        size="sm"
+              <UButton
+                label="Pause"
+                color="neutral"
+                variant="outline"
+                trailing-icon="i-lucide-chevron-down"
+              />
+            </UDropdownMenu>
+            <UModal v-model:open="open" title="New item" :ui="{ content: 'sm:max-w-3xl' }">
+              <UButton label="New item" />
+              <template #body>
+                <!-- Only the title is a form, so Enter there creates the item; the editor toolbar
+                 buttons would submit a form around them. -->
+                <div class="flex flex-col gap-4">
+                  <form @submit.prevent="create">
+                    <UFormField label="Title" required>
+                      <UInput v-model="title" required autofocus class="w-full" />
+                    </UFormField>
+                  </form>
+                  <div class="flex flex-col gap-1">
+                    <span class="text-sm font-medium">Body</span>
+                    <UEditor
+                      v-slot="{ editor }"
+                      v-model="body"
+                      content-type="markdown"
+                      :markdown="MARKDOWN_OPTIONS"
+                      :image="false"
+                      :mention="false"
+                      :editor-props="EDITOR_PROPS"
+                      class="rounded-md border border-default"
+                      :ui="newItemEditorUi"
+                    >
+                      <UEditorToolbar
+                        :editor="editor"
+                        :items="EDITOR_TOOLBAR"
+                        class="border-b border-default px-2 py-1"
                       />
-                      <UBadge
-                        v-if="item.labels.includes(holdLabel)"
-                        label="On hold"
-                        color="warning"
-                        variant="subtle"
-                        size="sm"
-                      />
-                      <UBadge
-                        v-if="tasks[item.ref]"
-                        :label="`${tasks[item.ref]?.done}/${tasks[item.ref]?.total} tasks`"
-                        color="neutral"
-                        variant="outline"
-                        size="sm"
-                      />
-                    </p>
+                    </UEditor>
                   </div>
-                  <!-- Its ::after covers the whole card, so a click anywhere opens the item while
+                  <UButton
+                    label="Create"
+                    :loading="saving"
+                    :disabled="title.trim() === ''"
+                    class="self-end"
+                    @click="create"
+                  />
+                </div>
+              </template>
+            </UModal>
+            <AccountMenu v-if="auth.mode !== 'none' && auth.me" :me="auth.me" :mode="auth.mode" />
+          </span>
+        </header>
+
+        <main class="flex flex-1 flex-col px-6 pt-2 pb-6">
+          <UAlert v-if="error" color="error" variant="subtle" :title="error" class="mb-4" />
+          <UAlert
+            v-if="paused"
+            color="warning"
+            variant="subtle"
+            title="The engine is paused: no agent starts on any item until you resume it."
+            class="mb-4"
+          />
+
+          <p v-if="!loaded && !error" class="flex items-center gap-2 text-sm text-muted">
+            <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+            Loading the board…
+          </p>
+          <div
+            ref="boardEl"
+            class="scrollbar-always flex flex-1 items-stretch gap-4 overflow-x-auto p-1 pb-4"
+            @dragover="edgeScroll"
+          >
+            <section
+              v-for="column in columns"
+              :key="column.status"
+              :aria-labelledby="`column-${column.status}`"
+              class="flex w-72 shrink-0 flex-col gap-2 rounded-2xl p-2.5 transition-[background-color,box-shadow] duration-200"
+              :class="
+                target === column.status ? 'bg-primary/10 ring-2 ring-primary' : 'bg-(--lane)'
+              "
+              @dragenter.prevent="over = column.status"
+              @dragleave="leave($event, column.status)"
+              @dragover.prevent
+              @drop.prevent="drop(column.status)"
+            >
+              <h2
+                class="flex items-center justify-between px-1.5 pt-1 pb-1 text-[15px] font-semibold"
+              >
+                <span class="flex items-center gap-1.5">
+                  <UTooltip
+                    v-if="column.handledBy"
+                    :text="HANDLED_BY[column.handledBy].hint"
+                    :delay-duration="100"
+                  >
+                    <span
+                      role="img"
+                      :aria-label="HANDLED_BY[column.handledBy].hint"
+                      class="flex cursor-help"
+                    >
+                      <UIcon
+                        :name="HANDLED_BY[column.handledBy].icon"
+                        class="size-4"
+                        :class="HANDLED_BY[column.handledBy].color"
+                      />
+                    </span>
+                  </UTooltip>
+                  <span :id="`column-${column.status}`">{{ column.displayName }}</span>
+                </span>
+                <span class="text-sm font-medium text-dimmed">{{ column.items.length }}</span>
+              </h2>
+              <TransitionGroup name="card" tag="div" class="flex flex-col gap-2">
+                <article
+                  v-for="item in column.items"
+                  :key="item.ref"
+                  :aria-label="item.title"
+                  :draggable="!pending.includes(item.ref)"
+                  class="card-frame rounded-[calc(var(--radius-xl)+1.5px)] p-[1.5px] transition-colors duration-150"
+                  :class="{
+                    'opacity-60': pending.includes(item.ref),
+                    'agent-ring': running.includes(item.ref),
+                    'agent-ring-stopping': stopping.includes(item.ref),
+                  }"
+                  @dragstart="dragging = item"
+                  @dragend="((dragging = undefined), (over = undefined))"
+                >
+                  <div
+                    class="relative rounded-xl bg-default p-3 shadow-[0_1px_2px_rgb(22_26_46/0.06)]"
+                  >
+                    <div class="flex items-center justify-between">
+                      <p class="flex items-center gap-2 text-xs text-muted">
+                        <span class="font-medium text-dimmed">{{ item.ref }}</span>
+                        <UBadge
+                          v-if="running.includes(item.ref)"
+                          :label="stopping.includes(item.ref) ? 'Stopping' : 'Running'"
+                          :color="stopping.includes(item.ref) ? 'error' : 'primary'"
+                          variant="subtle"
+                          size="sm"
+                        />
+                        <UBadge
+                          v-if="item.labels.includes(holdLabel)"
+                          label="On hold"
+                          color="warning"
+                          variant="subtle"
+                          size="sm"
+                        />
+                        <UBadge
+                          v-if="tasks[item.ref]"
+                          :label="`${tasks[item.ref]?.done}/${tasks[item.ref]?.total} tasks`"
+                          color="neutral"
+                          variant="outline"
+                          size="sm"
+                        />
+                      </p>
+                    </div>
+                    <!-- Its ::after covers the whole card, so a click anywhere opens the item while
                      keyboard users still get one focusable button; moving without dragging is
                      in the item's own More menu. -->
-                  <button
-                    type="button"
-                    class="mt-1 cursor-pointer text-left leading-snug font-semibold text-highlighted after:absolute after:inset-0 after:rounded-xl hover:text-primary focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary"
-                    @click="openDetail(item)"
-                  >
-                    {{ item.title }}
-                  </button>
-                  <p v-if="item.body" class="mt-1 line-clamp-3 text-sm text-muted">
-                    {{ previewText(item.body) }}
-                  </p>
-                </div>
-              </article>
-            </TransitionGroup>
-            <div
-              v-if="target === column.status"
-              class="rounded-md border-2 border-dashed border-primary p-3 text-center text-sm text-primary"
-            >
-              Drop here
-            </div>
-          </section>
-        </div>
-      </main>
-    </div>
-    <!-- Keyed: each item gets a fresh editor, whose image extension is bound to its ref. -->
-    <ItemDetail
-      v-if="detailRef && roles"
-      :key="detailRef"
-      v-model:open="detailOpen"
-      :item-ref="detailRef"
-      :status-name="statusName"
-      :hold-label="holdLabel"
-      :initial="detailItem"
-      :seen="detailSeen"
-      :columns="columns"
-      :roles="roles"
-      @updated="updated"
-      @move="(to) => detailItem && move(detailItem, to)"
-      @deleted="deleted"
-    />
-    <!-- After ItemDetail: opened from its More menu, it has to sit above the detail. -->
-    <UModal
-      v-model:open="reworkOpen"
-      :title="`Send ${reworkOf?.ref ?? ''} back for rework`"
-      description="The agent makes new tasks from this alone, so say what is wrong and what you expect."
-    >
-      <template #body>
-        <form class="flex flex-col gap-3" @submit.prevent="sendRework">
-          <UFormField label="What to rework">
-            <UTextarea v-model="reworkNote" :rows="4" autoresize autofocus class="w-full" />
-          </UFormField>
-          <span class="flex justify-end gap-2">
-            <UButton
-              label="Cancel"
-              color="neutral"
-              variant="outline"
-              @click="reworkOf = undefined"
-            />
-            <UButton
-              type="submit"
-              label="Send back for rework"
-              :disabled="reworkNote.trim() === ''"
-            />
-          </span>
-        </form>
-      </template>
-    </UModal>
+                    <button
+                      type="button"
+                      class="mt-1 cursor-pointer text-left leading-snug font-semibold text-highlighted after:absolute after:inset-0 after:rounded-xl hover:text-primary focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary"
+                      @click="openDetail(item)"
+                    >
+                      {{ item.title }}
+                    </button>
+                    <p v-if="item.body" class="mt-1 line-clamp-3 text-sm text-muted">
+                      {{ previewText(item.body) }}
+                    </p>
+                  </div>
+                </article>
+              </TransitionGroup>
+              <div
+                v-if="target === column.status"
+                class="rounded-md border-2 border-dashed border-primary p-3 text-center text-sm text-primary"
+              >
+                Drop here
+              </div>
+            </section>
+          </div>
+        </main>
+      </div>
+      <!-- Keyed: each item gets a fresh editor, whose image extension is bound to its ref. -->
+      <ItemDetail
+        v-if="detailRef && roles"
+        :key="detailRef"
+        v-model:open="detailOpen"
+        :item-ref="detailRef"
+        :status-name="statusName"
+        :hold-label="holdLabel"
+        :initial="detailItem"
+        :seen="detailSeen"
+        :columns="columns"
+        :roles="roles"
+        @updated="updated"
+        @move="(to) => detailItem && move(detailItem, to)"
+        @deleted="deleted"
+      />
+      <!-- After ItemDetail: opened from its More menu, it has to sit above the detail. -->
+      <UModal
+        v-model:open="reworkOpen"
+        :title="`Send ${reworkOf?.ref ?? ''} back for rework`"
+        description="The agent makes new tasks from this alone, so say what is wrong and what you expect."
+      >
+        <template #body>
+          <form class="flex flex-col gap-3" @submit.prevent="sendRework">
+            <UFormField label="What to rework">
+              <UTextarea v-model="reworkNote" :rows="4" autoresize autofocus class="w-full" />
+            </UFormField>
+            <span class="flex justify-end gap-2">
+              <UButton
+                label="Cancel"
+                color="neutral"
+                variant="outline"
+                @click="reworkOf = undefined"
+              />
+              <UButton
+                type="submit"
+                label="Send back for rework"
+                :disabled="reworkNote.trim() === ''"
+              />
+            </span>
+          </form>
+        </template>
+      </UModal>
+    </template>
   </UApp>
 </template>

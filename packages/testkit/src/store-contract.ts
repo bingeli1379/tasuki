@@ -200,5 +200,102 @@ export function describeStoreContract(
       await store.setPaused(false)
       expect(await store.isPaused()).toBe(false)
     })
+
+    const newAccount = (userId: string, username = userId) => ({
+      userId,
+      username,
+      displayName: `Name of ${userId}`,
+      access: 'member' as const,
+    })
+
+    it('accounts start enabled, stamped from the clock, listed oldest first', async () => {
+      await store.createAccount({ ...newAccount('u2'), access: 'admin' })
+      now += 1000
+      await store.createAccount(newAccount('u1'))
+      expect(await store.getAccount('u2')).toEqual({
+        userId: 'u2',
+        username: 'u2',
+        displayName: 'Name of u2',
+        access: 'admin',
+        disabled: false,
+        createdAt: at(T0),
+      })
+      expect((await store.findAccount('u1'))?.userId).toBe('u1')
+      expect(await store.findAccount('nobody')).toBeUndefined()
+      expect(await store.getAccount('nobody')).toBeUndefined()
+      expect((await store.listAccounts()).map((a) => a.userId)).toEqual(['u2', 'u1'])
+    })
+
+    it('a taken userId or username is InvalidInput', async () => {
+      await store.createAccount(newAccount('u1', 'eli'))
+      await expect(store.createAccount(newAccount('u1', 'other'))).rejects.toThrow(InvalidInput)
+      await expect(store.createAccount(newAccount('u2', 'eli'))).rejects.toThrow(InvalidInput)
+    })
+
+    it('updateAccount changes only what it is given, and NotFound for an unknown one', async () => {
+      await store.createAccount(newAccount('u1'))
+      expect(await store.updateAccount('u1', { access: 'maintainer' })).toMatchObject({
+        access: 'maintainer',
+        displayName: 'Name of u1',
+        disabled: false,
+      })
+      expect(await store.updateAccount('u1', { disabled: true, displayName: 'New' })).toMatchObject(
+        {
+          access: 'maintainer',
+          displayName: 'New',
+          disabled: true,
+        },
+      )
+      expect((await store.updateAccount('u1', { disabled: false })).disabled).toBe(false)
+      await expect(store.updateAccount('nobody', { access: 'admin' })).rejects.toThrow(NotFound)
+    })
+
+    it('keeps a password hash only when one is given or set', async () => {
+      await store.createAccount(newAccount('u1'))
+      await store.createAccount({ ...newAccount('u2'), passwordHash: 'h2' })
+      expect(await store.passwordHash('u1')).toBeUndefined()
+      expect(await store.passwordHash('u2')).toBe('h2')
+      await store.setPasswordHash('u1', 'h1')
+      expect(await store.passwordHash('u1')).toBe('h1')
+      expect(await store.getAccount('u1')).not.toHaveProperty('passwordHash')
+    })
+
+    it('sessions are found by their hash and gone once deleted', async () => {
+      await store.createAccount(newAccount('u1'))
+      await store.createSession('s1', { userId: 'u1', ttl: '7d', expiresAt: at(T0 + 5000) })
+      await store.createSession('s2', { userId: 'u1', ttl: 'never' })
+      expect(await store.getSession('s1')).toEqual({
+        userId: 'u1',
+        ttl: '7d',
+        expiresAt: at(T0 + 5000),
+        createdAt: at(T0),
+      })
+      expect(await store.getSession('s2')).toEqual({
+        userId: 'u1',
+        ttl: 'never',
+        createdAt: at(T0),
+      })
+      await store.deleteSession('s1')
+      expect(await store.getSession('s1')).toBeUndefined()
+      expect(await store.getSession('s2')).toBeDefined()
+    })
+
+    it('API tokens are found by their hash, listed per person oldest first, and deleted by id', async () => {
+      await store.createAccount(newAccount('u1'))
+      await store.createAccount(newAccount('u2'))
+      const a = await store.createApiToken('ha', { userId: 'u1', name: 'laptop' })
+      const b = await store.createApiToken('hb', {
+        userId: 'u1',
+        name: 'ci',
+        expiresAt: at(T0 + 9000),
+      })
+      await store.createApiToken('hc', { userId: 'u2', name: 'other' })
+      expect(a).toEqual({ id: expect.any(String), userId: 'u1', name: 'laptop', createdAt: at(T0) })
+      expect(await store.apiTokenByHash('hb')).toEqual(b)
+      expect((await store.apiTokensOf('u1')).map((t) => t.name)).toEqual(['laptop', 'ci'])
+      await store.deleteApiToken(a.id)
+      expect(await store.apiTokenByHash('ha')).toBeUndefined()
+      expect((await store.apiTokensOf('u1')).map((t) => t.name)).toEqual(['ci'])
+    })
   })
 }

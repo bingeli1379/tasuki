@@ -9,7 +9,9 @@
 
   "server": { "host": "127.0.0.1", "port": 8787, "allowInsecure": false },
 
-  "auth": { "kind": "none" },
+  // Left out, nobody signs in. auth-builtin keeps the accounts in tasuki; the first admin
+  // comes from the setup token in the start-up log (security-and-auth.md).
+  // "auth": { "plugin": "@tasuki/auth-builtin", "session": { "ttl": "7d" } },
 
   // refPrefix: sqlite refs become TSK-1, TSK-2... Default "TSK".
   "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },

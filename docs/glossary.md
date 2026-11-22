@@ -30,7 +30,7 @@
 |---|---|
 | engine | 單一 process，包含 API、Poller、規則比對、派工、結果處理。 |
 | tracker | item、task、dependency、comment 住的地方，plugin 的一個角色。sqlite 或 Jira 二選一，兩邊不同步。 |
-| store | engine 自己的狀態（Run、paused 旗標），plugin 的一個角色。預設 sqlite，Jira 模式也有（D88）。 |
+| store | engine 自己的狀態（Run、paused 旗標、帳號的 access、session、個人 API token），plugin 的一個角色。預設 sqlite，Jira 模式也有（D88）。 |
 | Poller | 定時掃描 tracker 的驅動端，不是核心，只是定時呼叫 use case 的人。 |
 | rule | config 裡的一條規則：監看某個 status，命中就跑某個 agent，依 outcome 轉 status。 |
 | claim status | rule 認領 item 之後 item 暫停的 status，純粹顯示用。可以沒有。 |
@@ -53,6 +53,9 @@
 | fake runner | `@tasuki/fake-runner`，不叫 LLM 的假 agent，照 item 標題裡的 `[fake:<verdict>]` 回報結果（規則有這個結果時），沒有標記時先建兩張 task 再回報 `succeeded`，review 時留一則 note 再回報規則的第一個結果，拿來試 engine 與跑 E2E（D63、D65）。 |
 | MCP facade | engine 提供給 agent 的 MCP 入口，背後呼叫 use case。 |
 | 使用者 MCP | engine 在 `/mcp` 提供給使用者自己的 AI client（Claude Code、Codex）的 MCP 入口，身分是使用者，能做的事跟看板一樣（D57）。 |
+| access | 帳號的權限：`admin`（管帳號、改設定、用系統）、`maintainer`（改設定、用系統）、`member`（用系統）。存在 store，跟帳號由誰管無關（D89）。跟 workflow 的 role 是兩回事。 |
+| setup token | store 裡沒有 `admin` 時 engine 印在啟動 log 的一次性 token，用來建立或升級第一個 `admin`（D89）。 |
+| 個人 API token | 使用者在看板上產生、給 `/mcp` 用的 Bearer token，存 hash、可撤銷，權限跟著產生它的人（D60）。 |
 | run token | 每個 Run 發一個的 token，綁定該 item 與底下的 task，Run 結束就失效。 |
 | M1 / M2 | M1 是 task 只是紀錄、由 orchestrator 自己排程。M2 是 engine 依賴圖排程 task，每個 task 一次 Run。先做 M1，M2 排在後面的切片（plan.md）。 |
 

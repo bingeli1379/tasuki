@@ -1,6 +1,6 @@
 # Security and auth
 
-狀態：已確認。loopback 檢查作者曾問過是否過嚴，見該節。
+狀態：已確認。loopback 檢查作者曾問過是否過嚴，見該節。身分與權限一節依 D89 改寫，port 簽名是草稿。
 
 ## 威脅模型
 
@@ -13,49 +13,87 @@
 ## Server 綁定
 
 - `server.host` 預設 `127.0.0.1`。
-- 啟動檢查：`host` 不是 loopback、`auth.kind` 是 `none`、而且沒設 `server.allowInsecure: true`，就拒絕啟動並說明原因。
+- 啟動檢查：`host` 不是 loopback、沒設 `auth`、而且沒設 `server.allowInsecure: true`，就拒絕啟動並說明原因。
 - 這只是一個啟動檢查，成本很低，理由是上面的威脅模型。作者問過是否太嚴。若要放寬，退一步是改成啟動時大聲警告，仍建議保留拒絕啟動。
 - Docker：容器內本來就要綁 `0.0.0.0`，所以 compose 範例要明寫 `allowInsecure` 或設 auth，並且 host 端的 port 只開在 `127.0.0.1`。
 - engine 自己不做 TLS。綁在非 loopback 的部署一律放在負責 HTTPS 的 reverse proxy 或 ingress 後面，engine 只聽 proxy 轉進來的 HTTP。理由：公司環境本來就有一層 proxy，憑證在那裡管理與更新；engine 自己做 TLS 只會多一份要輪替的憑證（D60）。
 - `server.publicUrl`：使用者從瀏覽器打開的網址，例如 `https://tasuki.example.com`。`host` 不是 loopback 時必填，而且必須是 `https`，否則拒絕啟動。`Host` header 與 `Origin` 的檢查都拿它來比對。
 
-## Auth port
+## 身分與權限
+
+「你是誰」與「你能做什麼」分開管（D89）：
+
+- 身分交給 auth plugin。它只回答這組帳密是不是某個人，回傳 `userId` 與 `displayName`。
+- 權限一律放在 tasuki 的 store，用 `userId` 對到一個 access。不管帳號是 tasuki 自己管還是外部管，指派都在看板上做。
 
 ```ts
+// draft; the code is the source once it exists
 interface AuthPort {
-  login(credentials: unknown): Promise<Identity>
-  verify(sessionToken: string): Promise<Identity | undefined>
+  login(credentials: { username: string; password: string }): Promise<Identity | undefined>
 }
 ```
 
-| kind | 行為 |
+auth 是 plugin 的一個角色，config 寫法跟其他角色一樣（`plugin` 加 `options`）。省略 `auth` 就是不登入。
+
+| plugin | 帳號在哪 | 行為 |
+|---|---|---|
+| 省略 | 沒有帳號 | 不登入，本機用。每個請求都當成 `admin`，看板不顯示管理帳號的頁面。 |
+| `@tasuki/auth-builtin` | tasuki 的 store | tasuki 自己管帳號：`admin` 在看板上建帳號、重設密碼。不提供預設帳號或預設密碼。帳號沒有另外的顯示名，大家看到的就是帳號名。 |
+| `@tasuki/auth-http` | 外部系統 | 登入頁收到的帳密轉給使用者提供的 API。契約草稿：`POST <url>` 帶 `{ username, password }`，成功回 `200 { userId, displayName }`，失敗回 4xx。 |
+
+`auth-http` 不是 SSO：使用者每次都在 tasuki 的登入頁打帳密，密碼會經過 tasuki，所以非 loopback 時一定要在 HTTPS proxy 後面，engine 也不把它寫進 log。公司只開 OIDC 或 SAML 時，另做一個 `auth-oidc` 之類的 plugin，權限那一半不用動。
+
+### access
+
+| access | 能做的事 |
 |---|---|
-| `none` | 不登入。local 預設。 |
-| `static` | 設定檔裡寫帳號與密碼。不提供預設密碼，要用就必須自己設。 |
-| `http` | 呼叫使用者提供的驗證 API。契約草稿：`POST <url>` 帶 credentials，成功回 `200 { userId, displayName }`，失敗回 4xx。 |
+| `admin` | 下面全部，加上管帳號：建帳號、重設密碼（builtin）、改別人的 access、停用帳號。 |
+| `maintainer` | 下面全部，加上改流程設定（stage、規則、prompt）。 |
+| `member` | 用看板與 `/mcp` 做所有操作：建 item、移動、留言、Stop、hold、刪 item。 |
+
+- 流程設定目前還在 config 檔裡，網頁上沒有設定頁，所以 W4 之前 `maintainer` 與 `member` 實際上一樣。設定頁只給 `admin` 與 `maintainer` 這條跟 W4 一起做。
+- 外部帳號第一次登入成功時，store 建一筆帳號，access 是 `member`。之後由 `admin` 升級。
+- 停用的帳號不能登入，它的 session 與個人 API token 立刻失效。外部帳號只能停用不能刪，刪了下次登入又會建回來。
+- 最後一個 `admin` 不能被降級或停用，不然就沒有人能管帳號了。
+- 身分用來記錄操作者：人寫的 comment 與按鈕留的 `system` 紀錄帶登入者的顯示名（`authorName`）。Jira 上 tasuki 寫的 comment 都顯示 engine 的帳號，所以名字放在 comment property `tasuki` 的 `name`，看板讀它；Jira 網頁照樣顯示 engine 的帳號。
+- 管帳號（建帳號、重設密碼、改 access、停用）與個人 API token 只在看板上做，不進使用者 MCP，是 D57 的例外：重設密碼走 MCP，密碼就會留在 AI 的對話紀錄裡。
+
+### 第一個 admin
+
+builtin 與 http 用同一招：
+
+1. engine 啟動時發現 store 裡沒有任何啟用中的 `admin`，就產生一次性的 setup token，印在啟動 log，也寫進 `<dataDir>/setup-token`（權限 600）。跟 Jenkins 的 initialAdminPassword 一樣，container 的主人看 log 或讀檔都拿得到。
+2. builtin：在登入頁貼 setup token，建第一個帳號，它就是 `admin`。http：先用外部帳號登入，再貼 setup token 把自己升成 `admin`。
+3. 有 `admin` 之後 token 立刻作廢，檔案也刪掉。engine 重啟時如果還是沒有 `admin`，就再產生一個新的；已經有 `admin` 時啟動會把殘留的檔案刪掉。
+
+不讓「第一個打開網頁的人自動變 admin」，因為綁在非 loopback 時誰先搶到就是誰的。不做 CLI 指令，因為 container 裡看 log 比 exec 進去容易。
+
+### session
 
 登入成功後 engine 發自己的 session token。
 
-- 看板用 cookie 帶 session：`HttpOnly`（前端 JavaScript 讀不到，XSS 偷不走）、`Secure`、`SameSite=Lax`。`Lax` 而不是 `Strict`，是為了從 Slack 或信件點連結進看板時還是登入狀態。
+- 看板用 cookie 帶 session：`HttpOnly`（前端 JavaScript 讀不到，XSS 偷不走）、`Secure`、`SameSite=Lax`。`Secure` 只在 `publicUrl` 是 https 時加，因為有些瀏覽器在 `http://localhost` 不收 `Secure` cookie，只綁 loopback 時就登不進去（D89）。`Lax` 而不是 `Strict`，是為了從 Slack 或信件點連結進看板時還是登入狀態。
 - session 存在 store，cookie 裡只放隨機值，DB 只存它的 hash。登出或過期就刪掉，server 端立刻失效，不靠 cookie 自己過期。
-- CSRF：會改東西的請求（`POST`、`PUT`、`PATCH`、`DELETE`）檢查 `Origin` 必須等於 `server.publicUrl` 的 origin，對不上回 403。`SameSite=Lax` 已經擋掉大部分跨站請求，`Origin` 檢查補上同站子網域與舊瀏覽器的缺口。
-- 有效期由 `auth.session.ttl` 設定，吃時間長度（`"24h"`）或 `"never"`。預設 24 小時。
+- CSRF：會改東西的請求（`POST`、`PUT`、`PATCH`、`DELETE`）帶了 `Origin` 時，它必須是 loopback 或 `server.publicUrl` 的 origin，對不上回 403。沒帶 `Origin` 的是瀏覽器以外的 client，不是 CSRF 的對象。不登入時也檢查，因為惡意網頁一樣能讓瀏覽器對 `127.0.0.1` 發 `POST`。`SameSite=Lax` 已經擋掉大部分跨站請求，`Origin` 檢查補上同站子網域與舊瀏覽器的缺口。
+- 有效期由 `auth.session.ttl` 設定，吃時間長度（`"7d"`）或 `"never"`。預設 7 天。
+- 改了 ttl，之前發的 session 全部失效：session 記著發出時的 ttl，驗證時跟現在的設定不同就刪掉、回 401。不只在啟動時清，因為 W4 之後 ttl 會在執行中被改。
 - `never` 允許，但不建議：有登入的情況下 token 洩漏等於永久通行證。
 - 測試過期機制不實際等待，時間從可注入的 `Clock` 取，測試裡直接撥快。
-- 授權：登入成功就有完整權限，不分角色（D60）。身分只用來記錄操作者（`cancelRequestedBy`、`system` comment）。
-- 除了 `/api/health`（只回報活著與 schema 版本）與登入本身，所有 REST 與 `/mcp` 都要通過驗證。新加的 route 預設要驗證，例外要明寫，不是反過來。
+- 除了 `/api/health`（只回 `{ ok: true }`）、登入與 setup token 本身，所有 REST 與 `/mcp` 都要通過驗證。新加的 route 預設要驗證，例外要明寫，不是反過來。
 
-### `static` 的密碼
+### builtin 的密碼
 
-- config 只放密碼的 hash，不放明文。演算法用 Node 內建的 scrypt，不另外裝套件。CLI 提供產生 hash 的指令。
-- 啟動時發現值不是 hash 的格式就拒絕啟動，因為那多半是有人直接把密碼貼進去了。
+- store 只存密碼的 hash。演算法用 Node 內建的 scrypt，不另外裝套件。
+- 密碼由 `admin` 在看板上設定或重設，帳號本人登入後可以改自己的（要先輸入目前的密碼）。設新密碼時要輸入兩次。
+- 規則只看長度，至少 8 個字元，不要求大小寫、數字、符號的組合。NIST SP 800-63B 第 4 版反對組合規則；它對「只有密碼一道關」要求至少 15 個字元，作者選擇維持 8（D89）。
+- 帳號不存在時也跑一次 scrypt，讓回應時間不透露哪些帳號存在。
 
 ### 防暴力破解
 
-- 登入失敗以帳號計數。同一個帳號連續失敗，下一次登入的回應延遲 1 秒、2 秒、4 秒，一路加倍到 30 秒為止，成功就歸零。
+- 登入失敗以帳號計數。同一個帳號連續失敗 5 次以內不延遲，從第 6 次起，下一次登入的回應延遲 1 秒、2 秒、4 秒，一路加倍到 30 秒為止，成功就歸零。
 - 不鎖帳號：鎖帳號讓任何人都能故意把別人鎖在外面。
 - 以帳號而不是 IP 計數，不用信任 proxy 帶的 `X-Forwarded-For`。計數放記憶體，engine 只有一個 instance，重啟歸零可以接受。
-- `http` 也套用同一套，不假設使用者提供的驗證 API 自己有擋。
+- `auth-http` 也套用同一套，不假設使用者提供的驗證 API 自己有擋。setup token 也算，以固定的 key 計數。
 - 錯誤訊息不分「帳號不存在」與「密碼錯」。
 
 ## Run token（agent 用的 MCP token）
@@ -71,15 +109,15 @@ interface AuthPort {
 
 `/mcp` 的身分是使用者，能做的事跟看板一樣，包含改 item status，所以它跟 REST API 是同一個威脅面，套同樣的綁定與 auth（D57）。S9 之前只綁 `127.0.0.1`，沒有登入。
 
-Claude Code 與 Codex 不會填登入表單，也不適合放一個 24 小時就過期的 session，所以 `/mcp` 用個人 API token（D60）：
+Claude Code 與 Codex 不會填登入表單，也不適合放一個幾天就過期的 session，所以 `/mcp` 用個人 API token（D60）：
 
 - 登入後在看板上產生，可以取名字（例如「筆電上的 Claude Code」），產生時只顯示一次。
-- DB 只存 hash。每張 token 綁產生它的使用者，看板上列得出來、可以一張一張撤銷，撤銷立刻生效。
+- DB 只存 hash。每張 token 綁產生它的使用者，權限跟著那個人的 access 走，看板上列得出來、可以一張一張撤銷，撤銷立刻生效。
 - 可以設到期日，預設不過期；token 只能用在 `/mcp`，撤銷是主要的防線。
 - `/mcp` 只收 `Authorization: Bearer <token>`，不吃看板的 cookie。惡意網頁就算讓瀏覽器對 `/mcp` 發請求，也帶不到使用者的身分。
-- `auth.kind` 是 `none` 時不需要 token，跟看板一樣。
+- 沒設 `auth` 時不需要 token，跟看板一樣。
 
-已知風險：只綁 loopback 擋不住 DNS rebinding，惡意網頁可以讓瀏覽器把請求送到 `127.0.0.1:8787`。REST 與 `/mcp` 都受影響，S9 一起檢查 `Host` header：只接受 loopback 的名稱，以及 `server.publicUrl` 的 host。
+已知風險：只綁 loopback 擋不住 DNS rebinding，惡意網頁可以讓瀏覽器把請求送到 `127.0.0.1:8787`。REST 與 `/mcp` 都受影響，所以每個請求都檢查 `Host` header：只接受 loopback 的名稱（`localhost`、`127.0.0.1`、`[::1]`），以及 `server.publicUrl` 的 host（S9c），對不上回 403。不登入時也檢查。
 
 ## 附件與內容
 
