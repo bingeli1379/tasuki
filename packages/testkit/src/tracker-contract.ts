@@ -3,13 +3,13 @@ import {
   InvalidInput,
   NotFound,
   StatusConflict,
-  type StoragePort,
+  type TrackerPort,
   type WorkUnit,
 } from '@tasuki/core'
 import { afterAll, beforeAll, describe, expect, it } from 'vite-plus/test'
 
-export interface StorageFixture {
-  storage: StoragePort
+export interface TrackerFixture {
+  tracker: TrackerPort
   teardown?: () => Promise<void>
 }
 
@@ -43,10 +43,10 @@ const MARKDOWN = [
   '> quoted',
 ].join('\n')
 
-export function describeStorageContract(name: string, setup: () => Promise<StorageFixture>): void {
+export function describeTrackerContract(name: string, setup: () => Promise<TrackerFixture>): void {
   // A remote tracker takes several round trips per test (create, re-read, transition).
-  describe(`StoragePort contract: ${name}`, { timeout: 30_000 }, () => {
-    let fixture: StorageFixture
+  describe(`TrackerPort contract: ${name}`, { timeout: 30_000 }, () => {
+    let fixture: TrackerFixture
 
     beforeAll(async () => {
       fixture = await setup()
@@ -56,7 +56,7 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
     }, 60_000)
 
     it('createItem returns the item with a ref and the requested status', async () => {
-      const item = await fixture.storage.createItem({
+      const item = await fixture.tracker.createItem({
         title: 'contract: create',
         body: 'first line\nsecond line',
         status: 'refining',
@@ -71,9 +71,9 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       })
     })
 
-    // list may lag behind writes (StoragePort), so wait for the item to appear.
+    // list may lag behind writes (TrackerPort), so wait for the item to appear.
     it('a created item is listed under its status', { timeout: 15_000 }, async () => {
-      const item = await fixture.storage.createItem({
+      const item = await fixture.tracker.createItem({
         title: 'contract: list',
         body: '',
         status: 'refining',
@@ -81,21 +81,21 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       await expect
         .poll(
           async () =>
-            (await fixture.storage.list('item', ['refining'])).find((u) => u.ref === item.ref),
+            (await fixture.tracker.list('item', ['refining'])).find((u) => u.ref === item.ref),
           { timeout: 10_000, interval: 500 },
         )
         .toEqual(item)
     })
 
     it('lists several statuses in one call, each unit under its own', async () => {
-      const first = await fixture.storage.createItem({
+      const first = await fixture.tracker.createItem({
         title: 'contract: list many',
         body: '',
         status: 'refining',
       })
-      const second = await fixture.storage.transition(
+      const second = await fixture.tracker.transition(
         (
-          await fixture.storage.createItem({
+          await fixture.tracker.createItem({
             title: 'contract: list many',
             body: '',
             status: 'refining',
@@ -107,7 +107,7 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       await expect
         .poll(
           async () =>
-            (await fixture.storage.list('item', ['refining', 'ready-to-split']))
+            (await fixture.tracker.list('item', ['refining', 'ready-to-split']))
               .filter((u) => u.ref === first.ref || u.ref === second.ref)
               .map((u) => [u.ref, u.status]),
           { timeout: 10_000, interval: 500 },
@@ -116,103 +116,103 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
           [first.ref, 'refining'],
           [second.ref, 'ready-to-split'],
         ])
-      expect(await fixture.storage.list('item', [])).toEqual([])
+      expect(await fixture.tracker.list('item', [])).toEqual([])
     })
 
     it('get returns the unit as it is now', async () => {
-      const item = await fixture.storage.createItem({
+      const item = await fixture.tracker.createItem({
         title: 'contract: get',
         body: '',
         status: 'refining',
       })
-      expect(await fixture.storage.get(item.ref)).toEqual(item)
+      expect(await fixture.tracker.get(item.ref)).toEqual(item)
     })
 
     it('transition moves the unit and returns it in the new status', async () => {
-      const item = await fixture.storage.createItem({
+      const item = await fixture.tracker.createItem({
         title: 'contract: transition',
         body: '',
         status: 'refining',
       })
-      const moved = await fixture.storage.transition(item.ref, 'refining', 'ready-to-split')
+      const moved = await fixture.tracker.transition(item.ref, 'refining', 'ready-to-split')
       expect(moved).toEqual({ ...item, status: 'ready-to-split', version: moved.version })
       expect(moved.version).not.toBe(item.version)
-      expect(await fixture.storage.get(item.ref)).toEqual(moved)
+      expect(await fixture.tracker.get(item.ref)).toEqual(moved)
     })
 
     it('transition from a status the unit has already left is a StatusConflict', async () => {
-      const item = await fixture.storage.createItem({
+      const item = await fixture.tracker.createItem({
         title: 'contract: conflict',
         body: '',
         status: 'refining',
       })
-      await fixture.storage.transition(item.ref, 'refining', 'ready-to-split')
+      await fixture.tracker.transition(item.ref, 'refining', 'ready-to-split')
 
-      const stale = fixture.storage.transition(item.ref, 'refining', 'in-progress')
+      const stale = fixture.tracker.transition(item.ref, 'refining', 'in-progress')
       await expect(stale).rejects.toBeInstanceOf(StatusConflict)
       await expect(stale).rejects.toMatchObject({ current: { status: 'ready-to-split' } })
-      expect((await fixture.storage.get(item.ref)).status).toBe('ready-to-split')
+      expect((await fixture.tracker.get(item.ref)).status).toBe('ready-to-split')
     })
 
     it('an unknown ref is NotFound for get and transition', async () => {
       const ref = 'NOPE-999999'
-      await expect(fixture.storage.get(ref)).rejects.toBeInstanceOf(NotFound)
+      await expect(fixture.tracker.get(ref)).rejects.toBeInstanceOf(NotFound)
       await expect(
-        fixture.storage.transition(ref, 'refining', 'in-progress'),
+        fixture.tracker.transition(ref, 'refining', 'in-progress'),
       ).rejects.toBeInstanceOf(NotFound)
     })
 
     const newItem = (title: string, body = ''): Promise<WorkUnit> =>
-      fixture.storage.createItem({ title: `contract: ${title}`, body, status: 'refining' })
+      fixture.tracker.createItem({ title: `contract: ${title}`, body, status: 'refining' })
 
     it('updateItem writes the fields given and leaves the rest', async () => {
       const item = await newItem('update', 'keep me')
-      const updated = await fixture.storage.updateItem(item.ref, item.version, {
+      const updated = await fixture.tracker.updateItem(item.ref, item.version, {
         title: 'contract: updated',
       })
       expect(updated).toMatchObject({ title: 'contract: updated', body: 'keep me' })
       expect(updated.version).not.toBe(item.version)
-      expect(await fixture.storage.get(item.ref)).toEqual(updated)
+      expect(await fixture.tracker.get(item.ref)).toEqual(updated)
     })
 
     it('updateItem from a version someone replaced is an EditConflict', async () => {
       const item = await newItem('edit conflict')
-      await fixture.storage.updateItem(item.ref, item.version, { body: 'theirs' })
+      await fixture.tracker.updateItem(item.ref, item.version, { body: 'theirs' })
 
-      const stale = fixture.storage.updateItem(item.ref, item.version, { body: 'mine' })
+      const stale = fixture.tracker.updateItem(item.ref, item.version, { body: 'mine' })
       await expect(stale).rejects.toBeInstanceOf(EditConflict)
       await expect(stale).rejects.toMatchObject({ current: { body: 'theirs' } })
-      expect((await fixture.storage.get(item.ref)).body).toBe('theirs')
+      expect((await fixture.tracker.get(item.ref)).body).toBe('theirs')
     })
 
     it('a markdown body round-trips unchanged', async () => {
       const item = await newItem('markdown', MARKDOWN)
       expect(item.body).toBe(MARKDOWN)
-      expect((await fixture.storage.get(item.ref)).body).toBe(MARKDOWN)
+      expect((await fixture.tracker.get(item.ref)).body).toBe(MARKDOWN)
     })
 
     it('comments come back oldest first with their author and kind', async () => {
       const item = await newItem('comments')
-      const human = await fixture.storage.addComment({
+      const human = await fixture.tracker.addComment({
         target: item.ref,
         author: 'human',
         kind: 'note',
         body: 'looks **good**',
       })
-      await fixture.storage.addComment({
+      await fixture.tracker.addComment({
         target: item.ref,
         author: 'agent',
         kind: 'question',
         body: 'which locale?\nsecond line',
       })
-      await fixture.storage.addComment({
+      await fixture.tracker.addComment({
         target: item.ref,
         author: 'engine',
         kind: 'system',
         body: 'run failed',
       })
       // What a person clicked (D74): theirs, but not feedback an agent should act on.
-      await fixture.storage.addComment({
+      await fixture.tracker.addComment({
         target: item.ref,
         author: 'human',
         kind: 'system',
@@ -220,7 +220,7 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       })
       expect(human).toMatchObject({ target: item.ref, author: 'human', body: 'looks **good**' })
 
-      const comments = await fixture.storage.comments(item.ref)
+      const comments = await fixture.tracker.comments(item.ref)
       expect(comments.map((c) => [c.author, c.kind, c.body])).toEqual([
         ['human', 'note', 'looks **good**'],
         ['agent', 'question', 'which locale?\nsecond line'],
@@ -232,36 +232,36 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
 
     it('comments and attachments leave the version alone', async () => {
       const item = await newItem('version')
-      await fixture.storage.addComment({
+      await fixture.tracker.addComment({
         target: item.ref,
         author: 'human',
         kind: 'note',
         body: 'x',
       })
-      await fixture.storage.addAttachment(item.ref, {
+      await fixture.tracker.addAttachment(item.ref, {
         filename: 'a.png',
         mimeType: 'image/png',
         data: PNG,
       })
-      expect((await fixture.storage.get(item.ref)).version).toBe(item.version)
+      expect((await fixture.tracker.get(item.ref)).version).toBe(item.version)
     })
 
     it('adds and removes one label at a time, leaving the others and the version', async () => {
       const item = await newItem('labels')
-      expect((await fixture.storage.addLabel(item.ref, 'keep')).labels).toEqual(['keep'])
-      const held = await fixture.storage.addLabel(item.ref, 'hold')
+      expect((await fixture.tracker.addLabel(item.ref, 'keep')).labels).toEqual(['keep'])
+      const held = await fixture.tracker.addLabel(item.ref, 'hold')
       expect([...held.labels].sort()).toEqual(['hold', 'keep'])
-      expect((await fixture.storage.addLabel(item.ref, 'hold')).labels).toHaveLength(2)
+      expect((await fixture.tracker.addLabel(item.ref, 'hold')).labels).toHaveLength(2)
       expect(held.version).toBe(item.version)
-      expect((await fixture.storage.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
-      expect((await fixture.storage.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
-      expect((await fixture.storage.get(item.ref)).labels).toEqual(['keep'])
-      await expect(fixture.storage.addLabel('NOPE-999999', 'hold')).rejects.toBeInstanceOf(NotFound)
+      expect((await fixture.tracker.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
+      expect((await fixture.tracker.removeLabel(item.ref, 'hold')).labels).toEqual(['keep'])
+      expect((await fixture.tracker.get(item.ref)).labels).toEqual(['keep'])
+      await expect(fixture.tracker.addLabel('NOPE-999999', 'hold')).rejects.toBeInstanceOf(NotFound)
     })
 
     it('an attachment is listed and reads back byte for byte', async () => {
       const item = await newItem('attachment')
-      const added = await fixture.storage.addAttachment(item.ref, {
+      const added = await fixture.tracker.addAttachment(item.ref, {
         filename: 'dot.png',
         mimeType: 'image/png',
         data: PNG,
@@ -272,9 +272,9 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
         mimeType: 'image/png',
         size: PNG.byteLength,
       })
-      expect(await fixture.storage.attachments(item.ref)).toEqual([added])
+      expect(await fixture.tracker.attachments(item.ref)).toEqual([added])
 
-      const read = await fixture.storage.readAttachment(item.ref, added.id)
+      const read = await fixture.tracker.readAttachment(item.ref, added.id)
       expect(read.attachment).toEqual(added)
       expect([...read.data]).toEqual([...PNG])
     })
@@ -282,12 +282,12 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
     it("another unit's attachment is NotFound", async () => {
       const owner = await newItem('attachment owner')
       const other = await newItem('attachment other')
-      const added = await fixture.storage.addAttachment(owner.ref, {
+      const added = await fixture.tracker.addAttachment(owner.ref, {
         filename: 'dot.png',
         mimeType: 'image/png',
         data: PNG,
       })
-      await expect(fixture.storage.readAttachment(other.ref, added.id)).rejects.toBeInstanceOf(
+      await expect(fixture.tracker.readAttachment(other.ref, added.id)).rejects.toBeInstanceOf(
         NotFound,
       )
     })
@@ -295,42 +295,42 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
     it('a deleted attachment is gone, and only its own unit can delete it', async () => {
       const owner = await newItem('attachment to delete')
       const other = await newItem('attachment bystander')
-      const kept = await fixture.storage.addAttachment(owner.ref, {
+      const kept = await fixture.tracker.addAttachment(owner.ref, {
         filename: 'keep.png',
         mimeType: 'image/png',
         data: PNG,
       })
-      const gone = await fixture.storage.addAttachment(owner.ref, {
+      const gone = await fixture.tracker.addAttachment(owner.ref, {
         filename: 'gone.png',
         mimeType: 'image/png',
         data: PNG,
       })
-      await expect(fixture.storage.deleteAttachment(other.ref, gone.id)).rejects.toBeInstanceOf(
+      await expect(fixture.tracker.deleteAttachment(other.ref, gone.id)).rejects.toBeInstanceOf(
         NotFound,
       )
-      const before = (await fixture.storage.get(owner.ref)).version
-      await fixture.storage.deleteAttachment(owner.ref, gone.id)
-      expect(await fixture.storage.attachments(owner.ref)).toEqual([kept])
-      await expect(fixture.storage.readAttachment(owner.ref, gone.id)).rejects.toBeInstanceOf(
+      const before = (await fixture.tracker.get(owner.ref)).version
+      await fixture.tracker.deleteAttachment(owner.ref, gone.id)
+      expect(await fixture.tracker.attachments(owner.ref)).toEqual([kept])
+      await expect(fixture.tracker.readAttachment(owner.ref, gone.id)).rejects.toBeInstanceOf(
         NotFound,
       )
-      await expect(fixture.storage.deleteAttachment(owner.ref, gone.id)).rejects.toBeInstanceOf(
+      await expect(fixture.tracker.deleteAttachment(owner.ref, gone.id)).rejects.toBeInstanceOf(
         NotFound,
       )
-      expect((await fixture.storage.get(owner.ref)).version).toBe(before)
+      expect((await fixture.tracker.get(owner.ref)).version).toBe(before)
     })
 
     it('a body embedding its own attachment round-trips unchanged', async () => {
       const item = await newItem('embedded image')
-      const added = await fixture.storage.addAttachment(item.ref, {
+      const added = await fixture.tracker.addAttachment(item.ref, {
         filename: 'dot.png',
         mimeType: 'image/png',
         data: PNG,
       })
       const body = `before\n\n![dot.png](attachment:${added.id})\n\nafter`
-      const updated = await fixture.storage.updateItem(item.ref, item.version, { body })
+      const updated = await fixture.tracker.updateItem(item.ref, item.version, { body })
       expect(updated.body).toBe(body)
-      expect((await fixture.storage.get(item.ref)).body).toBe(body)
+      expect((await fixture.tracker.get(item.ref)).body).toBe(body)
     })
 
     describe('tasks', () => {
@@ -344,14 +344,14 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
 
       it('an item without tasks has no children and no dependencies', async () => {
         const item = await newItem('no tasks')
-        expect(await fixture.storage.children(item.ref)).toEqual([])
-        expect(await fixture.storage.dependencies(item.ref)).toEqual([])
+        expect(await fixture.tracker.children(item.ref)).toEqual([])
+        expect(await fixture.tracker.dependencies(item.ref)).toEqual([])
       })
 
       // A verdict is checked right after the agent made its tasks, so no waiting here.
       it('a created task is a child of its item at once, readable on its own', async () => {
         const item = await newItem('with tasks')
-        const created = await fixture.storage.createTask(item.ref, task('first'))
+        const created = await fixture.tracker.createTask(item.ref, task('first'))
         expect(created).toMatchObject({
           kind: 'task',
           parent: item.ref,
@@ -359,17 +359,17 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
           status: 'to-do',
           origin: 'splitter',
         })
-        const manual = await fixture.storage.createTask(item.ref, task('by hand', [], 'manual'))
+        const manual = await fixture.tracker.createTask(item.ref, task('by hand', [], 'manual'))
         expect(manual.status).toBe('manual')
-        expect(await fixture.storage.children(item.ref)).toEqual([created, manual])
-        expect(await fixture.storage.get(created.ref)).toEqual(created)
+        expect(await fixture.tracker.children(item.ref)).toEqual([created, manual])
+        expect(await fixture.tracker.get(created.ref)).toEqual(created)
       })
 
       it('records which task waits for which, at once', async () => {
         const item = await newItem('dependencies')
-        const first = await fixture.storage.createTask(item.ref, task('first'))
-        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
-        expect(await fixture.storage.dependencies(item.ref)).toEqual([
+        const first = await fixture.tracker.createTask(item.ref, task('first'))
+        const second = await fixture.tracker.createTask(item.ref, task('second', [first.ref]))
+        expect(await fixture.tracker.dependencies(item.ref)).toEqual([
           { task: second.ref, blockedBy: first.ref },
         ])
       })
@@ -377,35 +377,35 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
       it('refuses to wait for something that is not a task of the same item', async () => {
         const item = await newItem('foreign blocker')
         const other = await newItem('other item')
-        const foreign = await fixture.storage.createTask(other.ref, task('theirs'))
+        const foreign = await fixture.tracker.createTask(other.ref, task('theirs'))
         await expect(
-          fixture.storage.createTask(item.ref, task('mine', [foreign.ref])),
+          fixture.tracker.createTask(item.ref, task('mine', [foreign.ref])),
         ).rejects.toBeInstanceOf(InvalidInput)
-        expect(await fixture.storage.children(item.ref)).toEqual([])
+        expect(await fixture.tracker.children(item.ref)).toEqual([])
       })
 
       it('refuses a task under something that is not an item', async () => {
         const item = await newItem('parent of a task')
-        const child = await fixture.storage.createTask(item.ref, task('child'))
+        const child = await fixture.tracker.createTask(item.ref, task('child'))
         await expect(
-          fixture.storage.createTask(child.ref, task('grandchild')),
+          fixture.tracker.createTask(child.ref, task('grandchild')),
         ).rejects.toBeInstanceOf(NotFound)
       })
 
       it('moves a task with the same compare-and-set as an item', async () => {
         const item = await newItem('task moves')
-        const created = await fixture.storage.createTask(item.ref, task('move me'))
-        const moved = await fixture.storage.transition(created.ref, 'to-do', 'in-progress')
+        const created = await fixture.tracker.createTask(item.ref, task('move me'))
+        const moved = await fixture.tracker.transition(created.ref, 'to-do', 'in-progress')
         expect(moved.status).toBe('in-progress')
         await expect(
-          fixture.storage.transition(created.ref, 'to-do', 'manual'),
+          fixture.tracker.transition(created.ref, 'to-do', 'manual'),
         ).rejects.toBeInstanceOf(StatusConflict)
       })
 
       it('edits a task the same way as an item', async () => {
         const item = await newItem('task edits')
-        const created = await fixture.storage.createTask(item.ref, task('before'))
-        const edited = await fixture.storage.updateItem(created.ref, created.version, {
+        const created = await fixture.tracker.createTask(item.ref, task('before'))
+        const edited = await fixture.tracker.updateItem(created.ref, created.version, {
           title: 'after',
           body: 'More detail.',
         })
@@ -415,55 +415,55 @@ export function describeStorageContract(name: string, setup: () => Promise<Stora
 
       it('deletes a task with its dependencies, at once, and never reuses its ref', async () => {
         const item = await newItem('task deletes')
-        const first = await fixture.storage.createTask(item.ref, task('first'))
-        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
-        await fixture.storage.addComment({
+        const first = await fixture.tracker.createTask(item.ref, task('first'))
+        const second = await fixture.tracker.createTask(item.ref, task('second', [first.ref]))
+        await fixture.tracker.addComment({
           target: second.ref,
           author: 'human',
           kind: 'note',
           body: 'gone with it',
         })
-        await fixture.storage.deleteTask(second.ref)
-        expect((await fixture.storage.children(item.ref)).map((t) => t.ref)).toEqual([first.ref])
-        await expect(fixture.storage.get(second.ref)).rejects.toBeInstanceOf(NotFound)
+        await fixture.tracker.deleteTask(second.ref)
+        expect((await fixture.tracker.children(item.ref)).map((t) => t.ref)).toEqual([first.ref])
+        await expect(fixture.tracker.get(second.ref)).rejects.toBeInstanceOf(NotFound)
         // A task waiting for a deleted one no longer waits.
-        const third = await fixture.storage.createTask(item.ref, task('third', [first.ref]))
-        await fixture.storage.deleteTask(first.ref)
-        expect(await fixture.storage.dependencies(item.ref)).toEqual([])
+        const third = await fixture.tracker.createTask(item.ref, task('third', [first.ref]))
+        await fixture.tracker.deleteTask(first.ref)
+        expect(await fixture.tracker.dependencies(item.ref)).toEqual([])
         expect([first.ref, second.ref]).not.toContain(third.ref)
-        const fourth = await fixture.storage.createTask(item.ref, task('fourth'))
+        const fourth = await fixture.tracker.createTask(item.ref, task('fourth'))
         expect([first.ref, second.ref, third.ref]).not.toContain(fourth.ref)
       })
 
       it('deletes an item with its tasks and every comment, and only an item', async () => {
         const item = await newItem('item deletes')
-        const first = await fixture.storage.createTask(item.ref, task('first'))
-        const second = await fixture.storage.createTask(item.ref, task('second', [first.ref]))
-        await fixture.storage.addComment({
+        const first = await fixture.tracker.createTask(item.ref, task('first'))
+        const second = await fixture.tracker.createTask(item.ref, task('second', [first.ref]))
+        await fixture.tracker.addComment({
           target: first.ref,
           author: 'human',
           kind: 'note',
           body: 'gone with it',
         })
-        await expect(fixture.storage.deleteItem(first.ref)).rejects.toBeInstanceOf(NotFound)
-        await fixture.storage.deleteItem(item.ref)
+        await expect(fixture.tracker.deleteItem(first.ref)).rejects.toBeInstanceOf(NotFound)
+        await fixture.tracker.deleteItem(item.ref)
         for (const ref of [item.ref, first.ref, second.ref])
-          await expect(fixture.storage.get(ref)).rejects.toBeInstanceOf(NotFound)
+          await expect(fixture.tracker.get(ref)).rejects.toBeInstanceOf(NotFound)
       })
 
       it('refuses to delete something that is not a task', async () => {
         const item = await newItem('not a task')
-        await expect(fixture.storage.deleteTask(item.ref)).rejects.toBeInstanceOf(NotFound)
-        expect((await fixture.storage.get(item.ref)).ref).toBe(item.ref)
+        await expect(fixture.tracker.deleteTask(item.ref)).rejects.toBeInstanceOf(NotFound)
+        expect((await fixture.tracker.get(item.ref)).ref).toBe(item.ref)
       })
 
       it('lists tasks by status with their item, after the usual lag', async () => {
         const item = await newItem('listed tasks')
-        const created = await fixture.storage.createTask(item.ref, task('listed'))
+        const created = await fixture.tracker.createTask(item.ref, task('listed'))
         await expect
           .poll(
             async () =>
-              (await fixture.storage.list('task', ['to-do'])).find((u) => u.ref === created.ref),
+              (await fixture.tracker.list('task', ['to-do'])).find((u) => u.ref === created.ref),
             { timeout: 10_000, interval: 500 },
           )
           .toEqual(created)

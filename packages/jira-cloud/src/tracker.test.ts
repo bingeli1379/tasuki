@@ -1,5 +1,5 @@
-import { createStatusMap, type StoragePort } from '@tasuki/core'
-import { describeStorageContract } from '@tasuki/testkit'
+import { createStatusMap, type TrackerPort } from '@tasuki/core'
+import { describeTrackerContract } from '@tasuki/testkit'
 import { existsSync } from 'node:fs'
 import { describe, it } from 'vite-plus/test'
 import { createClient, createFetch, JiraHttpError } from './client'
@@ -23,7 +23,7 @@ const configured = [
 ].every((k) => env[k])
 
 if (configured) {
-  describeStorageContract('jira-cloud', () => {
+  describeTrackerContract('jira-cloud', () => {
     const options = parseOptions({
       baseUrl: env['JIRA_BASE_URL'],
       email: env['JIRA_EMAIL'],
@@ -46,7 +46,7 @@ if (configured) {
     }
     const inner = createJiraTracker(ctx, options, jira, jiraFetch)
     const created: string[] = []
-    const storage: StoragePort = {
+    const tracker: TrackerPort = {
       ...inner,
       createItem: async (item) => {
         const unit = await inner.createItem(item)
@@ -64,10 +64,10 @@ if (configured) {
         ),
       )
     }
-    return Promise.resolve({ storage, teardown })
+    return Promise.resolve({ tracker, teardown })
   })
 } else {
-  describe('StoragePort contract: jira-cloud', () => {
+  describe('TrackerPort contract: jira-cloud', () => {
     it.skip('needs JIRA_* settings in the repo-root .env', () => {})
   })
 }

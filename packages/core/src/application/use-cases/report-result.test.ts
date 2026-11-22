@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { Rule } from '../../domain/rule'
-import { runtimeStub } from '../../testing/runtime-stub'
+import { storeStub } from '../../testing/store-stub'
 import { InvalidInput } from '../invalid-input'
 import { reportResult } from './report-result'
 
@@ -24,10 +24,10 @@ const review: Rule = {
 describe('reportResult', () => {
   it('records the verdict with the summary trimmed', async () => {
     const reported: unknown[] = []
-    const runtime = runtimeStub({
+    const store = storeStub({
       report: (...args) => (reported.push(args), Promise.resolve()),
     })
-    await reportResult(runtime, 'r1', review, { verdict: 'approve', summary: ' Reads well. ' })
+    await reportResult(store, 'r1', review, { verdict: 'approve', summary: ' Reads well. ' })
     expect(reported).toEqual([['r1', 'approve', 'Reads well.']])
   })
 
@@ -35,14 +35,14 @@ describe('reportResult', () => {
     'refuses %s, which is not an outcome the agent of this rule can report',
     async (verdict) => {
       await expect(
-        reportResult(runtimeStub({}), 'r1', review, { verdict, summary: 'Done.' }),
+        reportResult(storeStub({}), 'r1', review, { verdict, summary: 'Done.' }),
       ).rejects.toThrow('verdict must be one of approve, changes, needs_input, failed')
     },
   )
 
   it('refuses a blank summary, since it is the reason the item moves', async () => {
     await expect(
-      reportResult(runtimeStub({}), 'r1', review, { verdict: 'failed', summary: ' ' }),
+      reportResult(storeStub({}), 'r1', review, { verdict: 'failed', summary: ' ' }),
     ).rejects.toBeInstanceOf(InvalidInput)
   })
 })

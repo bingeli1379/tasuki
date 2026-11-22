@@ -3,7 +3,8 @@ import {
   type Plugin,
   type PluginContext,
   type RunnerPort,
-  type StoragePort,
+  type StorePort,
+  type TrackerPort,
 } from '@tasuki/core'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -21,7 +22,7 @@ async function step<T>(plugin: string, what: string, run: () => T | Promise<T>):
 
 // Plugins resolve from the config's folder, the way a project resolves its own dependencies.
 // Any failure refuses to start (D48).
-async function load<R extends 'tracker' | 'runner'>(
+async function load<R extends 'tracker' | 'store' | 'runner'>(
   name: string,
   configDir: string,
   role: R,
@@ -52,9 +53,19 @@ export async function loadTracker(
   options: unknown,
   configDir: string,
   ctx: PluginContext,
-): Promise<StoragePort> {
+): Promise<TrackerPort> {
   const tracker = await load(name, configDir, 'tracker')
   return step(name, 'create tracker', () => tracker(ctx, options))
+}
+
+export async function loadStore(
+  name: string,
+  options: unknown,
+  configDir: string,
+  ctx: PluginContext,
+): Promise<StorePort> {
+  const store = await load(name, configDir, 'store')
+  return step(name, 'create store', () => store(ctx, options))
 }
 
 export async function loadRunner(

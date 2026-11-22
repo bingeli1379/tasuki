@@ -12,7 +12,7 @@ import {
   type Kind,
   type Origin,
   type PluginContext,
-  type StoragePort,
+  type TrackerPort,
   type WorkUnit,
 } from '@tasuki/core'
 import { createHash } from 'node:crypto'
@@ -118,7 +118,7 @@ export function createJiraTracker(
   options: JiraOptions,
   jira: JiraRequest,
   jiraFetch: JiraFetch,
-): StoragePort {
+): TrackerPort {
   const getIssue = (key: string, rendered = false): Promise<Issue> =>
     jira(
       'GET',

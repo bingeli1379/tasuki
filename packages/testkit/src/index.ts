@@ -1,1 +1,2 @@
-export * from './storage-contract'
+export * from './tracker-contract'
+export * from './store-contract'

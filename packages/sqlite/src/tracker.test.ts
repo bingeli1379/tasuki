@@ -4,7 +4,7 @@ import {
   TASK_STATUS_DISPLAY,
   type PluginContext,
 } from '@tasuki/core'
-import { describeStorageContract } from '@tasuki/testkit'
+import { describeTrackerContract } from '@tasuki/testkit'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -31,7 +31,7 @@ const memoryTracker = (refPrefix: string): ReturnType<typeof createSqliteTracker
   return createSqliteTracker(ctx(), db, refPrefix)
 }
 
-describeStorageContract('sqlite', () => Promise.resolve({ storage: memoryTracker('TSK') }))
+describeTrackerContract('sqlite', () => Promise.resolve({ tracker: memoryTracker('TSK') }))
 
 describe('sqlite refs', () => {
   it('numbers refs in order under the configured prefix', async () => {

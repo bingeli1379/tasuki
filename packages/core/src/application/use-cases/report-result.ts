@@ -1,6 +1,6 @@
 import { verdictsOf, type Rule } from '../../domain/rule'
 import { InvalidInput } from '../invalid-input'
-import type { RuntimeStorePort } from '../ports/runtime-store'
+import type { StorePort } from '../ports/store'
 
 export interface ReportResultInput {
   verdict: string
@@ -10,7 +10,7 @@ export interface ReportResultInput {
 // The agent's last call in a Run. Only recorded here; the engine reads it once the process
 // exits and decides the outcome then.
 export async function reportResult(
-  runtime: RuntimeStorePort,
+  store: StorePort,
   runId: string,
   rule: Rule,
   input: ReportResultInput,
@@ -22,5 +22,5 @@ export async function reportResult(
   // The summary is the reason the item moves; every move the engine makes for an agent
   // carries one (D67).
   if (input.summary.trim() === '') throw new InvalidInput('summary is empty')
-  await runtime.report(runId, input.verdict, input.summary.trim())
+  await store.report(runId, input.verdict, input.summary.trim())
 }

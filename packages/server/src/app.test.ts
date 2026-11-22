@@ -1,14 +1,17 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { createStatusMap, type WorkUnit, type Workflow } from '@tasuki/core'
-import { createSqliteTracker, migrate as migrateTracker, TRACKER_MIGRATIONS } from '@tasuki/sqlite'
+import {
+  createSqliteStore,
+  createSqliteTracker,
+  migrate,
+  openDatabase,
+  STORE_MIGRATIONS,
+  TRACKER_MIGRATIONS,
+} from '@tasuki/sqlite'
 import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
 import { createRunTokens } from './run-tokens'
-import { openDatabase } from './runtime-store/database'
-import { migrate } from './runtime-store/migrate'
-import { RUNTIME_MIGRATIONS } from './runtime-store/migrations'
-import { createRuntimeStore } from './runtime-store/run-store'
 
 const statuses = createStatusMap({
   item: { refining: 'Refining', 'ready-to-split': 'Ready to Split', done: 'Done' },
@@ -23,10 +26,10 @@ const workflow: Workflow = {
 }
 
 // The real sqlite tracker in memory: the server is tested against a tracker that keeps
-// the StoragePort contract, not a hand-written fake that drifts from it.
-const memoryStorage = (): ReturnType<typeof createSqliteTracker> => {
+// the TrackerPort contract, not a hand-written fake that drifts from it.
+const memoryTracker = (): ReturnType<typeof createSqliteTracker> => {
   const db = openDatabase(':memory:')
-  migrateTracker(db, TRACKER_MIGRATIONS)
+  migrate(db, TRACKER_MIGRATIONS)
   return createSqliteTracker(
     { clock: { now: () => new Date() }, configDir: '', dataDir: '', statuses },
     db,
@@ -34,33 +37,22 @@ const memoryStorage = (): ReturnType<typeof createSqliteTracker> => {
   )
 }
 
-const memoryRuntime = (): ReturnType<typeof createRuntimeStore> => {
+const memoryStore = (): ReturnType<typeof createSqliteStore> => {
   const db = openDatabase(':memory:')
-  migrate(db, RUNTIME_MIGRATIONS)
-  return createRuntimeStore(db, { now: () => new Date() }, '/logs')
+  migrate(db, STORE_MIGRATIONS)
+  return createSqliteStore(db, { now: () => new Date() })
 }
 
-const appWith = (db = openDatabase(':memory:')): ReturnType<typeof createApp> =>
+const appWith = (): ReturnType<typeof createApp> =>
   createApp({
-    db,
-    storage: memoryStorage(),
-    runtime: memoryRuntime(),
+    tracker: memoryTracker(),
+    store: memoryStore(),
     statuses,
     workflow,
     rules: [],
     holdLabel: 'hold',
     tokens: createRunTokens(),
   })
-
-describe('GET /api/health', () => {
-  it('reports the schema version of the database it is wired to', async () => {
-    const db = openDatabase(':memory:')
-    migrate(db, ['CREATE TABLE a (id INTEGER)'])
-    const res = await appWith(db).request('/api/health')
-    expect(res.status).toBe(200)
-    expect(await res.json()).toEqual({ ok: true, schemaVersion: 1 })
-  })
-})
 
 describe('items on the board', () => {
   it('a created item shows up in the refining column', async () => {
@@ -295,26 +287,25 @@ describe('tasks', () => {
   })
   const setup = async () => {
     const db = openDatabase(':memory:')
-    migrateTracker(db, TRACKER_MIGRATIONS)
-    const storage = createSqliteTracker(
+    migrate(db, TRACKER_MIGRATIONS)
+    const tracker = createSqliteTracker(
       { clock: { now: () => new Date() }, configDir: '', dataDir: '', statuses: taskStatuses },
       db,
       'M',
     )
-    const runtime = memoryRuntime()
+    const store = memoryStore()
     const app = createApp({
-      db: openDatabase(':memory:'),
-      storage,
-      runtime,
+      tracker,
+      store,
       statuses: taskStatuses,
       workflow,
       rules: [],
       holdLabel: 'hold',
       tokens: createRunTokens(),
     })
-    const item = await storage.createItem({ title: 'Item', body: '', status: 'split-review' })
+    const item = await tracker.createItem({ title: 'Item', body: '', status: 'split-review' })
     const task = (title: string, blockedBy: string[] = []) =>
-      storage.createTask(item.ref, {
+      tracker.createTask(item.ref, {
         title,
         body: '',
         status: 'to-do',
@@ -323,7 +314,7 @@ describe('tasks', () => {
       })
     const first = await task('Prepare')
     const second = await task('Build', [first.ref])
-    return { app, runtime, item, first, second }
+    return { app, store, item, first, second }
   }
   const send = (method: string, body: unknown): RequestInit => ({
     method,
@@ -363,7 +354,7 @@ describe('tasks', () => {
   })
 
   it('edits and deletes a task, and refuses while an agent works on its item', async () => {
-    const { app, runtime, item, first, second } = await setup()
+    const { app, store, item, first, second } = await setup()
     const edited = await app.request(
       `/api/tasks/${first.ref}`,
       send('PATCH', { expectedVersion: first.version, title: 'Prepare well' }),
@@ -372,7 +363,7 @@ describe('tasks', () => {
     expect((await app.request(`/api/tasks/${second.ref}`, { method: 'DELETE' })).status).toBe(200)
     expect((await app.request(`/api/tasks/${second.ref}`)).status).toBe(404)
 
-    await runtime.createRun({
+    await store.createRun({
       target: item.ref,
       rule: 'execute',
       agent: 'fake',

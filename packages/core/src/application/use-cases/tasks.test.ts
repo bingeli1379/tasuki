@@ -3,11 +3,11 @@ import type { Rule } from '../../domain/rule'
 import type { Run } from '../../domain/run'
 import type { WorkUnit } from '../../domain/work-unit'
 import type { Station, Workflow } from '../../domain/workflow'
-import { runtimeStub } from '../../testing/runtime-stub'
-import { storageStub } from '../../testing/storage-stub'
+import { storeStub } from '../../testing/store-stub'
+import { trackerStub } from '../../testing/tracker-stub'
 import { InvalidInput } from '../invalid-input'
 import { NotFound } from '../not-found'
-import type { NewComment, NewTask } from '../ports/storage'
+import type { NewComment, NewTask } from '../ports/tracker'
 import { addAgentComment } from './add-agent-comment'
 import { createTask } from './create-task'
 import { deleteTask, updateTask } from './edit-task'
@@ -27,7 +27,6 @@ const run: Run = {
   leaseUntil: '',
   startedAt: '',
   lastActivityAt: '',
-  logPath: '',
 }
 
 const workflow = (...stations: (Partial<Station> & { id: string })[]): Workflow => ({
@@ -58,10 +57,10 @@ describe('createTask', () => {
     const bumped: string[] = []
     return {
       deps: {
-        storage: storageStub({
+        tracker: trackerStub({
           createTask: (_item, task) => (tasks.push(task), Promise.resolve(unit('X-2'))),
         }),
-        runtime: runtimeStub({ bumpProduced: (_id, key) => (bumped.push(key), Promise.resolve()) }),
+        store: storeStub({ bumpProduced: (_id, key) => (bumped.push(key), Promise.resolve()) }),
       },
       tasks,
       bumped,
@@ -103,11 +102,11 @@ describe('addAgentComment', () => {
     const bumped: string[] = []
     return {
       deps: {
-        storage: storageStub({
+        tracker: trackerStub({
           children: () => Promise.resolve([unit('X-2')]),
           addComment: (c) => (comments.push(c), Promise.resolve({ id: '1', ...c, createdAt: '' })),
         }),
-        runtime: runtimeStub({ bumpProduced: (_id, key) => (bumped.push(key), Promise.resolve()) }),
+        store: storeStub({ bumpProduced: (_id, key) => (bumped.push(key), Promise.resolve()) }),
       },
       comments,
       bumped,
@@ -139,7 +138,7 @@ describe('listBoard', () => {
     const item = unit('X-1', { kind: 'item', status: 'split-review' })
     delete item.parent
     const board = await listBoard(
-      storageStub({
+      trackerStub({
         list: (kind) =>
           Promise.resolve(
             kind === 'item'
@@ -147,7 +146,7 @@ describe('listBoard', () => {
               : [unit('X-2', { status: 'done' }), unit('X-3'), unit('Y-2', { parent: 'Y-1' })],
           ),
       }),
-      runtimeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
+      storeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
       workflow({ id: 'split-review' }),
       ['to-do', 'done'],
       [],
@@ -162,7 +161,7 @@ describe('listBoard', () => {
     delete item.parent
     let running = true
     const board = await listBoard(
-      storageStub({
+      trackerStub({
         // The Run ends while the tracker is still searching.
         list: (kind) =>
           new Promise((resolve) =>
@@ -172,7 +171,7 @@ describe('listBoard', () => {
             }, 0),
           ),
       }),
-      runtimeStub({
+      storeStub({
         isPaused: () => Promise.resolve(false),
         liveRuns: () =>
           Promise.resolve(running ? [{ ...run, target: 'X-1', state: 'running' as const }] : []),
@@ -197,8 +196,8 @@ describe('listBoard', () => {
       outcomes: {},
     })
     const board = await listBoard(
-      storageStub({ list: () => Promise.resolve([]) }),
-      runtimeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
+      trackerStub({ list: () => Promise.resolve([]) }),
+      storeStub({ liveRuns: () => Promise.resolve([]), isPaused: () => Promise.resolve(false) }),
       workflow(
         { id: 'refining' },
         { id: 'ready-to-split' },
@@ -235,17 +234,17 @@ describe('a person on a task', () => {
     all[ref] ? Promise.resolve(all[ref]) : Promise.reject(new NotFound(ref))
 
   it('reads a task with what it waits for and its comments', async () => {
-    const storage = storageStub({
+    const tracker = trackerStub({
       get: get(units('in-progress')),
       children: () => Promise.resolve([unit('X-2'), unit('X-3')]),
       dependencies: () => Promise.resolve([{ task: 'X-3', blockedBy: 'X-2' }]),
       comments: () => Promise.resolve([]),
     })
-    expect(await getTask(storage, 'X-3')).toMatchObject({
+    expect(await getTask(tracker, 'X-3')).toMatchObject({
       task: { ref: 'X-3', blockedBy: ['X-2'] },
       comments: [],
     })
-    await expect(getTask(storage, 'X-1')).rejects.toBeInstanceOf(NotFound)
+    await expect(getTask(tracker, 'X-1')).rejects.toBeInstanceOf(NotFound)
   })
 
   it('finishes a manual task and undoes a done one, logging each, but not under a live Run', async () => {
@@ -253,7 +252,7 @@ describe('a person on a task', () => {
     const logged: string[] = []
     let live: Run[] = []
     const deps = {
-      storage: storageStub({
+      tracker: trackerStub({
         get: get(units('blocked')),
         transition: (ref, from, to) => (
           moves.push(`${ref} ${from}>${to}`),
@@ -264,7 +263,7 @@ describe('a person on a task', () => {
           Promise.resolve({ id: '1', createdAt: '', ...c })
         ),
       }),
-      runtime: runtimeStub({ liveRuns: () => Promise.resolve(live) }),
+      store: storeStub({ liveRuns: () => Promise.resolve(live) }),
     }
     await moveTask(deps, { ref: 'X-2', from: 'manual', to: 'done' })
     await moveTask(deps, { ref: 'X-3', from: 'done', to: 'to-do' })
@@ -289,12 +288,12 @@ describe('a person on a task', () => {
     const deleted: string[] = []
     let live: Run[] = []
     const deps = {
-      storage: storageStub({
+      tracker: trackerStub({
         get: get(units('in-progress')),
         updateItem: (ref) => Promise.resolve(unit(ref, { title: 'Renamed' })),
         deleteTask: (ref) => (deleted.push(ref), Promise.resolve()),
       }),
-      runtime: runtimeStub({ liveRuns: () => Promise.resolve(live) }),
+      store: storeStub({ liveRuns: () => Promise.resolve(live) }),
     }
     const edit = { ref: 'X-3', expectedVersion: '1', title: 'Renamed' }
     expect((await updateTask(deps, edit)).title).toBe('Renamed')

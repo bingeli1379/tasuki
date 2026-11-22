@@ -7,11 +7,10 @@ import {
   type Clock,
   type Outcome,
   type Run,
-  type RuntimeStorePort,
+  type StorePort,
   type Verdict,
 } from '@tasuki/core'
 import { randomUUID } from 'node:crypto'
-import { join } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 
 type Row = Record<string, unknown>
@@ -47,18 +46,13 @@ function toRun(row: Row): Run {
     startedAt: String(row['started_at']),
     lastActivityAt: String(row['last_activity_at']),
     ...optional('finishedAt', row['finished_at']),
-    logPath: String(row['log_path']),
   }
 }
 
 // rowid breaks ties: a fake clock can start two Runs in the same millisecond.
 const NEWEST_FIRST = 'ORDER BY started_at DESC, rowid DESC'
 
-export function createRuntimeStore(
-  db: DatabaseSync,
-  clock: Clock,
-  logDir: string,
-): RuntimeStorePort {
+export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
   const later = (seconds: number): string =>
     new Date(clock.now().getTime() + seconds * 1000).toISOString()
 
@@ -75,8 +69,8 @@ export function createRuntimeStore(
       try {
         db.prepare(
           `INSERT INTO run (id, target, rule, agent, attempt, from_status, workspace, state,
-             lease_until, started_at, last_activity_at, log_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?, ?)`,
+             lease_until, started_at, last_activity_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
         ).run(
           id,
           run.target,
@@ -88,7 +82,6 @@ export function createRuntimeStore(
           later(run.leaseSeconds),
           now,
           now,
-          join(logDir, `${id}.log`),
         )
       } catch (e) {
         if (e instanceof Error && e.message.includes('UNIQUE constraint failed'))

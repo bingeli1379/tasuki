@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vite-plus/test'
 import type { Rule } from '../../domain/rule'
 import type { Outcome, Run } from '../../domain/run'
 import type { WorkUnit } from '../../domain/work-unit'
-import { runtimeStub } from '../../testing/runtime-stub'
-import { storageStub } from '../../testing/storage-stub'
-import type { NewComment } from '../ports/storage'
+import { storeStub } from '../../testing/store-stub'
+import { trackerStub } from '../../testing/tracker-stub'
+import type { NewComment } from '../ports/tracker'
 import { StatusConflict } from '../status-conflict'
 import { resumeBlocked } from './resume-blocked'
 
@@ -43,7 +43,6 @@ const run = (outcome: Outcome | undefined, over: Partial<Run> = {}): Run => ({
   leaseUntil: '',
   startedAt: '',
   lastActivityAt: '',
-  logPath: '',
   ...over,
 })
 
@@ -57,7 +56,7 @@ const setup = (opts: {
   const comments: NewComment[] = []
   const deps = {
     named: (s: string) => s,
-    storage: storageStub({
+    tracker: trackerStub({
       list: () => Promise.resolve([unit('X-1', opts.item)]),
       children: () =>
         Promise.resolve(
@@ -74,7 +73,7 @@ const setup = (opts: {
       addComment: (c) => (comments.push(c), Promise.resolve({ ...c, id: '1', createdAt: '' })),
     }),
     // What the store answers: the newest Run, when it ended in the outcome asked for.
-    runtime: runtimeStub({
+    store: storeStub({
       latestRunsEndedIn: (outcome) =>
         Promise.resolve(
           (opts.runs ?? [run('blocked_manual')]).slice(0, 1).filter((r) => r.outcome === outcome),
@@ -114,13 +113,9 @@ describe('resumeBlocked', () => {
   })
 
   it('asks the tracker nothing while no Run stopped at manual tasks', async () => {
-    const runtime = runtimeStub({ latestRunsEndedIn: () => Promise.resolve([]) })
+    const store = storeStub({ latestRunsEndedIn: () => Promise.resolve([]) })
     expect(
-      await resumeBlocked(
-        { storage: storageStub({}), runtime, named: (s) => s },
-        [execute],
-        'hold',
-      ),
+      await resumeBlocked({ tracker: trackerStub({}), store, named: (s) => s }, [execute], 'hold'),
     ).toEqual([])
   })
 
@@ -133,7 +128,7 @@ describe('resumeBlocked', () => {
     }
     expect(
       await resumeBlocked(
-        { storage: storageStub({}), runtime: runtimeStub({}), named: (s) => s },
+        { tracker: trackerStub({}), store: storeStub({}), named: (s) => s },
         [split],
         'hold',
       ),

@@ -1,14 +1,14 @@
 import { describe, expect, it } from 'vite-plus/test'
 import type { Workflow } from '../../domain/workflow'
-import { storageStub } from '../../testing/storage-stub'
-import type { StoragePort } from '../ports/storage'
+import { trackerStub } from '../../testing/tracker-stub'
+import type { TrackerPort } from '../ports/tracker'
 import { StatusConflict } from '../status-conflict'
 import { moveItem } from './move-item'
 import { requestRework } from './request-rework'
 
-const recording = (): { storage: StoragePort; moves: string[][] } => {
+const recording = (): { tracker: TrackerPort; moves: string[][] } => {
   const moves: string[][] = []
-  const storage = storageStub({
+  const tracker = trackerStub({
     addComment: (c) => (
       moves.push([c.target, c.kind, c.body]),
       Promise.resolve({ ...c, id: '1', createdAt: '' })
@@ -26,7 +26,7 @@ const recording = (): { storage: StoragePort; moves: string[][] } => {
       })
     },
   })
-  return { storage, moves }
+  return { tracker, moves }
 }
 
 const workflowOf = (ids: string[], rework?: string): Workflow => ({
@@ -37,8 +37,8 @@ const board = workflowOf(['refining', 'ready-to-split', 'done'])
 
 describe('moveItem', () => {
   it('transitions from the status the person saw to the one they picked', async () => {
-    const { storage, moves } = recording()
-    const item = await moveItem(storage, board, { ref: 'X-1', from: 'refining', to: 'done' })
+    const { tracker, moves } = recording()
+    const item = await moveItem(tracker, board, { ref: 'X-1', from: 'refining', to: 'done' })
     // A person's move leaves a line saying so (D74).
     expect(moves).toEqual([
       ['X-1', 'refining', 'done'],
@@ -48,25 +48,25 @@ describe('moveItem', () => {
   })
 
   it('rejects a status the board does not show without touching the tracker', async () => {
-    const { storage, moves } = recording()
+    const { tracker, moves } = recording()
     await expect(
-      moveItem(storage, board, { ref: 'X-1', from: 'refining', to: 'blocked' }),
+      moveItem(tracker, board, { ref: 'X-1', from: 'refining', to: 'blocked' }),
     ).rejects.toThrow('status "blocked" is not on the board')
     expect(moves).toEqual([])
   })
 
   it('rejects a from status the board does not show, e.g. a typo from an AI client', async () => {
-    const { storage, moves } = recording()
+    const { tracker, moves } = recording()
     await expect(
-      moveItem(storage, board, { ref: 'X-1', from: 'refinig', to: 'done' }),
+      moveItem(tracker, board, { ref: 'X-1', from: 'refinig', to: 'done' }),
     ).rejects.toThrow('status "refinig" is not on the board')
     expect(moves).toEqual([])
   })
 
   it('rejects a move to the status it is already in', async () => {
-    const { storage, moves } = recording()
+    const { tracker, moves } = recording()
     await expect(
-      moveItem(storage, board, { ref: 'X-1', from: 'done', to: 'done' }),
+      moveItem(tracker, board, { ref: 'X-1', from: 'done', to: 'done' }),
     ).rejects.toThrow('X-1 is already in done')
     expect(moves).toEqual([])
   })
@@ -84,7 +84,7 @@ describe('requestRework', () => {
       labels: [],
       version: '1',
     }
-    const storage = storageStub({
+    const tracker = trackerStub({
       get: () => Promise.resolve(item),
       addComment: (c) => (
         log.push(`comment ${c.author} ${c.body}`),
@@ -95,13 +95,13 @@ describe('requestRework', () => {
         Promise.resolve({ ...item, status: to })
       ),
     })
-    return { storage, log }
+    return { tracker, log }
   }
   const mapped = workflowOf(['in-review', 'ready-to-rework', 'done'], 'ready-to-rework')
 
   it('leaves the feedback first, then sends the item back', async () => {
-    const { storage, log } = setup()
-    const moved = await requestRework(storage, mapped, {
+    const { tracker, log } = setup()
+    const moved = await requestRework(tracker, mapped, {
       ref: 'X-1',
       from: 'in-review',
       feedback: 'Wrong colour.',
@@ -115,16 +115,16 @@ describe('requestRework', () => {
   })
 
   it('refuses without feedback, and leaves no comment when the item already moved', async () => {
-    const { storage, log } = setup('done')
+    const { tracker, log } = setup('done')
     await expect(
-      requestRework(storage, mapped, {
+      requestRework(tracker, mapped, {
         ref: 'X-1',
         from: 'in-review',
         feedback: ' ',
       }),
     ).rejects.toThrow('feedback is empty')
     await expect(
-      requestRework(storage, mapped, {
+      requestRework(tracker, mapped, {
         ref: 'X-1',
         from: 'in-review',
         feedback: 'Wrong.',
@@ -134,9 +134,9 @@ describe('requestRework', () => {
   })
 
   it('refuses when no status has the rework role', async () => {
-    const { storage, log } = setup()
+    const { tracker, log } = setup()
     await expect(
-      requestRework(storage, workflowOf(['in-review', 'done']), {
+      requestRework(tracker, workflowOf(['in-review', 'done']), {
         ref: 'X-1',
         from: 'in-review',
         feedback: 'x',

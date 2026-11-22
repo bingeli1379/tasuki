@@ -1,5 +1,5 @@
 import type { Ref, WorkUnit } from '../../domain/work-unit'
-import type { StoragePort } from '../ports/storage'
+import type { TrackerPort } from '../ports/tracker'
 
 export interface TaskEntry extends WorkUnit {
   // Tasks of the same item this one waits for.
@@ -7,10 +7,10 @@ export interface TaskEntry extends WorkUnit {
 }
 
 // Oldest first.
-export async function listTasks(storage: StoragePort, item: Ref): Promise<TaskEntry[]> {
+export async function listTasks(tracker: TrackerPort, item: Ref): Promise<TaskEntry[]> {
   const [tasks, dependencies] = await Promise.all([
-    storage.children(item),
-    storage.dependencies(item),
+    tracker.children(item),
+    tracker.dependencies(item),
   ])
   return tasks.map((t) => ({
     ...t,

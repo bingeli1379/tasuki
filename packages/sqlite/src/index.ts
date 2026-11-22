@@ -2,11 +2,15 @@ import { API_VERSION, definePlugin, type Plugin } from '@tasuki/core'
 import { join } from 'node:path'
 import { openDatabase } from './database'
 import { migrate } from './migrate'
+import { createSqliteStore } from './store'
+import { STORE_MIGRATIONS } from './store-migrations'
 import { createSqliteTracker } from './tracker'
 import { TRACKER_MIGRATIONS } from './tracker-migrations'
 
 export * from './database'
 export * from './migrate'
+export * from './store'
+export * from './store-migrations'
 export * from './tracker'
 export * from './tracker-migrations'
 
@@ -25,6 +29,12 @@ const plugin: Plugin = definePlugin({
     const db = openDatabase(join(ctx.dataDir, 'tracker.db'))
     migrate(db, TRACKER_MIGRATIONS)
     return createSqliteTracker(ctx, db, refPrefix)
+  },
+  store: (ctx) => {
+    // Its own file, so the tracker and the store can each be swapped for another plugin.
+    const db = openDatabase(join(ctx.dataDir, 'store.db'))
+    migrate(db, STORE_MIGRATIONS)
+    return createSqliteStore(db, ctx.clock)
   },
 })
 
