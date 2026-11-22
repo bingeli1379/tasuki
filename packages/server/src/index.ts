@@ -1,12 +1,20 @@
 import { serve } from '@hono/node-server'
-import { createStatusMap, itemStatusNames, type Clock, type RunnerPort } from '@tasuki/core'
+import {
+  createStatusMap,
+  itemStatusNames,
+  needsSetup,
+  type Clock,
+  type RunnerPort,
+} from '@tasuki/core'
+import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
-import { createApp } from './app'
+import { createApp, type AppAuth } from './app'
 import { loadConfig } from './config'
 import { createEngine } from './engine'
-import { loadRunner, loadStore, loadTracker } from './plugin-loader'
+import { loadAuth, loadRunner, loadStore, loadTracker } from './plugin-loader'
 import { createRunTokens } from './run-tokens'
+import { createLoginThrottle, createSetupToken, createSignIns } from './sign-ins'
 
 const systemClock: Clock = { now: () => new Date() }
 
@@ -29,6 +37,24 @@ try {
   for (const [name, agent] of Object.entries(config.agents))
     runners[name] = await loadRunner(agent.plugin, agent.options, config.configDir, ctx)
   const tokens = createRunTokens()
+  let auth: AppAuth | undefined
+  let setupToken: string | undefined
+  if (config.auth !== undefined) {
+    const port = await loadAuth(config.auth.plugin, config.auth.options, config.configDir, {
+      ...ctx,
+      store,
+    })
+    mkdirSync(config.dataDir, { recursive: true })
+    const setup = createSetupToken(config.dataDir, await needsSetup(store))
+    setupToken = setup.token
+    auth = {
+      port,
+      signIns: createSignIns(store, systemClock, config.auth),
+      throttle: createLoginThrottle(),
+      setup,
+      ...(config.auth.ttlSeconds === undefined ? {} : { ttlSeconds: config.auth.ttlSeconds }),
+    }
+  }
 
   // Loopback only until auth lands (S9, security-and-auth.md).
   serve({
@@ -40,6 +66,7 @@ try {
       rules: config.rules,
       holdLabel: config.holdLabel,
       tokens,
+      ...(auth === undefined ? {} : { auth }),
     }).fetch,
     port: config.port,
     hostname: '127.0.0.1',
@@ -66,6 +93,11 @@ try {
   console.log(`data dir: ${config.dataDir}`)
   console.log(`tracker: ${config.tracker.plugin}`)
   console.log(`store: ${config.store.plugin}`)
+  console.log(`auth: ${config.auth?.plugin ?? 'none, nobody signs in'}`)
+  if (setupToken !== undefined)
+    console.log(
+      `no admin yet: sign in with setup token ${setupToken} (also in ${join(config.dataDir, 'setup-token')})`,
+    )
   console.log(`rules: ${config.rules.map((r) => r.id).join(', ') || 'none'}`)
   console.log(`tasuki listening on http://127.0.0.1:${config.port}`)
 } catch (e) {

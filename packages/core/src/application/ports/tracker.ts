@@ -25,6 +25,8 @@ export interface ItemPatch {
 export interface NewComment {
   target: Ref
   author: CommentAuthor
+  // The signed-in person behind a human comment; the tracker reads it back as authorName.
+  authorName?: string
   kind: CommentKind
   body: string
 }

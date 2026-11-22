@@ -179,16 +179,36 @@ const trackers = [
     : []),
 ]
 
+// Signing in on its own engine (S9, D89): the board tests run with nobody signing in. It
+// starts from an empty store, so the setup token is in its data folder.
+const signIn = {
+  name: 'auth',
+  api: 8790,
+  web: 5182,
+  config: {
+    workflow: { statuses: stations, roles: DEFAULT_WORKFLOW.roles },
+    auth: { plugin: '@tasuki/auth-builtin' },
+  },
+  testMatch: 'sign-in.spec.ts',
+}
+process.env['TASUKI_E2E_AUTH_DATA'] = join(dir, signIn.name)
+
+const engines = [
+  ...trackers.map((t) => ({ ...t, testIgnore: 'sign-in.spec.ts' })),
+  ...(picked.length === 0 || picked.includes(signIn.name) ? [signIn] : []),
+]
+
 const config: PlaywrightTestConfig = defineConfig({
   testDir: 'e2e',
   fullyParallel: false,
   forbidOnly: !!process.env['CI'],
   reporter: process.env['CI'] ? 'github' : 'list',
-  projects: trackers.map((t) => ({
+  projects: [...trackers, signIn].map((t) => ({
     name: t.name,
     use: { baseURL: `http://localhost:${t.web}`, browserName: 'chromium' },
+    ...('testMatch' in t ? { testMatch: t.testMatch } : { testIgnore: 'sign-in.spec.ts' }),
   })),
-  webServer: trackers.flatMap((t) => [
+  webServer: engines.flatMap((t) => [
     {
       command: `node ${join(repoRoot, 'packages/server/dist/index.mjs')} --config ${engine(t.name, t.api, t.config)}`,
       url: `http://127.0.0.1:${t.api}/api/health`,

@@ -475,7 +475,7 @@ const authorOf = (c: Comment): string =>
                 />
                 <UDropdownMenu
                   :items="more"
-                  :content="{ align: 'end' }"
+                  :content="{ align: 'start' }"
                   :ui="{ itemLeadingIcon: 'size-4' }"
                 >
                   <UButton

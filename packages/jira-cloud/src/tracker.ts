@@ -86,6 +86,9 @@ function versionOf(issue: Issue): string {
 // person, in tasuki or straight in Jira (D61).
 const PROPERTY = 'tasuki'
 
+const authorNameOf = (tasuki?: string, jira?: string): { authorName?: string } =>
+  tasuki ? { authorName: tasuki } : jira ? { authorName: jira } : {}
+
 // Jira shows every comment as the token's owner, so agent and engine comments also start
 // with a visible line saying who wrote them. Reading strips it back off.
 const prefixOf = (author: CommentAuthor, kind: CommentKind): string =>
@@ -247,7 +250,7 @@ export function createJiraTracker(
 
   async function toComment(target: string, c: JiraComment, mediaMap: MediaMap): Promise<Comment> {
     const meta = c.properties?.find((p) => p.key === PROPERTY)?.value as
-      | { author: CommentAuthor; kind: CommentKind }
+      | { author: CommentAuthor; kind: CommentKind; name?: string }
       | undefined
     const author = meta?.author ?? 'human'
     const kind = meta?.kind ?? 'note'
@@ -258,7 +261,7 @@ export function createJiraTracker(
       id: c.id,
       target,
       author,
-      ...(c.author?.displayName ? { authorName: c.author.displayName } : {}),
+      ...authorNameOf(meta?.name, c.author?.displayName),
       kind,
       body: adfToMarkdown({ ...c.body, content }, mediaMap),
       createdAt: c.created,
@@ -435,9 +438,11 @@ export function createJiraTracker(
       const issue = await getUnit(comment.target)
       const body = await markdownToAdf(comment.body, mediaResolver(issue))
       const human = comment.author === 'human'
-      // A person's own note is the only comment without the property: one written straight in
-      // Jira has none either. A person's system line (D74) carries it, with no visible prefix.
-      const tagged = !human || comment.kind !== 'note'
+      // A person's own note written before sign-in existed is the only comment without the
+      // property: one written straight in Jira has none either. A person's system line (D74)
+      // carries it, with no visible prefix. Every comment tasuki writes shows the engine's
+      // Jira account, so the signed-in person's name rides in the property (D89).
+      const tagged = !human || comment.kind !== 'note' || comment.authorName !== undefined
       if (!human)
         body.content.unshift({
           type: 'paragraph',
@@ -451,7 +456,14 @@ export function createJiraTracker(
           ? {}
           : {
               properties: [
-                { key: PROPERTY, value: { author: comment.author, kind: comment.kind } },
+                {
+                  key: PROPERTY,
+                  value: {
+                    author: comment.author,
+                    kind: comment.kind,
+                    ...(comment.authorName === undefined ? {} : { name: comment.authorName }),
+                  },
+                },
               ],
             }),
       })
@@ -459,7 +471,7 @@ export function createJiraTracker(
         id: created.id,
         target: comment.target,
         author: comment.author,
-        ...(created.author?.displayName ? { authorName: created.author.displayName } : {}),
+        ...authorNameOf(comment.authorName, created.author?.displayName),
         kind: comment.kind,
         body: comment.body,
         createdAt: created.created,

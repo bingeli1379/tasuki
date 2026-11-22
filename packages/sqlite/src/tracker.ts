@@ -258,12 +258,13 @@ export function createSqliteTracker(
       get(comment.target)
       const row = db
         .prepare(
-          `INSERT INTO comment (target, author, kind, body, created_at) VALUES (?, ?, ?, ?, ?)
-           RETURNING *`,
+          `INSERT INTO comment (target, author, author_name, kind, body, created_at)
+           VALUES (?, ?, ?, ?, ?, ?) RETURNING *`,
         )
         .get(
           comment.target,
           comment.author,
+          comment.authorName ?? null,
           comment.kind,
           comment.body,
           ctx.clock.now().toISOString(),

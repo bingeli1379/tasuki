@@ -51,7 +51,10 @@ describe('store migrations', () => {
 
   it('dropping log_path for W3 keeps every Run', () => {
     const db = openDatabase(':memory:')
-    migrate(db, STORE_MIGRATIONS.slice(0, -1))
+    migrate(
+      db,
+      STORE_MIGRATIONS.slice(0, STORE_MIGRATIONS.indexOf('ALTER TABLE run DROP COLUMN log_path;')),
+    )
     db.exec(`INSERT INTO run (id, target, rule, agent, attempt, workspace, state, lease_until,
       started_at, last_activity_at, log_path) VALUES ('r1', 'T-1', 'split', 'fake', 1, '/w',
       'running', 'x', 'y', 'z', '/l')`)

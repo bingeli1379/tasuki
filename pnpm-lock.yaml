@@ -170,6 +170,9 @@ importers:
 
   .:
     devDependencies:
+      '@tasuki/auth-builtin':
+        specifier: workspace:*
+        version: link:packages/auth-builtin
       '@tasuki/claude-cli':
         specifier: workspace:*
         version: link:packages/claude-cli
@@ -191,6 +194,16 @@ importers:
       vite-plus:
         specifier: 1.6.0
         version: 1.6.0(@types/node@24.19.2)(@vitest/ui@5.1.0)(@vue/language-core@3.3.14)(esbuild@0.27.7)(jiti@2.7.0)(playwright@1.65.1)(typescript@7.0.2)(vue-tsc@3.3.14(typescript@7.0.2))
+
+  packages/auth-builtin:
+    dependencies:
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
+    devDependencies:
+      '@tasuki/sqlite':
+        specifier: workspace:*
+        version: link:../sqlite
 
   packages/claude-cli:
     dependencies:
@@ -240,6 +253,9 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
     devDependencies:
+      '@tasuki/auth-builtin':
+        specifier: workspace:*
+        version: link:../auth-builtin
       '@tasuki/fake-runner':
         specifier: workspace:*
         version: link:../fake-runner

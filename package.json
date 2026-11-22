@@ -12,6 +12,7 @@
     "prepare": "vp config --no-agent"
   },
   "devDependencies": {
+    "@tasuki/auth-builtin": "workspace:*",
     "@tasuki/claude-cli": "workspace:*",
     "@tasuki/fake-runner": "workspace:*",
     "@tasuki/jira-cloud": "workspace:*",

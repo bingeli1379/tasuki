@@ -1,6 +1,21 @@
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js'
 import {
+  ACCESS_LEVELS,
   addAttachment,
+  assertPassword,
+  changeOwnPassword,
+  createAccount,
+  Forbidden,
+  listAccounts,
+  needsSetup,
+  resetPassword,
+  setAccess,
+  setDisabled,
+  setUpFirstAdmin,
+  signIn,
+  type Access,
+  type Account,
+  type AuthPort,
   deleteAttachment,
   addComment,
   createItem,
@@ -30,11 +45,14 @@ import {
   type Workflow,
   type TrackerPort,
 } from '@tasuki/core'
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
+import { AsyncLocalStorage } from 'node:async_hooks'
 import { createAgentMcpServer } from './agent-mcp'
 import { createMcpServer } from './mcp'
 import type { RunTokens } from './run-tokens'
+import type { LoginThrottle, SetupToken, SignIns } from './sign-ins'
 
 // encodeURIComponent leaves ' ( ) * alone, which RFC 5987 does not allow unencoded.
 const encodeRfc5987 = (value: string): string =>
@@ -45,6 +63,14 @@ const encodeRfc5987 = (value: string): string =>
 
 const INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 
+export interface AppAuth {
+  port: AuthPort
+  signIns: SignIns
+  throttle: LoginThrottle
+  setup: SetupToken
+  ttlSeconds?: number
+}
+
 export interface AppDeps {
   tracker: TrackerPort
   store: StorePort
@@ -53,27 +79,254 @@ export interface AppDeps {
   rules: readonly Rule[]
   holdLabel: string
   tokens: RunTokens
+  // Unset: nobody signs in, and every request acts as an admin.
+  auth?: AppAuth
 }
 
+const SESSION_COOKIE = 'tasuki_session'
+// What a browser keeps a cookie for at most; the store decides when a session really ends.
+const NEVER_SECONDS = 400 * 86400
+
+const LOCAL: Account = {
+  userId: 'local',
+  username: '',
+  displayName: '',
+  access: 'admin',
+  disabled: false,
+  createdAt: '',
+}
+
+// Loopback only until a public URL can be configured (S9c). A page on another site that gets
+// the browser to reach 127.0.0.1 by DNS rebinding still sends its own name as the Host.
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
+const hostOf = (value: string): string | undefined => {
+  try {
+    return new URL(value).hostname
+  } catch {
+    return undefined
+  }
+}
+
+// Every human comment written while serving a signed-in request carries that person's name;
+// the engine's own writes run outside any request and carry none.
+function namingComments(tracker: TrackerPort, current: () => string | undefined): TrackerPort {
+  return Object.assign(Object.create(tracker) as TrackerPort, {
+    addComment: (comment: Parameters<TrackerPort['addComment']>[0]) => {
+      const name = current()
+      return tracker.addComment(
+        comment.author === 'human' && name ? { ...comment, authorName: name } : comment,
+      )
+    },
+  })
+}
+
+const text = (value: unknown): string => (typeof value === 'string' ? value : '')
+
 export function createApp({
-  tracker,
+  tracker: plainTracker,
   store,
   statuses,
   workflow,
   rules,
   holdLabel,
   tokens,
-}: AppDeps): Hono {
-  const app = new Hono()
+  auth,
+}: AppDeps): Hono<{ Variables: { actor: Account } }> {
+  const signedIn = new AsyncLocalStorage<Account>()
+  const tracker =
+    auth === undefined
+      ? plainTracker
+      : namingComments(plainTracker, () => signedIn.getStore()?.displayName)
+  const app = new Hono<{ Variables: { actor: Account } }>()
   app.onError((e, c) => {
     if (e instanceof InvalidInput) return c.json({ error: e.message }, 400)
+    if (e instanceof Forbidden) return c.json({ error: e.message }, 403)
     if (e instanceof NotFound) return c.json({ error: e.message }, 404)
     // The board puts the card where it really is.
     if (e instanceof StatusConflict || e instanceof EditConflict)
       return c.json({ error: e.message, item: e.current }, 409)
     return c.json({ error: e.message }, 500)
   })
+  app.use(async (c, next) => {
+    // The Node adapter builds the URL from the Host header.
+    if (!LOOPBACK.has(hostOf(c.req.url) ?? '')) return c.json({ error: 'unexpected Host' }, 403)
+    // CSRF: SameSite=Lax stops most cross-site writes; this covers the rest. A client that
+    // is not a browser sends no Origin and is not who CSRF is about.
+    const origin = c.req.header('Origin')
+    if (
+      !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) &&
+      origin !== undefined &&
+      !LOOPBACK.has(hostOf(origin) ?? '')
+    )
+      return c.json({ error: 'cross-site request' }, 403)
+    return next()
+  })
   app.get('/api/health', (c) => c.json({ ok: true }))
+
+  const sessionOf = async (c: Context): Promise<Account | undefined> => {
+    const token = getCookie(c, SESSION_COOKIE)
+    return token === undefined ? undefined : auth?.signIns.resolve(token)
+  }
+  const startSession = async (c: Context, account: Account): Promise<void> => {
+    if (auth === undefined) return
+    setCookie(c, SESSION_COOKIE, await auth.signIns.start(account.userId), {
+      httpOnly: true,
+      sameSite: 'Lax',
+      path: '/',
+      maxAge: auth.ttlSeconds ?? NEVER_SECONDS,
+      // Secure once the board is served over https (S9c); some browsers drop a Secure cookie
+      // on http://localhost.
+    })
+  }
+
+  // Asking who is signed in, signing in, and the first admin are open; everything else needs
+  // an account, unless a route is added to this list on purpose.
+  const OPEN = new Set(['/api/health', '/api/auth/state', '/api/auth/login', '/api/auth/setup'])
+  app.use(async (c, next) => {
+    const path = c.req.path
+    if (OPEN.has(path) || path === '/agent-mcp' || !(path.startsWith('/api/') || path === '/mcp'))
+      return next()
+    let actor: Account | undefined = LOCAL
+    if (auth !== undefined) {
+      // /mcp takes the Bearer token only, never the board's cookie.
+      const bearer = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '')?.[1]
+      actor =
+        path === '/mcp'
+          ? bearer === undefined
+            ? undefined
+            : await auth.signIns.resolveApiToken(bearer)
+          : await sessionOf(c)
+    }
+    if (actor === undefined) return c.json({ error: 'sign in first' }, 401)
+    c.set('actor', actor)
+    return signedIn.run(actor, next)
+  })
+
+  app.get('/api/auth/state', async (c) => {
+    const mode = auth === undefined ? 'none' : auth.port.accounts ? 'builtin' : 'external'
+    const me = auth === undefined ? LOCAL : await sessionOf(c)
+    return c.json({
+      mode,
+      needsSetup: auth !== undefined && auth.setup.open() && (await needsSetup(store)),
+      ...(me === undefined ? {} : { me }),
+    })
+  })
+  app.post('/api/auth/login', async (c) => {
+    if (auth === undefined) throw new InvalidInput('nobody signs in here')
+    const body = await c.req.json<{ username?: unknown; password?: unknown }>()
+    const credentials = { username: text(body.username).trim(), password: text(body.password) }
+    await auth.throttle.wait(credentials.username)
+    const account = await signIn({ auth: auth.port, store }, credentials)
+    if (account === undefined) {
+      auth.throttle.failed(credentials.username)
+      return c.json({ error: 'wrong username or password' }, 401)
+    }
+    auth.throttle.succeeded(credentials.username)
+    await startSession(c, account)
+    return c.json({ me: account })
+  })
+  app.post('/api/auth/logout', async (c) => {
+    const token = getCookie(c, SESSION_COOKIE)
+    if (token !== undefined) await auth?.signIns.end(token)
+    deleteCookie(c, SESSION_COOKIE, { path: '/' })
+    return c.json({ ok: true })
+  })
+  app.post('/api/auth/setup', async (c) => {
+    if (auth === undefined) throw new InvalidInput('nobody signs in here')
+    const body = await c.req.json<{ token?: unknown; username?: unknown; password?: unknown }>()
+    // A guessable-looking endpoint, so guesses at it are slowed like a password's.
+    await auth.throttle.wait('#setup')
+    if (!auth.setup.matches(text(body.token).trim())) {
+      auth.throttle.failed('#setup')
+      return c.json({ error: 'that is not the setup token' }, 401)
+    }
+    auth.throttle.succeeded('#setup')
+    let admin: Account
+    if (auth.port.accounts === undefined) {
+      const me = await sessionOf(c)
+      if (me === undefined) return c.json({ error: 'sign in first' }, 401)
+      admin = await setUpFirstAdmin({ auth: auth.port, store }, me)
+    } else {
+      assertPassword(text(body.password))
+      admin = await setUpFirstAdmin(
+        { auth: auth.port, store },
+        // An account tasuki keeps is shown by its username (D89).
+        {
+          username: text(body.username).trim(),
+          displayName: text(body.username).trim(),
+          password: text(body.password),
+        },
+      )
+      await startSession(c, admin)
+    }
+    auth.setup.close()
+    return c.json({ me: admin })
+  })
+  app.put('/api/me/password', async (c) => {
+    if (auth === undefined) throw new InvalidInput('nobody signs in here')
+    const body = await c.req.json<{ current?: unknown; next?: unknown }>()
+    await changeOwnPassword(auth.port, c.var.actor, text(body.current), text(body.next))
+    return c.json({ ok: true })
+  })
+  app.get('/api/accounts', async (c) => c.json(await listAccounts(store, c.var.actor)))
+  app.post('/api/accounts', async (c) => {
+    if (auth === undefined) throw new InvalidInput('nobody signs in here')
+    const body = await c.req.json<{ username?: unknown; password?: unknown; access?: unknown }>()
+    const access = body.access ?? 'member'
+    if (!ACCESS_LEVELS.includes(access as Access))
+      throw new InvalidInput(`access is one of ${ACCESS_LEVELS.join(', ')}`)
+    const account = await createAccount(auth.port, c.var.actor, {
+      username: text(body.username),
+      displayName: text(body.username),
+      password: text(body.password),
+      access: access as Access,
+    })
+    return c.json(account, 201)
+  })
+  app.patch('/api/accounts/:id', async (c) => {
+    const body = await c.req.json<{ access?: unknown; disabled?: unknown }>()
+    const id = c.req.param('id')
+    let account: Account | undefined
+    if (body.access !== undefined) {
+      if (!ACCESS_LEVELS.includes(body.access as Access))
+        throw new InvalidInput(`access is one of ${ACCESS_LEVELS.join(', ')}`)
+      account = await setAccess(store, c.var.actor, id, body.access as Access)
+    }
+    if (typeof body.disabled === 'boolean')
+      account = await setDisabled(store, c.var.actor, id, body.disabled)
+    if (account === undefined) throw new InvalidInput('change access or disabled')
+    return c.json(account)
+  })
+  app.put('/api/accounts/:id/password', async (c) => {
+    if (auth === undefined) throw new InvalidInput('nobody signs in here')
+    const body = await c.req.json<{ password?: unknown }>()
+    await resetPassword(
+      { auth: auth.port, store },
+      c.var.actor,
+      c.req.param('id'),
+      text(body.password),
+    )
+    return c.json({ ok: true })
+  })
+  // Personal API tokens for /mcp: each person sees and revokes only their own.
+  app.get('/api/tokens', async (c) => c.json(await store.apiTokensOf(c.var.actor.userId)))
+  app.post('/api/tokens', async (c) => {
+    if (auth === undefined) throw new InvalidInput('nobody signs in here: /mcp needs no token')
+    const body = await c.req.json<{ name?: unknown; expiresAt?: unknown }>()
+    const { token, apiToken } = await auth.signIns.issueApiToken(
+      c.var.actor.userId,
+      text(body.name),
+      typeof body.expiresAt === 'string' && body.expiresAt !== '' ? body.expiresAt : undefined,
+    )
+    return c.json({ ...apiToken, token }, 201)
+  })
+  app.delete('/api/tokens/:id', async (c) => {
+    const id = c.req.param('id')
+    if (!(await store.apiTokensOf(c.var.actor.userId)).some((t) => t.id === id))
+      throw new NotFound(`you have no token ${id}`)
+    await store.deleteApiToken(id)
+    return c.json({ ok: true })
+  })
   app.get('/api/board', async (c) =>
     c.json(await listBoard(tracker, store, workflow, statuses.mapped('task'), rules, holdLabel)),
   )
