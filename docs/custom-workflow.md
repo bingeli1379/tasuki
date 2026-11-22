@@ -123,7 +123,7 @@ tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各
 | W2 | 規則宣告 `outcomes`、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約（已完成，D88） | 行為不變，契約測試多一套 |
 | W4a | 流程設定進 store、設定頁（表單）、熱重載（已完成，D91） | 在網頁上改站和規則的 prompt，下一輪就生效 |
-| W4b | 流程設定的修改歷史、回到任一版 | 看得到誰在什麼時候改了什麼，能回到前一版 |
+| W4b | 流程設定的修改歷史、回到任一版（已完成，D94） | 看得到誰在什麼時候改了什麼，能回到前一版 |
 | 之後 | postgres store plugin | 換成 postgres 照常跑 |
 
 W1、W2 跟存在哪裡無關，先做是為了讓設計在檔案上定型，W4 搬進 DB 時才不會每改一次設計就多一次 migration。

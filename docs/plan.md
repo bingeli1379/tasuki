@@ -57,7 +57,7 @@
 | S9a | `auth-builtin`、access 與帳號管理、setup token、session cookie 與 CSRF、登入防暴力、`Host` 檢查、`/mcp` 的個人 API token（已完成，D60、D89） | 用 log 裡的 setup token 建第一個 admin、建帳號、改 access、ttl 過期或改 ttl 被踢回登入頁、沒登入打 API 被拒；產生 token 貼進 Claude Code，撤銷後 401 |
 | S9c | `auth-http`、開放非 loopback 綁定（`publicUrl`、`allowInsecure`）（已完成，D89、D90） | setup 連結建第一個 admin；admin 貼一串 username 加人，名單上的人用外部帳號登入，刪掉的進不來 |
 | W4a | 流程設定（站、角色、task status 對照、規則與 prompt、hold label）進 store，設定頁用表單（只給 `admin` 與 `maintainer`）、熱重載；agent、poll、limits 留在檔案（已完成，D91） | 在網頁上加一站、改規則的 prompt，下一輪就生效；存檔不合法時看到錯在哪 |
-| W4b | 流程設定的修改歷史、回到任一版（D91） | 看得到誰在什麼時候改了什麼，能回到前一版 |
+| W4b | 流程設定的修改歷史、回到任一版（已完成，D91、D94） | 看得到誰在什麼時候改了什麼，能回到前一版 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件 | 照文件寫出一個第三方 tracker 並通過契約測試 |
 | S12 | codex runner、npm CLI 打包、container image | `init`、`doctor`、`start` 可用 |

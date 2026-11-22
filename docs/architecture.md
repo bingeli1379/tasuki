@@ -122,6 +122,7 @@ interface StorePort {
   // The flow settings as opaque JSON, every save a new version; the engine checks them (D91).
   latestFlow(): Promise<FlowVersion | undefined>          // undefined before the first save
   saveFlow(expected: number | undefined, flow: unknown, savedBy: string): Promise<FlowVersion>  // throws FlowConflict if not the latest
+  flowHistory(): Promise<FlowVersion[]>                   // every save, newest first (W4b)
 }
 
 interface RunnerPort {

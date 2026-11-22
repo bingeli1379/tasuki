@@ -230,6 +230,17 @@ export function describeStoreContract(
       expect(await store.latestFlow()).toMatchObject({ version: 2, flow: { a: 2 } })
     })
 
+    it('the history holds every save, newest first, each as it was saved', async () => {
+      expect(await store.flowHistory()).toEqual([])
+      await store.saveFlow(undefined, { a: 1 }, 'Eli')
+      now += 1000
+      await store.saveFlow(1, { a: 2 }, 'Kai')
+      expect(await store.flowHistory()).toEqual([
+        { version: 2, flow: { a: 2 }, savedBy: 'Kai', savedAt: at(T0 + 1000) },
+        { version: 1, flow: { a: 1 }, savedBy: 'Eli', savedAt: at(T0) },
+      ])
+    })
+
     const newAccount = (userId: string, username = userId) => ({
       userId,
       username,

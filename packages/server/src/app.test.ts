@@ -588,6 +588,27 @@ describe('the flow settings (D91)', () => {
     expect(await (await app.request('/api/flow')).json()).toMatchObject({ version: 1 })
   })
 
+  it('the history lists every save newest first, each against the one before it (W4b)', async () => {
+    const { app } = await setup()
+    expect(await (await app.request('/api/flow/history')).json()).toEqual({ versions: [] })
+    const added = withStations([...stations.statuses, { id: 'ai-review', name: 'AI Review' }])
+    await put(app, undefined, added)
+    await put(app, 1, { ...added, labels: { hold: 'paused' } })
+    const { versions } = (await (await app.request('/api/flow/history')).json()) as {
+      versions: { version: number; flow: unknown; changes: { text: string }[] }[]
+    }
+    expect(versions.map((v) => [v.version, v.changes.map((c) => c.text)])).toEqual([
+      [2, ['Hold label: hold → paused']],
+      [1, ['Added the status AI Review (ai-review)']],
+    ])
+    // Restoring is saving an old one again, through the same checks as any save.
+    expect(await (await put(app, 2, versions[1]?.flow)).json()).toEqual({ version: 3 })
+    const after = (await (await app.request('/api/flow/history')).json()) as {
+      versions: typeof versions
+    }
+    expect(after.versions[0]?.changes.map((c) => c.text)).toEqual(['Hold label: paused → hold'])
+  })
+
   it('refuses a flow that cannot work, saying where', async () => {
     const { app } = await setup()
     const res = await put(app, undefined, {

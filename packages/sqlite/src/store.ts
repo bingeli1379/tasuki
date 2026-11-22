@@ -230,6 +230,9 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
       )
       return saved
     },
+    async flowHistory() {
+      return db.prepare('SELECT * FROM flow_version ORDER BY version DESC').all().map(toFlow)
+    },
     async createAccount(a) {
       const userId = a.userId ?? randomUUID()
       try {
