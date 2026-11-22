@@ -840,3 +840,60 @@
   - 不做虛擬滾動：幾百個帳號的 `<li>` 瀏覽器畫得動，難的是找人，所以加篩選框。看板 Done 欄只會越來越長，又有拖拉，另外處理。
 - 實測：`pnpm test` 400 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite、jira、auth、auth-http 共 26 條全過。把 `publicUrl` 的 host 從允許清單拿掉，server 測試會紅一條；拿掉「已綁定的 username 不能換人」的檢查，core 測試會紅一條。手動起 server：綁 `0.0.0.0` 沒有 auth 時拒絕啟動，有 auth 與 `publicUrl` 時印出連結、只認 `publicUrl` 的 `Host`。
 - 重新檢視：S12 server 自己 serve 看板時，沒有 `publicUrl` 也能印連結；公司的驗證 API 不是 JSON 或不是 `POST` 時。
+
+## D91 流程設定與啟動設定的分界，agent 留在檔案
+
+- 背景：W4 動工前（2026-11-22）。修改 D78 的分界：D78 與 custom-workflow.md 原本把 agent 與 prompt 的三層都列進流程設定，第一次啟動時把檔案的 `workflow` 讀進 DB。作者要設定頁讓不寫程式的人也能改，問到 agent 放哪裡實際影響什麼。
+- 決定：
+  - 檔案只放啟動設定：`dataDir`、`server`、`auth`、`tracker`、`store`、`agents`、`poll`、`limits`、`workspace`。store 放流程設定：`workflow`（站、角色、`taskStatuses`）、`rules`、`labels`。分的方式是部署的人設、跟機器與程式行為有關的放檔案，團隊每天會想調的流程放 DB（作者選的）。
+  - `agents` 留在檔案（作者選的）。規則的 `agent` 只能從檔案定義的名字裡挑。
+  - 規則拿掉 `promptFile`，prompt 只是存在 store 的一段字。agent 的 `appendSystemPromptFile` 留著，因為 agent 還在檔案裡。
+  - 檔案不再當流程設定的種子：檔案裡出現它不認識的欄位就拒絕啟動，`workflow`、`rules`、`labels` 也是（一般的欄位檢查，不是專為舊寫法寫的）。store 從沒存過時用預設流程：預設各站去掉 `splitting`、沒有規則，不寫進 store，第一次存檔才是第一版。E2E 開跑前用 API 存自己的流程設定。推翻 custom-workflow.md 原本的驗收條件 5。
+  - 設定頁用表單，不是 JSON 編輯器（作者選的），只給 `admin` 與 `maintainer`。
+  - 站的 key 在設定頁是 tracker 列出的 status 下拉選單。還有站的 key 不在 tracker 的 status 裡時（接 Jira 第一次啟動就是這樣），engine 不派 Run，看板頂端提示還有幾站沒對上並連到設定頁，不讓 engine 跑到轉移才失敗。
+  - W4 拆成 W4a（進 store、設定頁、熱重載）與 W4b（修改歷史、回到任一版）。
+  - 流程設定不進使用者 MCP，跟帳號一樣是 D57 的例外（作者選的）。
+  - 存檔帶著讀到的版本號，中間有別人存過就 409，設定頁提示重新載入（作者選的）。store 把每一版都留著，W4b 的歷史直接用。
+  - sqlite 的 status key 預設改成邏輯名，不再是顯示名（作者選的）。設定頁改顯示名不動資料；改邏輯名或拿掉一站時，上面還有 item 或 task 就拒絕存檔並列出來（custom-workflow.md 待釐清 5），Jira 改 key 也一樣。不寫轉換，本機舊的 sqlite tracker 資料要清掉。
+  - 實作時定的：store 把流程設定當成不透明的 JSON 存，驗證在 engine，第三方 store 只要會存一段 JSON 與比對版本號。tracker 多一個選用的 `listStatuses`，有固定 status 清單的 tracker（Jira 用 `/project/{key}/statuses`，依 issue type 分）才提供，設定頁的 key 下拉選單與存檔檢查都靠它；sqlite 不提供，key 欄不顯示。檢查「還有沒有人在被拿掉的 status」時，跳過 tracker 本來就沒有的 key：那裡不會有人，Jira 也不接受搜尋不存在的 status，Jira 第一次存檔就是這樣。
+  - 實作時定的：engine 每輪開始讀一次流程設定；Run 用開跑時的規則走完，規則跟著 run token 一起存在記憶體裡，`/agent-mcp` 從 token 拿規則，不再依名字去查現在的規則。看板與 API 每個請求讀一次，存完下一個請求就是新的。tracker plugin 拿到的 status 對照每次呼叫都讀現在那份，存檔後不用重建 tracker。
+  - 設定頁當下就標出重複的站 ID、規則名與 Jira status，有重複就不能按 Save；server 照樣全檢查一遍，前端只是提早說。改一站的 ID 時，按鈕、角色與規則裡指向它的地方跟著改；ID 清空或撞到別站的那一下不搬，打完才搬，所以邊打邊改不會掉引用（作者 2026-11-22 要的）。
+  - 實作時定的：store 裡存的設定跟檔案對不上時（規則用的 agent 在檔案裡改名或刪掉了）拒絕啟動，說明是哪一條，因為只有改檔案能修。站的顯示名預設（邏輯名的 Title Case）移到 core，設定頁與 server 用同一個。
+- 理由：
+  - agent 的 options 裡是 `allowedTools`、`plugins` 路徑、`env` 的 secret，決定 AI 在 engine 那台機器上能做什麼。放 DB 的話 maintainer 在網頁上點兩下就能開 `Bash(*)`，等於多一條提權的路。留在檔案，流程設定裡就沒有 secret 也沒有機器路徑，驗收條件 7 不用額外的遮罩邏輯。D78 的「DB 只存 `${VAR}`」因此用不到。
+  - 每種 runner 的 options 不一樣，要做成表單就得要 runner plugin 描述自己的欄位，plugin 契約變大；不做表單就只剩 JSON 框，跟「不寫程式的人也能改」相反。
+  - 檔案與 DB 各放一份流程，看的人要想現在以哪份為準。只留一個地方，DB 空的時候用內建預設，沒有這個問題。
+  - `poll`、`limits` 是程式行為的數字，改錯會讓 engine 打爆 Jira 的 rate limit 或讓 lease 提早過期，屬於部署的人調的。
+  - D89 寫的「W4 之後 ttl 會在執行中被改」不成立了，`auth` 留在檔案。驗證時比對 ttl 的做法不用改，重啟後改了 ttl 一樣要踢掉舊 session。
+  - 代價：網頁上換不了 model、改不了基礎層 prompt。
+- 實測：`pnpm test` 418 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite、jira 各 15 條、auth、auth-http 共 32 條全過（多了兩個 project 開跑前存流程設定、設定頁加一站的主路徑，Jira 那條在 KAN 上挑 Manual，還有重複 ID 的即時提示與改 ID 帶著引用走，後者只在 sqlite，因為 KAN 只剩一個空的 status）。拿掉改 ID 時搬按鈕引用的那行，sqlite 的那條會紅。拿掉 sqlite store 的版本比對，store 契約會紅一條；拿掉「被拿掉的 status 上還有人」的檢查，core 與 server 各紅一條。Jira 的 `listStatuses` 對 KAN 實際跑過。E2E 途中抓到設定頁兩個問題並修掉：Reka UI 的選項不能用空字串當值，「不移動」「不用」改用 `_`；沒寫 `name` 的站被表單用 id 當顯示名存回去，改成跟 server 共用 core 的預設名。
+- 重新檢視：有人需要在網頁上換 model 時，先考慮讓規則多一個 model 覆寫，不把整包 agent 搬進 DB；runner plugin 自己描述 options 的需求另外出現時；部署方式要「設定進 git」（GitOps）時，再看要不要匯入匯出。
+
+## D92 `custom` mode：全部的 tool、不驗結果
+
+- 背景：W4a 試用設定頁時（2026-11-22）。作者問 mode 是不是用 prompt 區分就夠，覺得使用者選什麼就是什麼，不用擋那麼多。討論後 mode 保留（工具與驗收擋的是 item 內容的 prompt injection 與 LLM 自己出包，不是使用者），另外多一個讓人自己負責的 mode，不跟 `review` 混在一起。
+- 決定（作者選的）：
+  - 新增 `custom`。agent 拿到全部的 tool：讀、留言、`create_task`、`set_task_status`、`report_result`。
+  - 結果一個都不驗，連 `needs_input` 也不檢查有沒有留問題，照表搬。`succeeded` 必填（作者試用後改的：做完總要有地方去），跟 split 一樣是 mode 自己的結果，所以表單上不能刪；其他結果由規則自己加。
+  - `prompt` 沒有預設，留空就只有 engine 的契約，不另外補一段。
+  - 不變的：agent 還是沒有改 item status 的 tool；Run 結束時還在 `in-progress` 的 task 照不變量 3 退回 `to-do`；task 的狀態機照常。
+  - 設定頁上 Mode 切到 Rework 時，Session 自動換成接著這張卡上次的對話，切走就換回每次重開；只改表單的初始值，server 省略 `session` 時仍是 `fresh`，已存的規則不會被偷改（作者 2026-11-22 要的，rework 要接著上次的想法）。
+  - 實作時定的：因為能走完整張 task 圖，有 `custom` 規則時五個 task status 都要對照，跟 execute 一樣。fake runner 跑 `custom` 時跟 `review` 一樣挑第一個結果回報。設定頁的「Does」改名「Mode」，說明放在 Rules 區塊開頭，免得那一格比旁邊多一行而對不齊；mode 選單改從 core 的 `MODE_OUTCOMES` 產生，顯示文字用 `Record<RuleMode, …>`，core 多一個 mode 時沒補就編譯不過。
+- 理由：
+  - 工具與驗收保護的是不在現場的那段時間：item 內容是誰都能寫的，可能夾帶「別拆了，直接回報成功」；LLM 也會在沒拆出 task 時說成功。拿掉它們，item 會帶著空的結果滑進下一站。
+  - 想自己控制的人有地方去，不用去改既有 mode 的語意。用 `review` 湊也行，但它沒有改 task 的 tool，名字也會讓人誤會。
+- 實測：`pnpm test` 423 條、`pnpm check` 沒有錯誤。verdict 表多三列 `custom`（`succeeded` 沒有 task、`needs_input` 沒留問題、自己宣告的結果都照搬）；engine 測試確認 `custom` 拿到全部七個 tool，task 沒做完也照宣告的結果把 item 移走；flow 測試確認 `prompt` 留空就是空的，五個 task status 沒對照完被拒。
+- 重新檢視：有人需要介於兩者之間的組合（例如只要 `create_task` 不要 `set_task_status`）時，再考慮讓規則逐項勾工具。
+
+## D93 看板標出被失敗送走的卡
+
+- 背景：W4a 試用時（2026-11-22）。作者指出 item 因為 `failed` 或重試到上限被移到別站時，看板上看不出來，跟人自己拖過去的長得一樣。
+- 決定（作者同意的）：
+  - 一張卡最新的 Run 結果是 `failed` 或 `max_attempts`，而且卡還停在那次 Run 送它去的站（Run 的 `to`），卡片的外框變紅（跟 Running 的藍光同一個框，不會動），id 旁邊多一個「Failed」或「Gave up after N tries」的小標，滑上去說是哪條規則送來的、點開看原因。
+  - 人把卡移走或下一次 Run 開跑就不標了，不用另外按「看過了」。
+  - `needs_input` 不標：它本來就會被送去專門等人回答的站，站名已經說明。`abandoned` 不標：lease 過期是 engine 自己會收回重跑的事。
+  - 實作時定的：`listBoard` 多回一個 `failed`，用 store 現有的 `latestRunsEndedIn` 讀兩次，不加新的 port 方法。`max_attempts` 那筆 Run 本身就是多出來的一次（D38），所以「試了幾次」是它的 attempt 減一。失敗原因只寫在 system comment 裡，Run 沒存，所以小標只說是哪條規則，原因要點開看。
+- 理由：外框讓人掃過看板就看得到，小標說清楚是哪一種；只有外框分不出失敗跟放棄，只有小標又容易漏看。
+- 實測：`pnpm test` 423 條、`pnpm check` 沒有錯誤。engine 測試確認失敗的兩張卡都被標、人移走一張後只剩另一張；重試到上限的卡標「試了 2 次」、人拉回去重跑成功後不標。E2E 多一條：`[fake:failed]` 的卡被送到 Blocked 後有紅框與 Failed，人移回 Refining 後兩者都消失。
+- 重新檢視：要在小標上直接看到原因時，Run 要多存一欄 reason。
+

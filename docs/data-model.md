@@ -5,7 +5,7 @@
 | store | 內容 | 後端 |
 |---|---|---|
 | tracker | WorkUnit、Dependency、Comment、Attachment | sqlite 或 Jira，二選一，不同步 |
-| store | Run、engine_state | 預設 sqlite，可換成別的 store plugin（D88） |
+| store | Run、engine_state、帳號與 session、流程設定的每一版 | 預設 sqlite，可換成別的 store plugin（D88） |
 
 兩邊只靠 `ref`（key）互相指，不做外鍵。Jira 模式下 ticket 全看 Jira，但 Run 沒地方放，所以一定有 store。
 store 被清掉的話，`blocked` 的 item 當成人工 blocked 處理，不會自動接回。
@@ -111,7 +111,7 @@ type Outcome =
 | version | 欄位，每次改 title、body、status 加一 | title、description、status 的 hash |
 | ref | `<refPrefix>-<n>`，前綴在 plugin 的 `options.refPrefix`，預設 `TSK`；n 是 `ref_counter` 發的流水號，刪掉的 task 的號碼不會再發（D52、D70） | issue key |
 | 刪 task | 同一個 transaction 刪掉它的 dependency（兩個方向）、comment、附件與它自己 | `DELETE /issue/{key}`，Jira 連 link、comment、附件一起刪 |
-| status 存什麼 | config 對照的 tracker key（預設是顯示名） | status id（D50） |
+| status 存什麼 | 流程設定對照的 tracker key（預設是邏輯名，改顯示名不動資料，D91） | status id（D50） |
 
 item 與 task 各有自己的 workflow，所以 Jira 的 status mapping 要兩份。
 engine 用的 token 是誰，engine 寫的東西就顯示成誰。用專用 bot 帳號或個人 token 都可以，comment 一律帶標記，所以兩種情況都分得出來是人還是 engine 寫的。
@@ -234,6 +234,15 @@ CREATE TABLE api_token (
   token_hash TEXT NOT NULL UNIQUE,
   expires_at TEXT,
   created_at TEXT NOT NULL
+);
+
+-- W4a (D91): every save of the flow settings. The store keeps the JSON as given; the engine
+-- checks it. The newest version is the one in use; none yet means the built-in default.
+CREATE TABLE flow_version (
+  version  INTEGER PRIMARY KEY,                 -- 1, 2, ...; a save names the one it started from
+  flow     TEXT NOT NULL,                       -- JSON: workflow, rules, labels
+  saved_by TEXT NOT NULL,                       -- the saver's display name, copied; '' with no sign-in
+  saved_at TEXT NOT NULL
 );
 ```
 

@@ -7,7 +7,7 @@
 - 能自訂的：規則盯哪一站（`watch`）、派哪個 agent、給什麼 prompt（D77 的三層）、每個 status 對到 tracker 的哪個 key。
 - W1 之後能自訂的：item 的 status、順序、顯示名、誰處理（`handledBy`）、人在每站的按鈕（`outcomes`）、兩個角色（D81，D86 從五個減成兩個）。
 - W2 之後能自訂的：規則有哪些結果、各去哪一站（規則的 `outcomes`），多了只讀與留言的 `review` mode（D84）。
-- config 只能寫在檔案裡，改了要重啟，前端看不到也改不了。
+- config 只能寫在檔案裡，改了要重啟，前端看不到也改不了（W4a 把流程設定搬進 store、加了設定頁，D91）。
 - store 寫死是 sqlite，第三方沒辦法換成別的 DB（W3 改成 plugin，D88）。
 
 ## 1. stage 的三種
@@ -67,6 +67,7 @@ status 整串由使用者列。程式裡會點名某個 item status 的地方，
 | mode | tool | 結果 |
 |---|---|---|
 | `review` | 讀 item、task、comment，留 comment | 沒有內建的完成結果，全部由規則的 `outcomes` 宣告 |
+| `custom` | 全部（建 task、改 task status 也有） | `succeeded` 必填，一個都不驗，照規則的 `outcomes` 搬；prompt 沒有預設（D92） |
 
 split、execute、rework 照舊。使用者要的站大多是「agent 看一看、留言、給結論」，例如 AI code review、檢查規格寫得夠不夠，`review` 就夠了。
 
@@ -74,18 +75,20 @@ split、execute、rework 照舊。使用者要的站大多是「agent 看一看�
 
 作者要兩種用法都吃：自己一台機器用，和部署在共用的機器上大家一起用。共用時要能在網頁上改，所以流程設定放 DB。
 
-切成兩份：
+切成兩份（D91）：
 
 | | 放哪 | 內容 |
 |---|---|---|
-| 啟動設定 | 檔案（現在的 `tasuki.config.jsonc`） | store 用哪個 plugin 與它的連線、`dataDir`、`server`、`auth` |
-| 流程設定 | store（DB） | status 與角色、規則、agent、prompt 的三層、status 對照 |
+| 啟動設定 | 檔案（`tasuki.config.jsonc`） | `dataDir`、`server`、`auth`、`tracker`、`store`、`agents`、`poll`、`limits`、`workspace` |
+| 流程設定 | store（DB） | status 與角色、`taskStatuses` 對照、規則（含行動層 prompt）、`labels.hold` |
 
-- secret 一律在環境變數。DB 只存 `${VAR}` 這個引用，執行時才展開。本機是 `.env`，docker 是 `env_file`，k8s 是 Secret 加 `envFrom`，engine 讀的都是 `process.env`。設定頁只顯示某個變數有沒有設，不顯示值。
+- 分的方式：部署的人設、跟機器與程式行為有關的放檔案；團隊每天會想調的流程放 DB。
+- `agents` 放檔案。agent 的 options 決定 AI 在 engine 那台機器上能做什麼（`allowedTools`、`plugins` 路徑、`env` 裡的 secret），是部署的人的責任，跟 `tracker` 一樣；放 DB 的話 maintainer 在網頁上就能把 `Bash(*)` 打開。代價是網頁上換不了 model、改不了基礎層 prompt，規則只從檔案定義的 agent 裡挑。
+- 流程設定裡沒有 secret，也沒有 engine 那台機器上的路徑。規則的 prompt 就是存在 DB 的一段字，沒有 `promptFile`。
 - 改了就生效：engine 每輪 poll 開始時讀一次流程設定，進行中的 Run 用它開跑時的那份。
-- 驗證跟現在 `loadConfig` 一樣嚴格，只是從「啟動失敗」改成「存檔被拒」，錯誤顯示在設定頁上。
-- 第一次啟動時 DB 是空的，寫入預設流程。
-- 設定頁要等 S9 的 auth，誰能改流程到時候再定。
+- 驗證跟現在 `loadConfig` 一樣嚴格，只是從「啟動失敗」改成「存檔被拒」，錯誤顯示在設定頁上，指到是哪一站、哪條規則的哪一欄。
+- 設定頁用表單，不是 JSON 編輯器，讓不寫程式的人也能改。只給 `admin` 與 `maintainer`。
+- 檔案只放啟動設定，寫了流程設定的欄位就跟其他不認識的欄位一樣被拒。DB 從沒存過時用預設流程（state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則），這份不寫進 DB，第一次存檔才有第一版，之後只在設定頁上改。
 - 不做匯出匯入（作者 2026-11-21）。
 
 ## 6. store 也是 plugin
@@ -105,9 +108,9 @@ tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各
 2. 看板上這站顯示雷達；把一站設成 `handledBy: "person"`，顯示眼睛；兩者都沒有的不標。
 3. agent 回一個規則沒宣告的結果名，engine 拒絕並讓 agent 重選，item 不動。
 4. 把 `entry` 角色改指到另一站，新 item 就從那裡開始；刪掉一站還有 item 在上面時，存檔被拒並說出是哪些 item。
-5. 檔案裡的 `workflow` 第一次啟動時被讀進 DB，行為跟讀檔時一樣，現有的 E2E 全過。
+5. DB 是空的時候啟動，看板出現預設流程的各站；檔案裡寫了 `workflow` 或 `rules` 就拒絕啟動。現有的 E2E 改成開跑前用 API 寫入流程設定，全過。
 6. 一個只在 `testkit` 契約測試裡出現的假 store plugin 能換掉內建的 sqlite store，engine 照常跑。
-7. 設定頁和 API 回應裡都看不到任何 secret 的值。
+7. 設定頁和 API 回應裡都看不到任何 secret 的值；流程設定裡本來就沒有 secret，規則的 agent 只能從檔案定義的名字裡選。
 8. 改了一條規則的 prompt 之後，設定頁看得到誰在什麼時候改了什麼，能回到前一版。
 
 ## 切片草案
@@ -119,7 +122,8 @@ tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各
 | W1 | status 自訂與角色、`handledBy`、站上的 `outcomes`，還在檔案裡設定（已完成，D81） | config 加一站，看板多一欄，眼睛和雷達標對 |
 | W2 | 規則宣告 `outcomes`、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
 | W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約（已完成，D88） | 行為不變，契約測試多一套 |
-| W4 | 流程設定進 store、設定頁、熱重載（S9 之後） | 在網頁上改規則和 prompt，下一輪就生效 |
+| W4a | 流程設定進 store、設定頁（表單）、熱重載（已完成，D91） | 在網頁上改站和規則的 prompt，下一輪就生效 |
+| W4b | 流程設定的修改歷史、回到任一版 | 看得到誰在什麼時候改了什麼，能回到前一版 |
 | 之後 | postgres store plugin | 換成 postgres 照常跑 |
 
 W1、W2 跟存在哪裡無關，先做是為了讓設計在檔案上定型，W4 搬進 DB 時才不會每改一次設計就多一次 migration。
@@ -131,4 +135,6 @@ W1、W2 跟存在哪裡無關，先做是為了讓設計在檔案上定型，W4 
 3. （已定，作者 2026-11-21）tracker 的選擇放啟動設定。接 Jira 時 Run 與流程設定仍在 store，store 換成遠端的 DB（第 6 節）之前，備份 `dataDir` 是唯一的保險。
 4. （已定，作者 2026-11-21）`plugins` 這類路徑指 engine 那台機器，由佈署的人在 setup 時備好（docker 打包進 image 或掛 volume）。存檔時 engine 檢查自己那台上存不存在，不存在就拒絕，錯誤顯示在設定頁。
 5. （已定，作者 2026-11-21）刪掉一站時，上面還有 item 就拒絕存檔，列出是哪些 item（驗收條件 4）。改名同理。Jira 那邊的 status 不跟著刪，`doctor` 再提示（plan.md 待釐清 14）。
-6. （已定，作者 2026-11-21）流程設定的每次修改都留歷史：誰、什麼時候、改了什麼，可以回到任一版。跟 W4 的設定頁一起做或緊接在後。
+6. （已定，作者 2026-11-21）流程設定的每次修改都留歷史：誰、什麼時候、改了什麼，可以回到任一版。W4b 緊接在 W4a 後做（D91）。
+7. （已定，作者 2026-11-22）`agents`、`poll`、`limits` 留在檔案，流程設定裡沒有 secret，規則沒有 `promptFile`；檔案不再當流程設定的種子（D91）。
+8. （已定，作者 2026-11-22）接 Jira 時，第一次啟動用的預設流程 key 是邏輯名，對不上 Jira 的 status id（D50）。設定頁的 key 欄是 tracker 列出的 status 下拉選單；還有站的 key 不在 tracker 的 status 裡時，engine 不派 Run，看板頂端提示還有幾站沒對上、連到設定頁（D91）。
