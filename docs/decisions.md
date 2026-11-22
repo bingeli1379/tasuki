@@ -910,3 +910,20 @@
   - 回到一版另開一條寫入的路，就要把 W4a 的每一項檢查再接一次；倒回表單再存，檢查自然都在，人也能在存之前先看一眼、順手再改。代價是要多按一次 Save。
 - 實測：`pnpm test` 433 條、`pnpm check` 沒有錯誤，`pnpm e2e` 36 條全過，sqlite 與 jira 各多一條：改第一條規則的 prompt 存檔、歷史最新一版標 In use 並寫「prompt changed」、點開看得到新 prompt、Restore 前一版後表單上方出現提示且 prompt 回到舊的、存檔後多一版。`flow-changes` 的單元測試逐項驗每一種改法，server 測試驗歷史的順序、第一版對預設、倒回舊版再存是新的一版且列出反向的改變。
 - 重新檢視：版本多到一次讀回太慢時加分頁；有人需要「誰改了這一欄」的逐欄追溯時，再看要不要存 patch 而不是整份。
+
+## D95 `doctor` 把檢查交給 plugin、心跳的細節、啟動只擋檔案這邊的錯
+
+- 背景：S10（2026-11-22）。plugins.md 待定 2 問 `doctor` 怎麼把 Jira workflow 與 CLI preflight 這種只有 plugin 知道的事交出去；D66 定了用心跳擋第二個 engine，但沒定多久算新鮮。
+- 決定（作者選 A）：
+  - `TrackerPort` 與 `RunnerPort` 各加一個選用的 `doctor`，回傳 `{ level: 'error' | 'warning', message }[]`。engine 把規則會走的轉移整理好（邏輯名，`ruleTransitions`）交給 tracker，plugin 自己判斷合不合法；engine 只收集、加上「tracker @tasuki/jira-cloud」「agent claude-main」這種前綴再印。沒實作就是沒東西要查。選用的方法舊 plugin 不用改，`apiVersion` 維持 1。
+  - 心跳是 tracker 的選用方法 `readHeartbeat`、`writeHeartbeat`（`undefined` 是清掉）。Jira 存在 project property `tasuki.heartbeat`，sqlite 不實作。engine 每輪一開始就寫，暫停或有沒對上的 status 時也寫，因為它還佔著這個 project。比三輪 poll 新就算還活著（Jira 預設 30 秒一輪，就是 90 秒）。`engineId` 是「主機名:data dir」，同一台機器、同一個 data dir 重開時認得出是自己留下的，`pnpm dev` 改檔重啟不用等。收到 SIGINT、SIGTERM 時清掉自己的心跳，下一個 engine 馬上能起。
+  - `doctor` 先做成 server 的子指令，S12 再包成 `tasuki doctor`。每一項都跑完才結束：config 讀不了、store 或流程載不起來時後面沒得查才停，tracker、各 agent、auth 各自失敗不影響別人。
+  - 啟動時：另一個 engine、agent preflight 的 error 拒絕啟動。流程對 tracker 的問題（tracker 沒有的 status、workflow 不允許的轉移）只印出來照樣啟動，跟 D91 一樣，因為流程要在設定頁改，拒絕啟動就改不了了。
+  - Jira 的轉移檢查：`POST /rest/api/3/workflows` 依 issue type 讀 workflow，`GLOBAL` 轉移從哪都能進、`DIRECTED` 只從 `links` 列的 status 進。transition 上的 condition（限定誰能按）不看。看板：`/rest/agile/1.0/board?projectKeyOrId=` 列出的每個看板，tasuki 用到、project 裡有、但沒有任何一欄放的 status 警告。欄位順序不檢查，也不代為去改（plan.md 待釐清 14 剩下的部分）。
+  - claude 的 preflight：`--version` 跑得起來；`allowedTools` 空的警告；`requires` 有東西才照 Run 的載入方式（`--plugin-dir`、`--mcp-config`、隔離旗標）起一次 `claude -p`，一行一行找 `type: system, subtype: init`（前面還會有 `ui_status` 之類的），MCP server 要是 `connected`（也看過 `failed`、`needs-auth`），skill 照 `init.skills` 的名字比（plugin 的是 `sdd:apply` 這種），讀到就砍整個 process group，60 秒沒出現算錯。codex 留到 S12。
+- 理由：
+  - 檢查交給 plugin，Jira 與 CLI 的細節才不會漏進 core（D44）。只讓 plugin 交原始資料、engine 自己比，第 8 條還做得到，「有沒有裝 skill」沒辦法變成通用的資料。在工廠裡丟錯只有過或不過，也沒辦法一次列完。
+  - `engineId` 用隨機值的話，當掉或被 `vp pack --watch` 直接重啟後，要等三輪才起得來；同一台機器、同一個 data dir 也不可能是別人的 engine。
+- 實測：`pnpm test` 450 條、`pnpm check` 沒有錯誤。KAN 上：`doctor` 對作者的 config 是 0 error 0 warning；起一個 engine 後，用另一個 data dir 起第二個被拒（「seen 2s ago」），`doctor` 也報同一條 error；SIGTERM 第一個後 property 回 404，第二個的 `doctor` 不再報。真的 claude 2.1.323：繼承設定時 `playwright` connected、`sdd:apply` 有，沒有的 MCP 與 skill 各報一條；隔離時 `sdd:apply` 讀不到；跑完沒有殘留的 process。testkit 的 tracker 契約多一條心跳的寫讀清。
+- 沒做：security-and-auth.md 說 `doctor` 與啟動 log 要列出 plugin 的版本，目前只列名字，plugin 沒有宣告版本，要從套件的 `package.json` 讀。
+- 重新檢視：設定頁存檔時也想擋 workflow 不允許的轉移時（現在只在 `doctor` 與啟動時印）；Jira 的 transition condition 擋到 engine 時；有人在同一台機器用同一個 data dir 開兩個 engine 時。

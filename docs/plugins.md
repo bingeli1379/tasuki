@@ -78,7 +78,7 @@ config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解�
 這些文件裡完全沒有，也沒有被確認過，實作前要先問作者。
 
 1. plugin 的 options 怎麼驗證，以及 JSON Schema 由誰提供給編輯器補全。
-2. `doctor` 怎麼把檢查委派給 plugin（Jira 的 workflow 轉移檢查、CLI preflight 都是 plugin 才知道的事）。
+2. （已定，D95）`doctor` 怎麼把檢查委派給 plugin：`TrackerPort` 與 `RunnerPort` 各有選用的 `doctor`，回傳 `{ level, message }[]`。tracker 拿到規則會走的轉移（邏輯名），自己判斷 workflow 允不允許；runner 自己檢查 CLI 與 `requires`。前綴（哪個 plugin、哪個 agent）由 engine 加。沒實作就是沒東西要檢查。心跳也是 tracker 的選用方法（`readHeartbeat`、`writeHeartbeat`），sqlite 不實作。
 3. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。程式目前要求完全相等。
 4. 第三方套件的命名慣例。
 5. （已定，D89）`auth` 的內建實作是 `@tasuki/auth-builtin` 與 `@tasuki/auth-http` 兩個套件；不登入是省略 `auth`，不是一個套件。builtin 讀寫 store 裡的帳號與密碼 hash，所以 `auth` 工廠拿到的 `ctx` 多一個 `store`（`AuthContext`）。
