@@ -297,5 +297,45 @@ export function describeStoreContract(
       expect(await store.apiTokenByHash('ha')).toBeUndefined()
       expect((await store.apiTokensOf('u1')).map((t) => t.name)).toEqual(['ci'])
     })
+
+    it('makes a userId when given none, and binds an externalId only one account holds', async () => {
+      const added = await store.createAccount({
+        username: 'eli',
+        displayName: 'eli',
+        access: 'member',
+      })
+      expect(added.userId).not.toBe('')
+      expect(added).not.toHaveProperty('externalId')
+      expect(await store.findAccountByExternalId('emp-1')).toBeUndefined()
+      expect((await store.updateAccount(added.userId, { externalId: 'emp-1' })).externalId).toBe(
+        'emp-1',
+      )
+      expect((await store.findAccountByExternalId('emp-1'))?.userId).toBe(added.userId)
+      const other = await store.createAccount({
+        username: 'amy',
+        displayName: 'amy',
+        access: 'member',
+        externalId: 'emp-2',
+      })
+      expect(other.externalId).toBe('emp-2')
+      await expect(store.updateAccount(other.userId, { externalId: 'emp-1' })).rejects.toThrow(
+        InvalidInput,
+      )
+    })
+
+    it('deleting an account takes its sessions and API tokens with it, and nobody else’s', async () => {
+      await store.createAccount(newAccount('u1'))
+      await store.createAccount(newAccount('u2'))
+      await store.createSession('s1', { userId: 'u1', ttl: 'never' })
+      await store.createSession('s2', { userId: 'u2', ttl: 'never' })
+      await store.createApiToken('h1', { userId: 'u1', name: 'laptop' })
+      await store.deleteAccount('u1')
+      expect(await store.getAccount('u1')).toBeUndefined()
+      expect(await store.getSession('s1')).toBeUndefined()
+      expect(await store.apiTokenByHash('h1')).toBeUndefined()
+      expect(await store.getSession('s2')).toBeDefined()
+      // The username is free again.
+      await store.createAccount(newAccount('u3', 'u1'))
+    })
   })
 }

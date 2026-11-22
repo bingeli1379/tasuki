@@ -4,7 +4,9 @@ import {
   addAttachment,
   assertPassword,
   changeOwnPassword,
+  addAccounts,
   createAccount,
+  deleteAccount,
   Forbidden,
   listAccounts,
   needsSetup,
@@ -81,6 +83,11 @@ export interface AppDeps {
   tokens: RunTokens
   // Unset: nobody signs in, and every request acts as an admin.
   auth?: AppAuth
+  // The address people open through the proxy (S9c); its host and origin pass the checks below.
+  publicUrl?: string
+  // The host agents reach /agent-mcp at, when the engine is bound to one address that is not
+  // loopback.
+  agentHost?: string
 }
 
 const SESSION_COOKIE = 'tasuki_session'
@@ -96,8 +103,8 @@ const LOCAL: Account = {
   createdAt: '',
 }
 
-// Loopback only until a public URL can be configured (S9c). A page on another site that gets
-// the browser to reach 127.0.0.1 by DNS rebinding still sends its own name as the Host.
+// A page on another site that gets the browser to reach 127.0.0.1 by DNS rebinding still
+// sends its own name as the Host.
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
 const hostOf = (value: string): string | undefined => {
   try {
@@ -131,12 +138,17 @@ export function createApp({
   holdLabel,
   tokens,
   auth,
+  publicUrl,
+  agentHost,
 }: AppDeps): Hono<{ Variables: { actor: Account } }> {
   const signedIn = new AsyncLocalStorage<Account>()
   const tracker =
     auth === undefined
       ? plainTracker
       : namingComments(plainTracker, () => signedIn.getStore()?.displayName)
+  const hosts = new Set(LOOPBACK)
+  const publicOrigin = publicUrl === undefined ? undefined : new URL(publicUrl)
+  if (publicOrigin !== undefined) hosts.add(publicOrigin.hostname)
   const app = new Hono<{ Variables: { actor: Account } }>()
   app.onError((e, c) => {
     if (e instanceof InvalidInput) return c.json({ error: e.message }, 400)
@@ -149,14 +161,17 @@ export function createApp({
   })
   app.use(async (c, next) => {
     // The Node adapter builds the URL from the Host header.
-    if (!LOOPBACK.has(hostOf(c.req.url) ?? '')) return c.json({ error: 'unexpected Host' }, 403)
+    const host = hostOf(c.req.url) ?? ''
+    if (!hosts.has(host) && !(c.req.path === '/agent-mcp' && host === agentHost))
+      return c.json({ error: 'unexpected Host' }, 403)
     // CSRF: SameSite=Lax stops most cross-site writes; this covers the rest. A client that
     // is not a browser sends no Origin and is not who CSRF is about.
     const origin = c.req.header('Origin')
     if (
       !['GET', 'HEAD', 'OPTIONS'].includes(c.req.method) &&
       origin !== undefined &&
-      !LOOPBACK.has(hostOf(origin) ?? '')
+      !LOOPBACK.has(hostOf(origin) ?? '') &&
+      origin !== publicOrigin?.origin
     )
       return c.json({ error: 'cross-site request' }, 403)
     return next()
@@ -174,8 +189,8 @@ export function createApp({
       sameSite: 'Lax',
       path: '/',
       maxAge: auth.ttlSeconds ?? NEVER_SECONDS,
-      // Secure once the board is served over https (S9c); some browsers drop a Secure cookie
-      // on http://localhost.
+      // Only over https: some browsers drop a Secure cookie on http://localhost (D89).
+      ...(publicOrigin?.protocol === 'https:' ? { secure: true } : {}),
     })
   }
 
@@ -241,24 +256,13 @@ export function createApp({
       return c.json({ error: 'that is not the setup token' }, 401)
     }
     auth.throttle.succeeded('#setup')
-    let admin: Account
-    if (auth.port.accounts === undefined) {
-      const me = await sessionOf(c)
-      if (me === undefined) return c.json({ error: 'sign in first' }, 401)
-      admin = await setUpFirstAdmin({ auth: auth.port, store }, me)
-    } else {
-      assertPassword(text(body.password))
-      admin = await setUpFirstAdmin(
-        { auth: auth.port, store },
-        // An account tasuki keeps is shown by its username (D89).
-        {
-          username: text(body.username).trim(),
-          displayName: text(body.username).trim(),
-          password: text(body.password),
-        },
-      )
-      await startSession(c, admin)
-    }
+    if (auth.port.accounts !== undefined) assertPassword(text(body.password))
+    const admin = await setUpFirstAdmin(
+      { auth: auth.port, store },
+      { username: text(body.username), password: text(body.password) },
+    )
+    if (admin === undefined) return c.json({ error: 'wrong username or password' }, 401)
+    await startSession(c, admin)
     auth.setup.close()
     return c.json({ me: admin })
   })
@@ -282,6 +286,23 @@ export function createApp({
       access: access as Access,
     })
     return c.json(account, 201)
+  })
+  // From an outside system, by username: one per line when pasted from a list.
+  app.post('/api/accounts/batch', async (c) => {
+    if (auth === undefined) throw new InvalidInput('nobody signs in here')
+    const body = await c.req.json<{ usernames?: unknown; access?: unknown }>()
+    const access = body.access ?? 'member'
+    if (!ACCESS_LEVELS.includes(access as Access))
+      throw new InvalidInput(`access is one of ${ACCESS_LEVELS.join(', ')}`)
+    const usernames = Array.isArray(body.usernames) ? body.usernames.map(text) : []
+    return c.json(
+      await addAccounts({ auth: auth.port, store }, c.var.actor, usernames, access as Access),
+      201,
+    )
+  })
+  app.delete('/api/accounts/:id', async (c) => {
+    await deleteAccount(store, c.var.actor, c.req.param('id'))
+    return c.json({ ok: true })
   })
   app.patch('/api/accounts/:id', async (c) => {
     const body = await c.req.json<{ access?: unknown; disabled?: unknown }>()

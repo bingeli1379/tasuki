@@ -14,18 +14,21 @@ export interface NewRun {
 }
 
 export interface NewAccount {
-  userId: string
+  // The store makes one when left out.
+  userId?: string
   username: string
   displayName: string
   access: Access
   // Only for accounts the store keeps the password of (auth-builtin).
   passwordHash?: string
+  externalId?: string
 }
 
 export interface AccountChange {
   displayName?: string
   access?: Access
   disabled?: boolean
+  externalId?: string
 }
 
 export interface Session {
@@ -75,16 +78,19 @@ export interface StorePort {
   // The newest Run of each target, where that Run ended in outcome.
   latestRunsEndedIn(outcome: Outcome): Promise<Run[]>
 
-  // Throws InvalidInput when the userId or the username is taken.
+  // Throws InvalidInput when the userId, the username or the externalId is taken.
   createAccount(account: NewAccount): Promise<Account>
   getAccount(userId: string): Promise<Account | undefined>
   findAccount(username: string): Promise<Account | undefined>
+  findAccountByExternalId(externalId: string): Promise<Account | undefined>
   // Oldest first.
   listAccounts(): Promise<Account[]>
   // Throws NotFound for an unknown userId.
   updateAccount(userId: string, change: AccountChange): Promise<Account>
   passwordHash(userId: string): Promise<string | undefined>
   setPasswordHash(userId: string, hash: string): Promise<void>
+  // With its sessions and API tokens. What it wrote keeps the name it was written under.
+  deleteAccount(userId: string): Promise<void>
 
   // Tokens are kept by their hash only; the token itself is never stored.
   createSession(tokenHash: string, session: Omit<Session, 'createdAt'>): Promise<void>

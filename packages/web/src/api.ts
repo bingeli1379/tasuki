@@ -73,6 +73,8 @@ export interface Account {
   access: Access
   disabled: boolean
   createdAt: string
+  // Set once someone added from an outside system has signed in.
+  externalId?: string
 }
 
 export interface AuthState {

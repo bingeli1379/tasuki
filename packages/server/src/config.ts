@@ -41,7 +41,11 @@ export interface AuthConfig extends PluginRef {
 export interface Config {
   configDir: string
   dataDir: string
+  // What the server binds to; anything but loopback needs publicUrl (security-and-auth.md).
+  host: string
   port: number
+  // The https address people open, behind the proxy that does TLS (D60).
+  publicUrl?: string
   tracker: PluginRef
   // Where the engine keeps its Runs and the pause (D78).
   store: PluginRef
@@ -186,6 +190,37 @@ function pluginRef(value: unknown, path: string): PluginRef {
   if (!isObject(value) || typeof value['plugin'] !== 'string')
     throw new Error(`config ${path}.plugin must be a package name`)
   return { plugin: value['plugin'], options: value['options'] ?? {} }
+}
+
+export const isLoopback = (host: string): boolean =>
+  host === 'localhost' || host === '::1' || /^127\.\d+\.\d+\.\d+$/.test(host)
+
+// An unauthenticated engine on the network lets anyone drive an agent with tool access, and a
+// password typed at the login page crosses the network as typed. allowInsecure owns both, for
+// a container whose port is only published on the host's loopback (D90).
+function checkBinding(server: Raw, hasAuth: boolean): { host: string; publicUrl?: string } {
+  const host = server['host'] ?? '127.0.0.1'
+  if (typeof host !== 'string' || host === '')
+    throw new Error('config server.host must be a string')
+  const raw = server['publicUrl']
+  let publicUrl: URL | undefined
+  if (raw !== undefined) {
+    try {
+      publicUrl = typeof raw === 'string' ? new URL(raw) : undefined
+    } catch {}
+    if (publicUrl === undefined) throw new Error('config server.publicUrl must be a URL')
+  }
+  const binding = publicUrl === undefined ? { host } : { host, publicUrl: publicUrl.origin }
+  if (isLoopback(host) || server['allowInsecure'] === true) return binding
+  if (!hasAuth)
+    throw new Error(
+      `config server.host is ${host} with no auth: anyone who reaches it can drive the agents. Set auth, or server.allowInsecure: true`,
+    )
+  if (publicUrl?.protocol !== 'https:')
+    throw new Error(
+      `config server.publicUrl must be the https address people open when server.host is ${host}, behind a proxy that does TLS`,
+    )
+  return binding
 }
 
 const UNIT_SECONDS = { m: 60, h: 3600, d: 86400 } as const
@@ -385,6 +420,7 @@ export function loadConfig(path: string): Config {
   return {
     configDir,
     dataDir: resolve(configDir, typeof raw['dataDir'] === 'string' ? raw['dataDir'] : './data'),
+    ...checkBinding(server, raw['auth'] !== undefined),
     port: typeof server['port'] === 'number' ? server['port'] : 8787,
     tracker,
     store,

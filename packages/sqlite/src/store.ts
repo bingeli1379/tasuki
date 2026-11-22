@@ -60,6 +60,7 @@ function toAccount(row: Row): Account {
     access: row['access'] as Access,
     disabled: row['disabled_at'] !== null,
     createdAt: String(row['created_at']),
+    ...(typeof row['external_id'] === 'string' ? { externalId: row['external_id'] } : {}),
   }
 }
 
@@ -196,16 +197,18 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
         .map(toRun)
     },
     async createAccount(a) {
+      const userId = a.userId ?? randomUUID()
       try {
         db.prepare(
-          `INSERT INTO account (user_id, username, display_name, access, password_hash, created_at)
-           VALUES (?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO account (user_id, username, display_name, access, password_hash, external_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
         ).run(
-          a.userId,
+          userId,
           a.username,
           a.displayName,
           a.access,
           a.passwordHash ?? null,
+          a.externalId ?? null,
           clock.now().toISOString(),
         )
       } catch (e) {
@@ -213,13 +216,17 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
           throw new InvalidInput(`the username ${a.username} is taken`)
         throw e
       }
-      return account(a.userId) as Account
+      return account(userId) as Account
     },
     async getAccount(userId) {
       return account(userId)
     },
     async findAccount(username) {
       const row = db.prepare('SELECT * FROM account WHERE username = ?').get(username)
+      return row === undefined ? undefined : toAccount(row)
+    },
+    async findAccountByExternalId(externalId) {
+      const row = db.prepare('SELECT * FROM account WHERE external_id = ?').get(externalId)
       return row === undefined ? undefined : toAccount(row)
     },
     async listAccounts() {
@@ -238,6 +245,17 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
         db.prepare(
           'UPDATE account SET disabled_at = CASE WHEN ? THEN COALESCE(disabled_at, ?) END WHERE user_id = ?',
         ).run(change.disabled ? 1 : 0, clock.now().toISOString(), userId)
+      if (change.externalId !== undefined)
+        try {
+          db.prepare('UPDATE account SET external_id = ? WHERE user_id = ?').run(
+            change.externalId,
+            userId,
+          )
+        } catch (e) {
+          if (e instanceof Error && e.message.includes('UNIQUE constraint failed'))
+            throw new InvalidInput(`another account is bound to ${change.externalId}`)
+          throw e
+        }
       return account(userId) as Account
     },
     async passwordHash(userId) {
@@ -247,6 +265,18 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
     },
     async setPasswordHash(userId, hash) {
       db.prepare('UPDATE account SET password_hash = ? WHERE user_id = ?').run(hash, userId)
+    },
+    async deleteAccount(userId) {
+      db.exec('BEGIN')
+      try {
+        db.prepare('DELETE FROM session WHERE user_id = ?').run(userId)
+        db.prepare('DELETE FROM api_token WHERE user_id = ?').run(userId)
+        db.prepare('DELETE FROM account WHERE user_id = ?').run(userId)
+        db.exec('COMMIT')
+      } catch (e) {
+        db.exec('ROLLBACK')
+        throw e
+      }
     },
     async createSession(tokenHash, session) {
       db.prepare(

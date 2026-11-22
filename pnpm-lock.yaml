@@ -173,6 +173,9 @@ importers:
       '@tasuki/auth-builtin':
         specifier: workspace:*
         version: link:packages/auth-builtin
+      '@tasuki/auth-http':
+        specifier: workspace:*
+        version: link:packages/auth-http
       '@tasuki/claude-cli':
         specifier: workspace:*
         version: link:packages/claude-cli
@@ -204,6 +207,12 @@ importers:
       '@tasuki/sqlite':
         specifier: workspace:*
         version: link:../sqlite
+
+  packages/auth-http:
+    dependencies:
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/claude-cli:
     dependencies:
@@ -256,6 +265,9 @@ importers:
       '@tasuki/auth-builtin':
         specifier: workspace:*
         version: link:../auth-builtin
+      '@tasuki/auth-http':
+        specifier: workspace:*
+        version: link:../auth-http
       '@tasuki/fake-runner':
         specifier: workspace:*
         version: link:../fake-runner

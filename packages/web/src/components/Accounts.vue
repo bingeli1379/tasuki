@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { call, messageOf, sendJson, type Access, type Account } from '../api'
 
 const props = defineProps<{ me: Account; keepsAccounts: boolean }>()
@@ -19,6 +19,22 @@ const draftAgain = ref('')
 const resetAgain = ref('')
 const resetting = ref<Account>()
 const newPassword = ref('')
+const query = ref('')
+const deleting = ref<Account>()
+// Pasted from a list, one username per line.
+const pasted = ref('')
+const pastedAccess = ref<Access>('member')
+const toast = useToast()
+const failed = (e: unknown): void => void toast.add({ title: messageOf(e), color: 'error' })
+
+const shown = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  return q === ''
+    ? accounts.value
+    : accounts.value.filter(
+        (a) => a.username.toLowerCase().includes(q) || a.displayName.toLowerCase().includes(q),
+      )
+})
 
 async function load(): Promise<void> {
   try {
@@ -41,7 +57,35 @@ async function create(): Promise<void> {
     adding.value = false
     await load()
   } catch (e) {
-    error.value = messageOf(e)
+    failed(e)
+  }
+}
+
+async function addPasted(): Promise<void> {
+  try {
+    const result = await call<{ existing: string[] }>(
+      '/api/accounts/batch',
+      sendJson('POST', { usernames: pasted.value.split(/\r?\n/), access: pastedAccess.value }),
+    )
+    if (result.existing.length > 0)
+      toast.add({ title: `Already here, left as they were: ${result.existing.join(', ')}` })
+    pasted.value = ''
+    adding.value = false
+    await load()
+  } catch (e) {
+    failed(e)
+  }
+}
+
+async function remove(): Promise<void> {
+  const account = deleting.value
+  if (!account) return
+  try {
+    await call(`/api/accounts/${account.userId}`, { method: 'DELETE' })
+    deleting.value = undefined
+    await load()
+  } catch (e) {
+    failed(e)
   }
 }
 
@@ -50,7 +94,7 @@ async function change(account: Account, change: { access?: Access; disabled?: bo
     await call(`/api/accounts/${account.userId}`, sendJson('PATCH', change))
     await load()
   } catch (e) {
-    error.value = messageOf(e)
+    failed(e)
     await load()
   }
 }
@@ -58,6 +102,7 @@ async function change(account: Account, change: { access?: Access; disabled?: bo
 // One form open at a time: two stacked forms read as one.
 function startReset(account: Account): void {
   adding.value = false
+  deleting.value = undefined
   resetting.value = account
   newPassword.value = ''
   resetAgain.value = ''
@@ -65,7 +110,14 @@ function startReset(account: Account): void {
 
 function startAdding(): void {
   resetting.value = undefined
+  deleting.value = undefined
   adding.value = true
+}
+
+function startDelete(account: Account): void {
+  adding.value = false
+  resetting.value = undefined
+  deleting.value = account
 }
 
 async function reset(): Promise<void> {
@@ -79,9 +131,8 @@ async function reset(): Promise<void> {
     resetting.value = undefined
     newPassword.value = ''
     resetAgain.value = ''
-    error.value = ''
   } catch (e) {
-    error.value = messageOf(e)
+    failed(e)
   }
 }
 </script>
@@ -93,15 +144,23 @@ async function reset(): Promise<void> {
     :description="
       keepsAccounts
         ? 'Everyone who can sign in, and what they may do.'
-        : 'Accounts come from the outside system; someone signing in for the first time is a member.'
+        : 'Only people added here sign in, with their company account.'
     "
     :ui="{ content: 'sm:max-w-2xl' }"
   >
     <template #body>
       <div class="flex flex-col gap-4">
         <UAlert v-if="error" color="error" variant="subtle" :title="error" />
+        <UFormField label="Find someone" :ui="{ label: 'sr-only' }">
+          <UInput
+            v-model="query"
+            icon="i-lucide-search"
+            placeholder="Find someone"
+            class="w-full"
+          />
+        </UFormField>
         <ul class="divide-y divide-default">
-          <li v-for="a in accounts" :key="a.userId" :aria-label="a.username" class="py-2">
+          <li v-for="a in shown" :key="a.userId" :aria-label="a.username" class="py-2">
             <div class="flex items-center justify-between gap-3">
               <span :class="{ 'opacity-50': a.disabled }">
                 <span class="font-medium">{{ a.displayName }}</span>
@@ -110,6 +169,14 @@ async function reset(): Promise<void> {
                   {{ a.username }}
                 </span>
                 <UBadge v-if="a.disabled" label="Disabled" color="neutral" size="sm" class="ml-2" />
+                <UBadge
+                  v-else-if="!keepsAccounts && a.externalId === undefined"
+                  label="Not signed in yet"
+                  color="neutral"
+                  variant="outline"
+                  size="sm"
+                  class="ml-2"
+                />
               </span>
               <span class="flex items-center gap-1">
                 <USelect
@@ -140,6 +207,40 @@ async function reset(): Promise<void> {
                     @click="change(a, { disabled: !a.disabled })"
                   />
                 </UTooltip>
+                <UTooltip text="Delete" :delay-duration="100">
+                  <UButton
+                    icon="i-lucide-trash-2"
+                    :aria-label="`Delete ${a.username}`"
+                    color="error"
+                    variant="ghost"
+                    size="sm"
+                    :disabled="a.userId === props.me.userId"
+                    @click="startDelete(a)"
+                  />
+                </UTooltip>
+              </span>
+            </div>
+            <!-- Under the account it is for, where the button was pressed however far down. -->
+            <div
+              v-if="deleting?.userId === a.userId"
+              class="mt-2 flex items-center justify-between gap-3 rounded-lg bg-elevated p-3"
+            >
+              <p class="text-sm">
+                {{
+                  keepsAccounts
+                    ? 'Their sessions and API tokens stop working.'
+                    : 'They cannot sign in until someone adds them again.'
+                }}
+                What they wrote keeps their name.
+              </p>
+              <span class="flex shrink-0 gap-2">
+                <UButton
+                  label="Keep"
+                  color="neutral"
+                  variant="ghost"
+                  @click="deleting = undefined"
+                />
+                <UButton label="Delete for good" color="error" @click="remove" />
               </span>
             </div>
             <!-- Under the account it is for, so it is clear whose password changes. -->
@@ -188,6 +289,32 @@ async function reset(): Promise<void> {
             </form>
           </li>
         </ul>
+        <template v-if="!keepsAccounts">
+          <form
+            v-if="adding"
+            class="flex flex-col gap-3 rounded-lg border border-default p-4"
+            @submit.prevent="addPasted"
+          >
+            <h3 class="font-semibold">Add people</h3>
+            <UFormField label="Usernames" hint="One per line, as they sign in to the company">
+              <UTextarea v-model="pasted" :rows="5" autoresize autofocus class="w-full" />
+            </UFormField>
+            <UFormField label="Access">
+              <USelect v-model="pastedAccess" :items="ACCESS" class="w-full" />
+            </UFormField>
+            <span class="flex justify-end gap-2">
+              <UButton label="Cancel" color="neutral" variant="ghost" @click="adding = false" />
+              <UButton type="submit" label="Add people" :disabled="pasted.trim() === ''" />
+            </span>
+          </form>
+          <UButton
+            v-else
+            label="Add people"
+            variant="outline"
+            class="self-start"
+            @click="startAdding"
+          />
+        </template>
         <template v-if="keepsAccounts">
           <form
             v-if="adding"

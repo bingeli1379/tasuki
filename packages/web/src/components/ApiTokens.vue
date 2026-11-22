@@ -10,6 +10,7 @@ const expiresOn = ref('')
 // Shown once, right after it is made: only its hash is kept.
 const made = ref<{ name: string; token: string }>()
 const error = ref('')
+const toast = useToast()
 const busy = ref(false)
 const copied = ref(false)
 
@@ -70,7 +71,7 @@ async function revoke(token: ApiToken): Promise<void> {
     await call(`/api/tokens/${token.id}`, { method: 'DELETE' })
     await load()
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   }
 }
 

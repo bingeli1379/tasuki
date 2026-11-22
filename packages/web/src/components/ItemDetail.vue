@@ -200,7 +200,7 @@ async function save(): Promise<void> {
       })
       return
     }
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     saving.value = false
   }
@@ -220,7 +220,7 @@ async function addComment(): Promise<void> {
     commentDraft.value = ''
     error.value = ''
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     commenting.value = false
   }
@@ -267,7 +267,7 @@ async function upload(event: Event): Promise<void> {
     edits++
     error.value = ''
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     uploading.value = false
     input.value = ''
@@ -296,7 +296,7 @@ async function control(action: 'stop' | 'hold' | 'release'): Promise<void> {
     emit('updated', item)
     await load()
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     controlling.value = false
   }
@@ -317,7 +317,7 @@ async function remove(): Promise<void> {
     emit('deleted', props.itemRef)
     open.value = false
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
     confirmingDelete.value = false
   } finally {
     controlling.value = false
@@ -359,7 +359,7 @@ async function decide(to: string): Promise<void> {
       })
       return
     }
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     moving.value = false
   }

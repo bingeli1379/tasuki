@@ -14,6 +14,9 @@ export interface Account extends Identity {
   access: Access
   disabled: boolean
   createdAt: string
+  // Who the outside system says this is, bound at the first sign in (auth-http, D90). Unset
+  // for an account tasuki keeps, and for one an admin added that has not signed in yet.
+  externalId?: string
 }
 
 export const MIN_PASSWORD_LENGTH = 8

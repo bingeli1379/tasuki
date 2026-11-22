@@ -44,6 +44,34 @@ describe('loadConfig', () => {
       expect(() => ttl(bad)).toThrow('config auth.session.ttl')
   })
 
+  it('binds loopback unless told otherwise, and off loopback needs auth and an https publicUrl', () => {
+    const server = (s: object, auth = true) =>
+      loadConfig(
+        write(
+          JSON.stringify({ server: s, ...(auth ? { auth: { plugin: '@tasuki/auth-http' } } : {}) }),
+        ),
+      )
+    expect(server({}, false)).toMatchObject({ host: '127.0.0.1' })
+    expect(server({}, false).publicUrl).toBeUndefined()
+    expect(() => server({ host: '0.0.0.0' }, false)).toThrow('with no auth')
+    expect(() => server({ host: '0.0.0.0' })).toThrow('config server.publicUrl must be the https')
+    expect(() => server({ host: '0.0.0.0', publicUrl: 'http://tasuki.example' })).toThrow(
+      'config server.publicUrl must be the https',
+    )
+    expect(() => server({ host: '0.0.0.0', publicUrl: 'not a url' })).toThrow(
+      'config server.publicUrl must be a URL',
+    )
+    expect(server({ host: '0.0.0.0', publicUrl: 'https://tasuki.example/' })).toMatchObject({
+      host: '0.0.0.0',
+      publicUrl: 'https://tasuki.example',
+    })
+    // A container publishing its port on the host's loopback only (D90).
+    expect(server({ host: '0.0.0.0', allowInsecure: true }, false)).toMatchObject({
+      host: '0.0.0.0',
+    })
+    expect(server({ host: '::1' }, false).host).toBe('::1')
+  })
+
   it('leaves splitting off the default mapping unless a rule claims it', () => {
     expect(loadConfig(write('{}')).statuses.item?.['splitting']).toBeUndefined()
     const claiming = write(

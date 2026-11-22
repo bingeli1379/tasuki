@@ -173,7 +173,7 @@ async function setPaused(action: 'pause' | 'kill' | 'resume'): Promise<void> {
     paused.value = action !== 'resume'
     error.value = ''
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   }
 }
 
@@ -200,7 +200,7 @@ async function create(): Promise<void> {
     error.value = ''
     open.value = false
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     saving.value = false
   }
@@ -259,7 +259,7 @@ async function move(item: Item, to: string, feedback?: string): Promise<void> {
       return
     }
     place(item)
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     pending.value = pending.value.filter((r) => r !== item.ref)
     wrote()

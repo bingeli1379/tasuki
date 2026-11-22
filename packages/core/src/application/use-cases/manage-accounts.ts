@@ -61,6 +61,41 @@ export async function createAccount(
   })
 }
 
+// Accounts from an outside system are added by username only, many at once when pasted from a
+// list; the outside system checks the password and tells their name at the first sign in.
+export async function addAccounts(
+  { auth, store }: AccountDeps,
+  actor: Account,
+  usernames: readonly string[],
+  access: Access,
+): Promise<{ added: Account[]; existing: string[] }> {
+  assertAdmin(actor)
+  if (auth.accounts !== undefined)
+    throw new InvalidInput('tasuki keeps these accounts: add each with a password')
+  const wanted = [...new Set(usernames.map((u) => u.trim()).filter((u) => u !== ''))]
+  if (wanted.length === 0) throw new InvalidInput('no usernames given')
+  const added: Account[] = []
+  const existing: string[] = []
+  for (const username of wanted) {
+    if ((await store.findAccount(username)) !== undefined) existing.push(username)
+    else added.push(await store.createAccount({ username, displayName: username, access }))
+  }
+  return { added, existing }
+}
+
+// Deleting someone added from an outside system takes them off the list: they cannot sign in
+// again until an admin adds them back (D90).
+export async function deleteAccount(
+  store: StorePort,
+  actor: Account,
+  userId: string,
+): Promise<void> {
+  assertAdmin(actor)
+  if (userId === actor.userId) throw new InvalidInput('you cannot delete your own account')
+  await assertKeepsAnAdmin(store, await target(store, userId))
+  await store.deleteAccount(userId)
+}
+
 export async function setAccess(
   store: StorePort,
   actor: Account,
