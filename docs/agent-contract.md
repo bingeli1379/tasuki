@@ -26,6 +26,8 @@
 |---|---|---|---|---|---|---|
 | `get_item` | 讀這張 item（含 status、labels）。worker 讀的是 task 所屬的 item | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `list_tasks` | 列出 task，含 status、origin、blockedBy | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `list_attachments` | 列出 item 與它每張 task 上的所有附件，不論 body 有沒有連到：target、id、檔名、mimeType、大小 | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `read_attachment` | 讀一個附件（`target`、`id`）：圖片回 image，文字回 text，其他回 base64 的 resource | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `list_comments` | 讀 item 或 task 的 comment | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `add_comment` | 在 item 或其 task 上留言，`kind` 為 `note` 或 `question` | ✓ | ✓ | ✓ | ✓ | ✓ |
 | `create_task` | 建 task（title、body、blockedBy、initialStatus 為 `to-do` 或 `manual`） | ✓ | ✗ | ✗ | ✗ | ✓ |
@@ -35,7 +37,7 @@
 
 刻意沒有的：任何改 item status 的 tool、刪除、跨 item 存取。
 
-目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`list_comments`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69、S7b D71）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，`dispatch` 是 worker（D102），`review` 是 reviewer（D84），`custom` 全部都有（D92），表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`list_comments` 的 `target` 一樣省略時是 item，只能讀被派的 item 與它的 task。人留的 comment 裡，`note` 是人寫的話（rework 的回饋就是最新那則），`system` 是人按按鈕留下的紀錄，不是要 agent 做的事（D74）。`update_task` 隨用到的切片長出來。
+目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`list_attachments`、`read_attachment`（D103）、`list_comments`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69、S7b D71）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，`dispatch` 是 worker（D102），`review` 是 reviewer（D84），`custom` 全部都有（D92），表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`list_comments` 的 `target` 一樣省略時是 item，只能讀被派的 item 與它的 task。人留的 comment 裡，`note` 是人寫的話（rework 的回饋就是最新那則），`system` 是人按按鈕留下的紀錄，不是要 agent 做的事（D74）。`update_task` 隨用到的切片長出來。
 
 worker 只做 `TASUKI_TARGET` 那一張 task，自己的 task 從 `list_tasks` 裡用 ref 找。它的 `add_comment` 與 `list_comments` 的 `target` 省略時是那張 task，不是 item。worker 沒有 `set_task_status`：task 的 status 由 engine 照 verdict 移（state-machine.md 的 Dispatch）。
 
