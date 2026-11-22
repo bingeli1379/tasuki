@@ -61,7 +61,7 @@
 | S10 | `doctor`，含擋第二個 engine 的心跳（已完成，D66、D95） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
 | S11 | plugin 開發套件：`testkit` 對外發佈、範例 plugin、開發文件（已完成，D96；真的 `npm publish` 在 S14） | 照文件寫出一個第三方 tracker 並通過契約測試 |
 | S12a | `tasuki` CLI（`start`、`doctor`、`pause`、`resume`）、內建 plugin 跟著 CLI 裝、engine serve 看板、本機從 tarball 裝得起來（已完成，D98） | 只放一份 config 的資料夾裡 `tasuki start`，瀏覽器開 8787 就是看板 |
-| S12b | 互動式 `tasuki init`：選 tracker 與 agent，Jira 的 issue type、link type、status id 向 Jira 查好寫進 config 並附上名稱（D50） | 空資料夾 `tasuki init` 答完問題，直接 `tasuki start` 跑得起來 |
+| S12b | 互動式 `tasuki init`：選 tracker、agent、要不要登入，Jira 的 issue type 與 link type 向 Jira 查好寫進 config 並附上名稱（D50）；status 對照照舊在設定頁（已完成，D99） | 空資料夾 `tasuki init` 答完問題，直接 `tasuki start` 跑得起來 |
 | S12c | container image（本機 build，在 OrbStack 跑），claude-cli 加 `api-key` 與 `oauth-token`（`claude setup-token`）認證 | `docker run` 起來後用 token 真的派一次 claude |
 | S12d | codex runner，做到契約測試會過（作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |

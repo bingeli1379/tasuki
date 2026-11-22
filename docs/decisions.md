@@ -967,3 +967,18 @@
 - 實測：`pnpm verify:cli-install` 用 `pnpm pack` 打出 core、server、六個內建 plugin 與 cli 的 tarball，在暫存資料夾用 npm 裝起來（各套件互相要 `0.0.0`，registry 上沒有，用 `overrides` 指到 tarball），另一個只放 config（sqlite 加 fake-runner）的 instance 資料夾跑裝好的 `tasuki`：`doctor` 0 errors 0 warnings；`start` 之後 `/` 是看板、它的 script 拿得到；`pause --kill` 後 `GET /api/board` 回 `paused: true`，`resume` 後回 false。`pnpm test` 453 條、`pnpm check` 沒有錯誤、E2E 的 sqlite、auth、auth-http 共 19 條過（jira 沒跑，會清空 KAN）。D96 說留給 S12 的 `files` 也一起補了，這次的 tarball 有 `dist`。
 - 沒驗的：真的 `npm i -g`。registry 上沒有 `@tasuki/*`，全域安裝不吃 `overrides`，各套件的依賴解析不到，要等 S14 發佈後才驗得了。上面裝進資料夾的樹跟全域的差別只在外面多一層 `@tasuki/cli/node_modules`，從 `server` 往上解析一樣走得到。
 - 重新檢視：內建 plugin 要獨立升版、不想跟著 CLI 一起裝時。
+
+## D99 S12b：互動式 `tasuki init`
+
+- 背景：S12b（2026-11-22）。D50 說 Jira 的 id 由 `init` 查好寫進 config、附上名稱；config-and-rules.md 說 `init` 要帶一份預設的 `allowedTools`。其他行為文件沒寫。
+- 決定（作者同意）：
+  - 依序問 tracker（sqlite 或 Jira Cloud）、agents（claude、fake，可多選，至少一個）、要不要登入（不用或 `auth-builtin`）。`auth-http` 要填外部 API，不放進 init，自己改 config。
+  - 選 Jira 時問網址、email、API token（不顯示），打 `GET /rest/api/3/myself` 確認登得進去，不行就整組重問；再問 project key，`GET /rest/api/3/project/{key}` 不是 200 就重問。item 的 issue type 從 `subtask: false` 且 `hierarchyLevel` 是 0 的裡面挑（epic 在 1，排除），task 從 `subtask: true` 的裡面挑。link type 有叫 `Blocks` 的就直接用，沒有才列出來讓人挑。
+  - 寫出的 config 是 JSONC，id 旁邊用註解附上 Jira 上的名稱。email 與 token 只寫進旁邊的 `.env`（權限 600，同名的行會被換掉），config 裡寫 `${JIRA_EMAIL}`、`${JIRA_API_TOKEN}`（D49）。claude 的 `allowedTools` 帶範例檔那份。
+  - config 已經存在就拒絕，不覆蓋。`--config <路徑>` 指定寫到哪裡。
+  - Jira status 的對照不在 init 做，照舊在設定頁挑（W4a），因為它存在 store 裡、不在檔案裡。codex 等 S12d 再加。不做非互動的旗標版本，現在沒有腳本要呼叫它。
+  - 問答用 `@clack/prompts`（1.9.0，create-vite 用的同一套）：方向鍵選、空白鍵多選、token 以遮罩顯示、查 Jira 時有 spinner，Ctrl+C 任何一題都不寫檔就結束。先用 `node:readline` 手寫過一版，只有編號輸入，作者覺得太簡陋，換掉；方向鍵選單不是幾行程式寫得完的，所以加這個依賴。只在 `cli`，engine 不依賴它。
+  - `doctor` 的輸出上色（error 紅、warning 黃、總結 0 個 error 是綠），用 Node 內建的 `util.styleText`，不是 TTY 或設了 `NO_COLOR` 時照舊是純文字，格式不變。
+  - 找不到 config 時的錯誤訊息提示跑 `tasuki init`（config-and-rules.md 路徑一節）。
+- 實測：先用 readline 版，把答案 pipe 進去打 KAN（新的暫存資料夾，環境裡拿掉 `JIRA_*`）：查出 item `10009`（故事）、task `10007`（Subtask）、link `10000`（Blocks），`.env` 權限 `-rw-------`。接著同一個資料夾 `tasuki doctor` 0 errors，14 個 warning 都是 status 還沒在設定頁對照。換成 clack 後在 100 欄的 pty 裡用方向鍵與空白鍵走完 sqlite 加 claude 加 auth-builtin，寫出的 config 正確。單元測試 mock 掉 clack，4 條：sqlite 的 config 讓 `runDoctor` 回 0；Jira 錯的 token 與錯的 project 都會重問，寫出的 id、名稱註解、`.env` 內容與權限都對；取消時不寫檔；已經有 config 時不動它。
+- 重新檢視：第三方 tracker 也想在 init 問自己的問題時（要給 plugin 一個 init 的 hook）；有腳本要不互動地產生 config 時。

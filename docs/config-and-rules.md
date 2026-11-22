@@ -114,13 +114,13 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
 `env` 是給被 spawn 的 agent CLI 用的，engine 自己不使用裡面的值。engine 不碰 git，所以不放 GitHub / GitLab 的設定。
 
-`allowedTools` 是 CLI 自己的工具名稱清單。空陣列或省略，代表除了 runner 注入的 tasuki MCP tool 之外一律不准，因為 headless 沒有人能即時按允許。名稱格式依 CLI 而定，待驗證。`init` 產生的 config 要帶一份能完成 split / execute 的預設清單，等 M3 驗證完再填。
+`allowedTools` 是 CLI 自己的工具名稱清單。空陣列或省略，代表除了 runner 注入的 tasuki MCP tool 之外一律不准，因為 headless 沒有人能即時按允許。名稱格式依 CLI 而定，待驗證。`tasuki init` 產生的 config 帶範例檔那份清單（D99）。
 
 `auth` 只宣告認證方式，憑證本身一律放 `env`，不另外開欄位。`inherit-login` 沿用 CLI 自己的登入，不需要任何變數。`api-key` 與 `oauth-token` 要求 `env` 裡有對應的變數，變數名稱依 CLI 而定，待驗證。省略時是 `inherit-login`。
 
 ## 路徑
 
-- config 檔一定要有。用 `--config <path>` 指定，沒給就找工作目錄的 `tasuki.config.jsonc`，找不到就報錯並提示跑 `tasuki init`，不悄悄退回別的地方。
+- config 檔一定要有。用 `--config <path>` 指定，沒給就找工作目錄的 `tasuki.config.jsonc`，找不到就報錯並提示跑 `tasuki init`，不悄悄退回別的地方。`tasuki init` 問 tracker、agent 與要不要登入，寫出 config，Jira 的 id 向 Jira 查好再附上名稱，email 與 token 寫進旁邊的 `.env`；config 已經存在就不動（D99）。
 - config 裡所有相對路徑都相對於 config 檔所在的資料夾，不是 process 的工作目錄。
 - `dataDir` 預設 `./data`。tracker 是 sqlite 時，檔案固定在 `<dataDir>/tracker.db`。store 是 sqlite 時在 `<dataDir>/store.db`，Run log 不管 store 是哪個都在 `<dataDir>/logs/`，`workspace.root` 沒設時是 `<dataDir>/workspaces`。
 - 啟動時印出解析後的絕對路徑。
