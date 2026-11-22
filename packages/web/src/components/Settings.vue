@@ -41,6 +41,21 @@ interface RuleDraft {
   prompt: string
 }
 
+interface SettingChange {
+  text: string
+  // A prompt's text before and after, '' for its default.
+  before?: string
+  after?: string
+}
+
+interface SavedVersion {
+  version: number
+  flow: Record<string, unknown>
+  savedBy: string
+  savedAt: string
+  changes: SettingChange[]
+}
+
 interface TrackerStatus {
   key: string
   name: string
@@ -96,6 +111,11 @@ const rules = ref<RuleDraft[]>([])
 // One draft name per rule for an outcome of its own.
 const newOutcome = ref<Record<number, string>>({})
 const toast = useToast()
+// W4b: the saves so far, newest first, shown instead of the form while looked at.
+const view = ref<'form' | 'history'>('form')
+const history = ref<SavedVersion[]>()
+// The version put back in the form, until it is saved or the form reloaded.
+const restored = ref<number>()
 
 const kebab = (text: string): string =>
   text
@@ -169,6 +189,7 @@ async function load(): Promise<void> {
     const res = await call<FlowResponse>('/api/flow')
     loaded.value = res
     fromFlow(res)
+    restored.value = undefined
     error.value = ''
   } catch (e) {
     error.value = messageOf(e)
@@ -180,8 +201,28 @@ watch(open, (isOpen) => {
   // What was loaded last time could be stale; show nothing until this load answers.
   loaded.value = undefined
   error.value = ''
+  view.value = 'form'
   void load()
 })
+
+async function showHistory(): Promise<void> {
+  view.value = 'history'
+  history.value = undefined
+  try {
+    history.value = (await call<{ versions: SavedVersion[] }>('/api/flow/history')).versions
+  } catch (e) {
+    view.value = 'form'
+    toast.add({ title: messageOf(e), color: 'error' })
+  }
+}
+
+// Into the form only: saving it is an ordinary save, checked like any other, as a new version.
+function restore(saved: SavedVersion): void {
+  if (!loaded.value) return
+  fromFlow({ ...loaded.value, flow: saved.flow })
+  restored.value = saved.version
+  view.value = 'form'
+}
 
 // Back to the shape the server checks: what is left at its default is left out.
 function toFlow(): unknown {
@@ -352,7 +393,70 @@ function dropOutcome(rule: RuleDraft, name: string): void {
         <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
         Loading the settings…
       </p>
+      <section v-else-if="view === 'history'" aria-label="History" class="flex flex-col gap-3">
+        <p v-if="!history" class="flex items-center gap-2 text-sm text-muted">
+          <UIcon name="i-lucide-loader-circle" class="size-4 animate-spin" />
+          Loading the history…
+        </p>
+        <p v-else-if="history.length === 0" class="text-sm text-muted">
+          Nothing saved yet: the engine runs on the default settings.
+        </p>
+        <ul v-else class="flex flex-col gap-2">
+          <li
+            v-for="(v, i) in history"
+            :key="v.version"
+            :aria-label="`Version ${v.version}`"
+            class="flex flex-col gap-2 rounded-md border border-default p-3"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <span class="flex min-w-0 flex-wrap items-center gap-x-2 text-sm">
+                <span class="font-medium">Version {{ v.version }}</span>
+                <span class="text-muted">
+                  {{ v.savedBy || 'Someone' }} ·
+                  <time :datetime="v.savedAt">{{ new Date(v.savedAt).toLocaleString() }}</time>
+                </span>
+                <UBadge v-if="i === 0" label="In use" color="success" variant="subtle" size="sm" />
+              </span>
+              <UButton
+                v-if="i > 0"
+                label="Restore"
+                icon="i-lucide-history"
+                variant="outline"
+                size="sm"
+                @click="restore(v)"
+              />
+            </div>
+            <p v-if="v.changes.length === 0" class="text-sm text-muted">Saved with no changes.</p>
+            <ul v-else class="flex list-disc flex-col gap-1 ps-5 text-sm">
+              <li v-for="(c, j) in v.changes" :key="j">
+                <details v-if="c.before !== undefined">
+                  <summary class="cursor-pointer">{{ c.text }}</summary>
+                  <div class="mt-1 grid gap-2 sm:grid-cols-2">
+                    <figure v-for="side in ['before', 'after'] as const" :key="side">
+                      <figcaption class="text-xs text-muted">
+                        {{ side === 'before' ? 'Before' : 'After' }}
+                      </figcaption>
+                      <pre
+                        class="max-h-60 overflow-auto rounded bg-elevated p-2 text-xs whitespace-pre-wrap"
+                        >{{ c[side] || 'The default for its mode' }}</pre>
+                    </figure>
+                  </div>
+                </details>
+                <span v-else>{{ c.text }}</span>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </section>
       <div v-else-if="loaded" class="flex flex-col gap-8">
+        <UAlert
+          v-if="restored !== undefined"
+          color="info"
+          variant="subtle"
+          icon="i-lucide-history"
+          :title="`Version ${restored} is in the form`"
+          description="Save to make it the one in use, as a new version."
+        />
         <section aria-label="Statuses" class="flex flex-col gap-3">
           <h3 class="font-semibold text-highlighted">Statuses</h3>
           <p class="text-sm text-muted">
@@ -666,9 +770,33 @@ function dropOutcome(rule: RuleDraft, name: string): void {
       </div>
     </template>
     <template #footer>
-      <div class="flex w-full justify-end gap-2">
-        <UButton label="Cancel" color="neutral" variant="ghost" @click="open = false" />
-        <UButton label="Save" :loading="saving" :disabled="!loaded || clashes" @click="save" />
+      <div class="flex w-full items-center gap-2">
+        <UButton
+          v-if="view === 'form'"
+          label="History"
+          icon="i-lucide-history"
+          color="neutral"
+          variant="ghost"
+          :disabled="!loaded"
+          @click="showHistory"
+        />
+        <UButton
+          v-else
+          label="Back to the form"
+          icon="i-lucide-arrow-left"
+          color="neutral"
+          variant="ghost"
+          @click="view = 'form'"
+        />
+        <span class="ms-auto flex gap-2">
+          <UButton label="Cancel" color="neutral" variant="ghost" @click="open = false" />
+          <UButton
+            label="Save"
+            :loading="saving"
+            :disabled="!loaded || clashes || view === 'history'"
+            @click="save"
+          />
+        </span>
       </div>
     </template>
   </UModal>

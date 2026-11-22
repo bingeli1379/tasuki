@@ -63,3 +63,43 @@ test('an ID already taken is flagged as typed, and a new ID carries what points 
   await expect(dialog).toBeHidden()
   await expect(page.getByRole('region', { name: new RegExp(`^${first}`) })).toBeVisible()
 })
+
+// W4b (D94): a save shows in the history with what it changed, and an older version restored
+// into the form saves as a new one. A prompt, since the fake runner never reads it.
+test('the history shows what a save changed, and restoring saves the older one again', async ({
+  page,
+}) => {
+  const prompt = `Spec prompt ${Date.now()}`
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  const rule = dialog.getByRole('region', { name: 'Rules' }).getByRole('listitem').first()
+  const id = await rule.getByLabel('Name').inputValue()
+  await rule.getByLabel('Prompt').fill(prompt)
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await dialog.getByRole('button', { name: 'History' }).click()
+  const newest = dialog.getByRole('region', { name: 'History' }).getByRole('listitem').first()
+  await expect(newest.getByText('In use')).toBeVisible()
+  await newest.getByText(`Rule ${id} prompt changed`).click()
+  await expect(newest.getByText(prompt)).toBeVisible()
+  const label = await newest.getAttribute('aria-label')
+  const version = Number(label?.replace('Version ', ''))
+
+  await dialog
+    .getByRole('listitem', { name: `Version ${version - 1}` })
+    .getByRole('button', { name: 'Restore' })
+    .click()
+  await expect(dialog.getByText(`Version ${version - 1} is in the form`)).toBeVisible()
+  await expect(rule.getByLabel('Prompt')).not.toHaveValue(prompt)
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await dialog.getByRole('button', { name: 'History' }).click()
+  const restored = dialog.getByRole('listitem', { name: `Version ${version + 1}` })
+  await expect(restored.getByText('In use')).toBeVisible()
+  await expect(restored.getByText(`Rule ${id} prompt changed`)).toBeVisible()
+})

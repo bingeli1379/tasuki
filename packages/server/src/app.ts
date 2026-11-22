@@ -53,7 +53,8 @@ import { bodyLimit } from 'hono/body-limit'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createAgentMcpServer } from './agent-mcp'
-import type { LiveFlow } from './flow'
+import { DEFAULT_FLOW, type LiveFlow } from './flow'
+import { describeChanges } from './flow-changes'
 import { createMcpServer } from './mcp'
 import { defaultPrompt } from './prompts'
 import type { RunTokens } from './run-tokens'
@@ -365,6 +366,18 @@ export function createApp({
         tracker.listStatuses === undefined
           ? null
           : { item: await tracker.listStatuses('item'), task: await tracker.listStatuses('task') },
+    })
+  })
+  // Newest first, each with what it changed from the one before it; the first save is set
+  // against the default it replaced (W4b).
+  app.get('/api/flow/history', async (c) => {
+    assertEditsFlow(c.var.actor)
+    const history = await store.flowHistory()
+    return c.json({
+      versions: history.map((v, i) => ({
+        ...v,
+        changes: describeChanges(history[i + 1]?.flow ?? DEFAULT_FLOW, v.flow),
+      })),
     })
   })
   app.put('/api/flow', async (c) => {

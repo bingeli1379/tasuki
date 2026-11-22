@@ -92,6 +92,8 @@ export interface StorePort {
   // Compare-and-set on the version latestFlow gave, undefined before the first save. Throws
   // FlowConflict when another save came in between. Versions count up from 1.
   saveFlow(expected: number | undefined, flow: unknown, savedBy: string): Promise<FlowVersion>
+  // Every save, newest first.
+  flowHistory(): Promise<FlowVersion[]>
 
   // Throws InvalidInput when the userId, the username or the externalId is taken.
   createAccount(account: NewAccount): Promise<Account>
