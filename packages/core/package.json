@@ -1,7 +1,9 @@
 {
   "name": "@tasuki/core",
   "version": "0.0.0",
-  "private": true,
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     ".": {

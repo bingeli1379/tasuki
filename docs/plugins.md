@@ -1,6 +1,6 @@
 # Plugins
 
-狀態：草稿。方向已確認（D44），匯出形狀、config 寫法、載入失敗的行為已確認（D48），其餘列在「待定」。
+狀態：草稿。方向已確認（D44），匯出形狀、config 寫法、載入失敗的行為已確認（D48），options 驗證、`apiVersion`、命名、依賴寫法已確認（D96），其餘列在「待定」。怎麼寫一個 plugin 見 plugin-development.md。
 
 tracker、store、runner、auth 四個角色都可以由第三方寫成 npm 套件。內建的 sqlite、Jira Cloud、claude-cli、codex-cli 與第三方走同一條路，內建的沒有任何第三方拿不到的東西。
 
@@ -11,7 +11,8 @@ tracker、store、runner、auth 四個角色都可以由第三方寫成 npm 套�
 - store 的 migration 由 plugin 自己帶，engine 不寫任何 SQL。
 - 一個技術一個套件：`sqlite`、`jira-cloud`、`claude-cli`、`codex-cli`。不按角色切，因為同一個技術可能同時提供多個角色。
 - `core` 是公開契約。plugin 只相依 `core`，不 import `server` 或其他 plugin。ports 與它們引用的型別都是公開 API，改簽名是 breaking change。
-- `testkit` 提供契約測試。內建與第三方的實作都要通過同一組。
+- `testkit` 提供契約測試。內建與第三方的實作都要通過同一組。它跟 `core` 一起發佈到 npm，依賴同一個確切版本的 `core`，測試框架是 peer 的 `vitest`（D96）。
+- 第三方 plugin 把 `@tasuki/core` 寫成 `peerDependencies`，用 engine 那一份。engine 用 `instanceof` 認 port 丟的錯誤，plugin 自己帶一份的話 class 對不上（D96）。
 - plugin 宣告 `apiVersion`，engine 載入時檢查。
 - plugin 是受信任的程式碼，沒有沙箱，見 security-and-auth.md。
 
@@ -77,9 +78,9 @@ config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解�
 
 這些文件裡完全沒有，也沒有被確認過，實作前要先問作者。
 
-1. plugin 的 options 怎麼驗證，以及 JSON Schema 由誰提供給編輯器補全。
+1. （已定，D96）plugin 的 options 由 plugin 在工廠裡自己驗，不對就丟錯，走「載入失敗」。給編輯器補全的 JSON Schema 跟 config 的一起決定（plan.md 待釐清 13）。
 2. （已定，D95）`doctor` 怎麼把檢查委派給 plugin：`TrackerPort` 與 `RunnerPort` 各有選用的 `doctor`，回傳 `{ level, message }[]`。tracker 拿到規則會走的轉移（邏輯名），自己判斷 workflow 允不允許；runner 自己檢查 CLI 與 `requires`。前綴（哪個 plugin、哪個 agent）由 engine 加。沒實作就是沒東西要檢查。心跳也是 tracker 的選用方法（`readHeartbeat`、`writeHeartbeat`），sqlite 不實作。
-3. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。程式目前要求完全相等。
-4. 第三方套件的命名慣例。
+3. （已定，D96）`apiVersion` 要求完全相等。
+4. （已定，D96）第三方套件取 `tasuki-plugin-<名字>` 或 `@<scope>/tasuki-plugin-<名字>`，`@tasuki/` 留給內建的。
 5. （已定，D89）`auth` 的內建實作是 `@tasuki/auth-builtin` 與 `@tasuki/auth-http` 兩個套件；不登入是省略 `auth`，不是一個套件。builtin 讀寫 store 裡的帳號與密碼 hash，所以 `auth` 工廠拿到的 `ctx` 多一個 `store`（`AuthContext`）。
 6. plugin 的錯誤怎麼回報成 `system` comment 或 log，哪些資訊不能外洩（secret）。

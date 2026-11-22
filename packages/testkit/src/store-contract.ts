@@ -7,7 +7,7 @@ import {
   type NewRun,
   type StorePort,
 } from '@tasuki/core'
-import { afterEach, beforeEach, describe, expect, it } from 'vite-plus/test'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
 export interface StoreFixture {
   store: StorePort

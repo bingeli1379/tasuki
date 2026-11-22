@@ -439,7 +439,7 @@
 
 ## D62 依賴定版，升版經過 Dependabot
 - 決定：
-  - 所有 `package.json` 的依賴寫確切版本，`pnpm-workspace.yaml` 開 `saveExact`，之後 `pnpm add` 也定版。`peerDependencies`（testkit 的 `vite-plus`）保留範圍，那是相容性的宣告。
+  - 所有 `package.json` 的依賴寫確切版本，`pnpm-workspace.yaml` 開 `saveExact`，之後 `pnpm add` 也定版。`peerDependencies`（testkit 的 `vitest`，D96 之前是 `vite-plus`）保留範圍，那是相容性的宣告。
   - pnpm 的 `minimumReleaseAge` 從預設的 1 天拉到 7 天：版本要公開滿 7 天才裝得進來。
   - GitHub Actions 釘 commit SHA，後面註解版本。
   - `.github/dependabot.yml`：npm（含 pnpm workspace）與 github-actions，每月 1 號、15 號早上 9 點（台北）各開一個合併的升版 PR，cooldown 7 天，跟 pnpm 一致，CI 才裝得下它提的版本。資安修補不受 cooldown 影響，有公告就開，前提是 repo 設定開了「Dependabot security updates」。
@@ -449,7 +449,7 @@
 - Dependabot 不提 `typescript` 與 `@types/node` 的大版本：web 要等 vue-tsc 支援 TS 7（D58）；`@types/node` 跟著 engine 跑的 Node 大版本，換 Node 時手動一起升。第一次跑時它提了這兩個，CI 在 `pnpm check` 擋下（vue-tsc 碰到 TS 7 的 `ERR_PACKAGE_PATH_NOT_EXPORTED`）。
 - 已驗證（2026-11-20）：Dependabot 讀得懂 pnpm 12 的 lockfile 與 workspace，github-actions 的檢查也正常。repo 的資安更新原本就是開的。
 - 不修的警示：`esbuild` 0.27.x 的開發伺服器在 Windows 上能讀任意檔案（low），修在 0.28.1，但 esbuild 被 vite-plus 綁在 0.27.x。我們不用 esbuild 的開發伺服器、也不在 Windows 上跑，等 vite-plus 升版。
-- 重新檢視：Dependabot 的 PR 太吵或太少時調頻率；要發布 npm 套件（S11、S12）時，看被別人安裝的套件是否改回範圍。
+- 重新檢視：Dependabot 的 PR 太吵或太少時調頻率；要發布 npm 套件（S14，D97）時，看被別人安裝的套件是否改回範圍。
 
 ## D63 S4：規則命中，假 runner 跑 split
 - 決定：
@@ -927,3 +927,29 @@
 - 實測：`pnpm test` 450 條、`pnpm check` 沒有錯誤。KAN 上：`doctor` 對作者的 config 是 0 error 0 warning；起一個 engine 後，用另一個 data dir 起第二個被拒（「seen 2s ago」），`doctor` 也報同一條 error；SIGTERM 第一個後 property 回 404，第二個的 `doctor` 不再報。真的 claude 2.1.323：繼承設定時 `playwright` connected、`sdd:apply` 有，沒有的 MCP 與 skill 各報一條；隔離時 `sdd:apply` 讀不到；跑完沒有殘留的 process。testkit 的 tracker 契約多一條心跳的寫讀清。
 - 沒做：security-and-auth.md 說 `doctor` 與啟動 log 要列出 plugin 的版本，目前只列名字，plugin 沒有宣告版本，要從套件的 `package.json` 讀。
 - 重新檢視：設定頁存檔時也想擋 workflow 不允許的轉移時（現在只在 `doctor` 與啟動時印）；Jira 的 transition condition 擋到 engine 時；有人在同一台機器用同一個 data dir 開兩個 engine 時。
+
+## D96 S11：testkit 改用 vitest、core 是第三方的 peer、範例裝在 workspace 外面驗
+
+- 背景：S11（2026-11-22）。要讓第三方照文件寫出 tracker 並通過契約測試。plugins.md 待定 1、3、4 還沒定，testkit 從 `vite-plus/test` import，第三方不裝 Vite+ 就跑不動。
+- 決定（作者同意）：
+  - 這片做到「發得出去」：`core` 與 `testkit` 拿掉 `private`、加上 `files: ["dist"]`，用 `pnpm pack` 的 tarball 驗。真的 `npm publish` 在 S14（D97），因為現在發出去，別人也裝不到 engine。版本留在 `0.0.0`，發版時再定。
+  - testkit 改成從 `vitest` import，peer 是 `vitest`，workspace 裡用 devDependency 的 `vitest` 5.1.0。`vite-plus/test` 本身就是 `export * from 'vitest'`，workspace 解析到同一份 vitest，內建 plugin 的契約照常跑。
+  - testkit 依賴確切版本的 `core`（`workspace:*` pack 成 `0.0.0`），兩個一起升，契約永遠對著它那一版的 port。這回答了 D62 「發布時要不要改回範圍」的問題：先不改。
+  - 第三方把 `@tasuki/core` 寫成 `peerDependencies`。core 的 use case 與 server 用 `instanceof` 認 `StatusConflict`、`NotFound` 這些錯誤，plugin 自己帶一份 core 的話 class 對不上。
+  - plugins.md 待定 1：options 由 plugin 在工廠裡自己驗，丟錯走載入失敗；JSON Schema 跟 config 的一起決定（待釐清 13）。待定 3：`apiVersion` 維持完全相等，上線前不顧兼容，用不到範圍。待定 4：`tasuki-plugin-<名字>` 或 `@<scope>/tasuki-plugin-<名字>`，`@tasuki/` 留給內建的。
+  - 範例放 `examples/tracker-memory/`，不在 `pnpm-workspace.yaml` 的 `packages/*` 裡，也不用 `workspace:*`，工具鏈用一般的 `tsc` 與 `vitest`，相對 import 寫 `.js`（`NodeNext`），跟 repo 自己的 D43 不同，因為它要照第三方的樣子 build 出 Node 直接跑得動的檔案。root 的 lint 跳過 `examples/`（在 repo 裡沒有裝它的依賴），由 `pnpm verify:plugin-example` 檢查。
+  - 契約只做 tracker 跟原本就有的 store。runner 的契約等 S12 有第二個真的 runner（codex）再長，auth 還沒排。
+- 理由：驗收是「照文件寫出第三方 tracker」，只有在 workspace 外面、從發佈出去的形狀安裝，才擋得住 `files` 漏掉、依賴寫錯這種問題，`workspace:*` 都會把它們蓋掉。
+- 實測：`pnpm verify:plugin-example` 在暫存資料夾用 npm 從 tarball 裝好，型別檢查過、契約 31 條（30 條契約加 1 條 options）全過、`tsc` build 後 import 得到 `definePlugin` 的結果。另外手動在同一個資料夾裝 sqlite、fake-runner，config 的 tracker 指到 `tasuki-plugin-memory`：`doctor` 0 error 0 warning，`start` 後 `POST /api/items` 建出 `MEM-1`，`GET /api/board` 在 `refining` 欄看得到。`pnpm test` 450 條、`pnpm check` 沒有錯誤。
+- 發現、留給 S12：內建的 `sqlite`、`fake-runner` 這些套件沒寫 `files`，`dist` 又在 `.gitignore` 裡，`pnpm pack` 出來沒有 `dist`；上面的手動驗證是把 `dist` 複製進去的。S12 打包 CLI 時一起補。
+- 重新檢視：`core` 到 1.0、要對外承諾相容時（`apiVersion` 改範圍、peer 改範圍）；有第三方用不是 vitest 的測試框架時；verify 要進 CI 時（現在要連網路裝 `vitest` 與 `typescript`）。
+
+## D97 對外發佈集中到最後一片 S14，之前作者自己整體測一輪
+
+- 背景：2026-11-22，S11 做完後。原本 npm 發佈散在 S11（testkit）與 S12（CLI、container image）。
+- 決定（作者提的）：
+  - 新增 S14「對外發佈」，排在 S13 之後，凡是會讓外面的人拿到東西的事都放這裡：license（待釐清 9）、npm 套件名稱查撞名（D23）、版本號與依賴要不要改回範圍（D62、D96）、`npm publish` core、testkit、內建 plugin 與 CLI、container image 推到 registry、給使用者看的 README，含訂閱帳號與 API key 的服務條款（plan.md 待驗證）。
+  - S12 改成做到本機為止：CLI 從 `npm pack` 的 tarball 裝得起來，container image 在本機 build 得起來。內建套件補 `files`（D96 發現的）留在 S12，因為本機從 tarball 裝 CLI 就需要它。
+  - S13 做完、進 S14 之前，作者自己把整個產品測一輪並調整。調整照 S7e 的方式插成切片，全部定了才進 S14。
+- 理由：發佈出去就收不回來，版本與名稱都會被別人裝走。集中在作者測過、調過之後，才不會發了一版又馬上推翻。本機裝得起來的部分還是在功能切片裡做，作者測的時候才是用真的安裝方式在測。
+- 重新檢視：有人要在 S14 之前先用某個套件時（例如有第三方要寫 plugin）。
