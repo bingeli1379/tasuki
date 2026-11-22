@@ -13,6 +13,10 @@
 | UI 的 Stop 按鈕（API） | hard | 針對某張 item 目前存活的 Run |
 | 在 item 上貼 `hold` label | soft | 不需要 engine 專屬操作，Jira 上貼就行 |
 | 把 item 移到別的 status | soft | Run 當初預期的 status 變了，視為人要接手 |
+| task 詳情的 Stop 按鈕（API） | hard | 只有 `dispatch`：針對那張 task 的 Run，同時把 task 移到 `manual`（D102） |
+| 把 task 移到別的 status | soft | 只有 `dispatch`：task 的 Run 預期 task 在 `in-progress` |
+
+`dispatch` 底下，作用在 item 的三種訊號作用在它所有存活的 task Run。
 
 按 Stop 會同時貼上 `hold`。只砍 Run 的話，item 還在 watch status 或 claim status，下一輪就會被認領或被復原送回去重跑（D72）。在看板或使用者 MCP 貼 hold 時，有存活的 Run 就當場 soft cancel，不等下一輪。
 
@@ -20,6 +24,7 @@
 
 - item 帶有 `hold`，或
 - item 目前的 status 不是這個 Run 預期的（有 claim status 時是 claim status，沒有時是 watch status）
+- `dispatch` 的 task Run：那張 task 已經不是 `in-progress`，或它的 item 符合上面兩條
 
 符合任一個就 `requestCancel(soft, by)`，`by` 是 `hold` 或 `moved`。Stop 是 `requestCancel(hard, by = 'stop')`。一個 Run 只記第一次的時間。之後的 hard 會把 soft 升級，原因也換成 hard 的那個，因為是它把 Run 停掉的；反過來不會（D73）。
 
@@ -42,13 +47,18 @@
 - item 停在 watch status（例如 `in-progress`）且沒有存活的 Run：Poller 會再起一個 Run，續跑。
 - item 停在 claim status（例如 `splitting`）且沒有存活的 Run：復原機制把它送回 watch status，再被 Poller 撿起。只看最近一次 Run 是被 Stop 或 hold 取消的 item，先問 store，沒有就不碰 tracker（core 的 `resumeReleased`）。
 
-### M1 的限制
+### 停單張 task
 
-engine 只看得到 orchestrator 這一個 process，看不到裡面的 subagent。
+`execute`（M1）底下 engine 只看得到 orchestrator 這一個 process，看不到裡面的 subagent。
 
 - 把單張 task 改成 `manual` 只是 soft：之後不再派它，已經在跑的那一張會做完。
 - 想立刻停掉某張 task，只能 hard stop 整個 orchestrator。它重啟後讀到那張 task 已經是 `manual`，就不會再動它。
-- 精準到單張 task 的 kill 要等 M2。
+
+`dispatch`（M2）每張 task 是自己的 Run，process 在 engine 手上（D102）：
+
+- task 詳情的 Stop：hard cancel 那張的 Run，task 移到 `manual`，留一則人的 `system` comment。不貼 `hold`，同一張 item 的其他 task 照跑。
+- 人在看板或 Jira 把 task 移走（例如改成 `manual`）：soft cancel 那張的 Run，跟移走 item 一樣。
+- 要整張 item 停，按 item 的 Stop。
 
 ### 全域 pause
 
@@ -74,12 +84,13 @@ item 在 Run 被 `abandoned` 之後怎麼處理：
 | 沒有 claim 的 watch status（例如 `in-progress`） | 不動，留一則 comment 說下一輪再試。Poller 下一輪會再起新的 Run，`attempt + 1` |
 | 已經不在 tracker（被人刪了） | Run 記成 `abandoned`，其他都不做。不擋下來的話，每一輪復原都會在這裡丟錯，後面的認領全部停擺（D69） |
 | task 還停在 `in-progress` | 送回 `to-do`，每張留一則原因（不變量 3，D69）。Run 正常結束時也一樣，只有 `cancelled` 不動（不變量 6） |
+| `dispatch` 的 task Run | 那張 task 送回 `to-do`，`attempt + 1`。到了 `maxAttempts` 就轉 `manual`，留一則原因。item 不動 |
 
 被中斷的 workspace 會留著改到一半的檔案。engine 不清理，只有 `workspace.cleanup = on-done` 時在 item 完成後才刪。agent 續跑時要能接受這個狀態。
 
 ## 迴圈控制
 
-- `maxAttempts` 以（item, rule）為單位計算，超過就走該規則 `outcomes.max_attempts` 的出口，預設是 `failure` 角色那站（預設流程的 `blocked`）。
+- `maxAttempts` 以（item, rule）為單位計算，超過就走該規則 `outcomes.max_attempts` 的出口，預設是 `failure` 角色那站（預設流程的 `blocked`）。`dispatch` 以（task, rule）計算，`failed` 也累計，因為 task 失敗會回 `to-do` 重派；到了上限 task 轉 `manual`（D102）。
 - 每個 Run 有 `runTimeoutMinutes`，逾時視為 `failed` 並 hard stop。
 - `limits.idleTimeoutMinutes` 不是 `null` 時，Run 的 `lastActivityAt` 距今超過它，處理方式與逾時相同：`failed` 並 hard stop，原因記為「沒有動靜」。預設 `null`（關閉）。lease 只證明 process 活著，這一條才抓得到「活著但卡死」。
 - 預設關閉的原因：agent 執行長時間的工具呼叫（例如跑一輪測試）期間，CLI 可能完全沒有輸出，會被誤殺。實際行為待 M3 驗證（見 plan.md 待驗證），之後再決定預設值。

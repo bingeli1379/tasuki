@@ -144,7 +144,7 @@ my-instance/
 
 目前 server 從檔案讀的欄位（W4a）：`dataDir`、`server.port`、`tracker`、`store`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`agents`、`auth`。檔案裡出現這些與 `$schema`、`version`、`workspace` 以外的欄位就拒絕啟動，`workflow`、`rules`、`labels` 也一樣（D91）。`@tasuki/claude-cli` 的 options 讀 `auth`（`inherit-login`、`api-key`、`oauth-token`，D100）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires`（`mcpServers`、`skills` 兩個名字清單）給 `doctor` 第 9 條用。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`@tasuki/codex-cli` 的 options 讀 `auth`、`model`、`sandbox`、`env`、`inheritSettings`（省略時加 `--ignore-user-config --ignore-rules`，不讀這台機器的 codex 設定，登入照樣讀 `CODEX_HOME`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
-流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `agent` 要是檔案 `agents` 裡的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是檔案的 `limits.defaultMaxAttempts`；`prompt` 省略時是 mode 的預設，寫了就不能是空字串。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。
+流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `agent` 要是檔案 `agents` 裡的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是檔案的 `limits.defaultMaxAttempts`；`prompt` 省略時是 mode 的預設，寫了就不能是空字串。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。有 `mode: dispatch` 的規則時，`to-do`、`in-progress`、`manual`、`done` 四個要對照，engine 只會把 task 移到這幾個（D102）。
 
 存檔時除了上面的檢查，還有兩條要問 tracker：tracker 有固定的 status 清單時（Jira），每個 key 都要在清單裡；一個 status 改了 key 或被拿掉時，上面不能還有 item 或 task，被擋時列出是哪些。存 store 裡的設定已經跟檔案對不上時（例如檔案的 agent 改名了），拒絕啟動並說明，因為只有改檔案能修。
 
@@ -156,20 +156,21 @@ my-instance/
 | `watch` | 監看的 item status 邏輯名。規則只作用在 item，所以沒有 `kind` 欄位 |
 | `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複，item 留在 watch status，卡片掛 Running。預設規則都不設（D74）。沒寫 `workflow` 時，`splitting` 只在有規則 claim 它時才列進預設流程，不然看板會多一欄永遠是空的 |
 | `agent` | 用哪個 agent（agents 裡的 key） |
-| `mode` | `split` / `execute` / `rework` / `review` / `custom`，以 `TASUKI_MODE` 傳給 agent |
+| `mode` | `split` / `execute` / `dispatch` / `rework` / `review` / `custom`，以 `TASUKI_MODE` 傳給 agent。`dispatch` 由 engine 一張 task 起一個 Run（state-machine.md，D102） |
 | `prompt` | 這一階段要 agent 做什麼（行動層），省略時用引擎內建、對應 `mode` 的預設。不管設不設，engine 的契約都會排在它前面。流程設定在 store 裡，所以沒有指到檔案的 `promptFile`（D91） |
-| `session` | `fresh` 或 `per-item`（續用這個 item 在同一個 agent 上最近的 session） |
+| `session` | `fresh` 或 `per-item`（續用這個 item 在同一個 agent 上最近的 session）。`dispatch` 的 `per-item` 讀成續用同一張 task 最近的 session，平行的 task 不共用 |
+| `maxAttempts` 在 `dispatch` | 以（task, rule）計算，`failed` 與 `abandoned` 都累計，到了 task 轉 `manual` |
 | `timeoutMinutes` | 覆寫 `limits.runTimeoutMinutes` |
 | `maxAttempts` | 覆寫 `limits.defaultMaxAttempts` |
 | `outcomes` | 這條規則的結果名對到 item 要去的 status 邏輯名。agent 只能從這裡挑一個回報 |
 
-MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator，`review` 是 reviewer，只能讀與留言；`custom` 拿到全部的 tool，`succeeded` 必填，結果一個都不驗，`prompt` 沒有預設，不寫就只有 engine 的契約（D92，見 agent-contract.md）。有 `custom` 規則時五個 task status 都要對照，跟 execute 一樣，因為它能走完整張 task 圖。
+MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator，`dispatch` 是 worker，`review` 是 reviewer，worker 與 reviewer 只能讀與留言；`custom` 拿到全部的 tool，`succeeded` 必填，結果一個都不驗，`prompt` 沒有預設，不寫就只有 engine 的契約（D92，見 agent-contract.md）。有 `custom` 規則時五個 task status 都要對照，跟 execute 一樣，因為它能走完整張 task 圖。
 
 `outcomes` 的 key 是結果名，小寫加底線（例如 `needs_design`），值是 status 的邏輯名（D84）。結果分三種：
 
 | 結果 | 哪些 | 要不要寫 | engine 驗不驗 |
 |---|---|---|---|
-| mode 自己的 | `split`、`rework` 是 `succeeded`；`execute` 是 `succeeded` 與 `blocked_manual`；`review` 沒有 | 必填 | 驗（agent-contract.md 的 verdict 表） |
+| mode 自己的 | `split`、`rework` 是 `succeeded`；`execute` 與 `dispatch` 是 `succeeded` 與 `blocked_manual`；`review` 沒有 | 必填 | 驗（agent-contract.md 的 verdict 表）。`dispatch` 的兩個由 engine 看 task 判斷，不是 agent 回報 |
 | 每條規則都有的 | `needs_input`、`failed`、`max_attempts` | 可省略，省略時是 `failure` 角色那站 | `needs_input` 驗，另外兩個不用 |
 | 自己宣告的 | 其他任何名字，例如 review 的 `approve`、`changes`，execute 多一個 `needs_design` | 選填，但每條規則至少要有一個不是上一列的結果 | 不驗，照表搬 |
 
@@ -236,6 +237,22 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 ```
 
 `rework` 的 `needs_input` 去 `blocked` 而不是 `needs-answers`，原因見 D31。
+
+要 engine 自己照依賴圖派 task、平行跑、能停單張的，把 `execute` 換成 `dispatch`（D102）。`timeoutMinutes` 這時是每張 task 的上限：
+
+```jsonc
+{
+  "id": "dispatch",
+  "watch": "in-progress",
+  "agent": "claude-main",
+  "mode": "dispatch",
+  "timeoutMinutes": 120,
+  "outcomes": {
+    "succeeded": "in-review",
+    "blocked_manual": "blocked"
+  }
+}
+```
 
 不要 split-review 這個關卡的人，把 `split` 與 `rework` 的 `succeeded` 改成 `in-progress`。
 想讓 AI 先審一輪再給人，不用改程式：加一站 `ai-review`，讓 `split-review` 或 execute 的出口指過去，再加一條 `review` 規則。

@@ -1007,3 +1007,18 @@
 - 實測（codex-cli 0.169.0，沒登入，暫時的 `CODEX_HOME`）：用 build 好的 runner 帶真的參數跑真的 codex，沒有任何參數錯誤，第一行是 `thread.started`，session 有回報；log 有 `rmcp` 連不上的錯誤，表示注入的 http MCP 被讀進去了（故意指到連不到的 port）。resume 一個不存在的 id，codex 印 `no rollout found`，runner 開新的並回報新的 thread id。`codex mcp list --json` 讀 `-c` 注入的 server 是 `streamable_http`、`auth_status: bearer_token`。單元測試 10 條（含契約 4 條、process tree 的 terminate），claude-cli 加跑契約後 16 條。從 tarball 裝好的 `tasuki` 對只有 codex agent 的 config 跑 `doctor` 0 errors。`pnpm test` 471 條、`pnpm check` 沒有錯誤、`verify:plugin-example` 31 條過。
 - 沒驗的：真的叫模型（沒帳號），所以 MCP tool 在 `approval_policy="never"` 下會不會被擋、`workspace-write` 沒網路時能不能 `git push`、`CODEX_API_KEY` 實際能不能登入，都留在 plan.md 待驗證。
 - 重新檢視：有 Codex 帳號時；codex 出了逐個 tool 的權限設定時。
+
+## D102 S13 設計：`dispatch` mode，engine 照依賴圖一張 task 一個 Run
+
+- 背景：S13 開工前（2026-11-22）。D5 先做 M1、D9 寫明 M1 停不了單張 task、D36 把 task 層規則的形狀留到這時候。作者提出三種：一個 item 一個 agent 由它派 subagent、一個 task 一個 agent 由 engine 派、寫進 config 讓使用者選。
+- 決定（作者同意）：
+  - 兩種並存，規則的 `mode` 選：`execute` 照舊是一個 orchestrator（M1），新的 `dispatch` 由 engine 照 task 圖一張 task 起一個 Run（M2）。第三種就是這個二選一，不另外發明 config 語法。不用 D36 預留的 `kind: "task"` 規則：那種還要多一個「item 在哪站才算數」的條件，item 的出口也會散到兩條規則上。
+  - 認領：可跑的 task 是 `to-do` 或沒人負責的 `in-progress`，blockedBy 全部 `done`，照建立順序各起一個 Run，受 `maxConcurrentRuns` 限制，認領時 engine 把 task 移到 `in-progress`。item 底下還有存活的 task Run 時不認領 item 本身（不變量 1 改成以 target 計）。
+  - task Run 結束：`succeeded` 到 `done`，不走 `in-review`；`failed`、沒有 verdict、`abandoned` 回 `to-do`；`needs_input` 到 `manual`。attempt 以（task, rule）計，`failed` 也累計，到了 `maxAttempts` 轉 `manual`。task 出事都變成 `manual`，item 自然由 `blocked_manual` 進 `blocked`，不另開出口。
+  - item 的出口由 engine 判斷，沒有 agent：task 全 done 走 `succeeded`，沒有可跑的又剩 manual 走 `blocked_manual`。照 D38 `max_attempts` 的做法記一筆不起 process 的 Run，自動接回與卡片標示照舊讀最近一次 Run。
+  - worker 的 tool：`get_item`（讀所屬 item）、`list_tasks`、`list_comments`、`add_comment`（`target` 省略時是自己那張 task）、`report_result`。沒有 `set_task_status`，status 由 engine 照 verdict 移；verdict 固定是 `succeeded`、`needs_input`、`failed`。
+  - 停單張：task 詳情的 Stop 是 hard cancel 那張的 Run，task 轉 `manual`（人的操作，不違反不變量 6），不貼 `hold`。人把 task 移走是 soft，跟移走 item 一致。討論時講過 Jira 上移走 task 算 hard，寫文件時改成 soft，跟 D9 的 item 一樣。
+  - git 接力照 D10 留在 prompt：每張 task 做完自己 merge 回 `feature/<KEY>` 再 push，平行的各開 worktree，push 撞到就拉回來解，解不掉回報 `needs_input`。要整合的由 splitter 多開一張整合 task，engine 不知道它特別。
+- 理由：要 hard 停單張，process 就得在 engine 手上。MCP 是 agent 呼叫 engine，engine 插不進正在想事情的 orchestrator；Claude Code 的 Channels 能讓 MCP server 推事件進 session，但它是 stdio、research preview，就算推到了，停不停 subagent 還是 LLM 決定，仍是 soft。`execute` 留著給想讓 agent 自己指揮的人，不用為了 M2 拿掉。
+- 代價：engine 多一段排程與 task 層的 attempt；task 之間的接力全靠 git，agent 沒照 prompt merge 回去，下一張就看不到前一張的東西。
+- 重新檢視：Channels 能在 headless 用、要給 `execute` 加快 soft stop 時（plan.md 待驗證）；要讓 AI 審單張 task 時（目前 dispatch 不走 `in-review`）；要限制單張 item 的平行數時。

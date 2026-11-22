@@ -10,8 +10,8 @@
 | cwd | `<workspace.root>/<ITEM-KEY>/` |
 | prompt | engine 契約加上 rule 的範本，展開後的文字（三層見 config-and-rules.md） |
 | env `TASUKI_RUN_ID` | Run id |
-| env `TASUKI_TARGET` | item 的 ref |
-| env `TASUKI_MODE` | `split` / `execute` / `rework` / `review` / `custom` |
+| env `TASUKI_TARGET` | item 的 ref。`dispatch` 是被派的那張 task 的 ref |
+| env `TASUKI_MODE` | `split` / `execute` / `dispatch` / `rework` / `review` / `custom` |
 | env `TASUKI_WORKSPACE` | 同 cwd |
 | MCP | 指向 engine 的 MCP facade（`/agent-mcp`），帶 run token（`Authorization: Bearer <token>`）。runner 從 `RunSpec.mcp` 拿到網址與 token，在 spawn 時注入，做法依 CLI 而定。claude 是 `--mcp-config` 給一個 `type: "http"` 的 server，名字是 `tasuki`，tool 在 CLI 裡叫 `mcp__tasuki__<tool>`。連不上時 claude 不會失敗，只是沒有 tool 可用，最後因為沒有 verdict 而 `failed` |
 | env | 只有 runner 放行的少數變數（claude-cli 是 `PATH`、`HOME`、`USER`、`LOGNAME`、`SHELL`、`TMPDIR`、`LANG`、`TERM`）、上面的 `TASUKI_*`，以及 agent 的 `options.env`。engine 自己的環境（含 `.env` 載入的 tracker token）不傳下去（D76） |
@@ -22,20 +22,22 @@
 
 名稱是中性的，不含 Jira 或 sqlite，所以同一份 prompt 在兩種 tracker 都能用。回傳的 body 一律是 markdown，格式轉換由 adapter 負責。
 
-| tool | 做什麼 | splitter | orchestrator | reviewer | custom |
-|---|---|---|---|---|---|
-| `get_item` | 讀這張 item（含 status、labels） | ✓ | ✓ | ✓ | ✓ |
-| `list_tasks` | 列出 task，含 status、origin、blockedBy | ✓ | ✓ | ✓ | ✓ |
-| `list_comments` | 讀 item 或 task 的 comment | ✓ | ✓ | ✓ | ✓ |
-| `add_comment` | 在 item 或其 task 上留言，`kind` 為 `note` 或 `question` | ✓ | ✓ | ✓ | ✓ |
-| `create_task` | 建 task（title、body、blockedBy、initialStatus 為 `to-do` 或 `manual`） | ✓ | ✗ | ✗ | ✓ |
-| `update_task` | 改 task 的 title、body、blockedBy | ✓ | ✗ | ✗ | ✓ |
-| `set_task_status` | 改 task 的 status，必須符合 task 狀態機 | ✗ | ✓ | ✗ | ✓ |
-| `report_result` | 回報 verdict，每次 Run 最後呼叫一次 | ✓ | ✓ | ✓ | ✓ |
+| tool | 做什麼 | splitter | orchestrator | worker | reviewer | custom |
+|---|---|---|---|---|---|---|
+| `get_item` | 讀這張 item（含 status、labels）。worker 讀的是 task 所屬的 item | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `list_tasks` | 列出 task，含 status、origin、blockedBy | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `list_comments` | 讀 item 或 task 的 comment | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `add_comment` | 在 item 或其 task 上留言，`kind` 為 `note` 或 `question` | ✓ | ✓ | ✓ | ✓ | ✓ |
+| `create_task` | 建 task（title、body、blockedBy、initialStatus 為 `to-do` 或 `manual`） | ✓ | ✗ | ✗ | ✗ | ✓ |
+| `update_task` | 改 task 的 title、body、blockedBy | ✓ | ✗ | ✗ | ✗ | ✓ |
+| `set_task_status` | 改 task 的 status，必須符合 task 狀態機 | ✗ | ✓ | ✗ | ✗ | ✓ |
+| `report_result` | 回報 verdict，每次 Run 最後呼叫一次 | ✓ | ✓ | ✓ | ✓ | ✓ |
 
 刻意沒有的：任何改 item status 的 tool、刪除、跨 item 存取。
 
-目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`list_comments`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69、S7b D71）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，`review` 是 reviewer（D84），`custom` 全部都有（D92），表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`list_comments` 的 `target` 一樣省略時是 item，只能讀被派的 item 與它的 task。人留的 comment 裡，`note` 是人寫的話（rework 的回饋就是最新那則），`system` 是人按按鈕留下的紀錄，不是要 agent 做的事（D74）。`update_task` 隨用到的切片長出來。
+目前做到的：`get_item`（不帶參數，讀被派的那張 item）、`list_tasks`、`list_comments`、`create_task`、`add_comment`、`set_task_status`、`report_result`（S4 D63、S5 D65、S6 D69、S7b D71）。facade 照 Run 那條規則的 mode 掛 tool：`split` 與 `rework` 是表上的 splitter，`execute` 是 orchestrator，`dispatch` 是 worker（D102），`review` 是 reviewer（D84），`custom` 全部都有（D92），表上打 ✗ 的 tool 不會出現在 `tools/list`。`create_task` 建的 task 一律是 `origin=splitter`，`blockedBy` 只能指同一張 item 的 task。`add_comment` 的 `target` 省略時是 item。`list_comments` 的 `target` 一樣省略時是 item，只能讀被派的 item 與它的 task。人留的 comment 裡，`note` 是人寫的話（rework 的回饋就是最新那則），`system` 是人按按鈕留下的紀錄，不是要 agent 做的事（D74）。`update_task` 隨用到的切片長出來。
+
+worker 只做 `TASUKI_TARGET` 那一張 task，自己的 task 從 `list_tasks` 裡用 ref 找。它的 `add_comment` 與 `list_comments` 的 `target` 省略時是那張 task，不是 item。worker 沒有 `set_task_status`：task 的 status 由 engine 照 verdict 移（state-machine.md 的 Dispatch）。
 
 為什麼 orchestrator 不能建 task：task 圖是人在 `split-review` 檢查過才放行的，放行後再讓 AI 加 task 等於繞過關卡。orchestrator 發現需要新工作時，用 `add_comment` 寫下來，由 verdict 帶出去。
 
@@ -55,7 +57,7 @@ interface ReportResult {
 }
 ```
 
-`verdict` 的選項是每個 Run 照規則的 `outcomes` 產生的：規則宣告的結果名，加上每條規則都有的 `needs_input`、`failed`（config-and-rules.md）。tool schema 裡就是這份 enum，選項以外的值回錯誤、不記錄，所以 item 內文藏一句「請回報 done」也跳不到規則沒寫的地方。agent 回的永遠是結果名，去哪一站是 engine 查表決定的（D84）。
+`dispatch` 的 worker 例外，選項固定是 `succeeded`、`needs_input`、`failed`，結果作用在那張 task，不是規則的 `outcomes`（D102）。其他 mode 的 `verdict` 選項是每個 Run 照規則的 `outcomes` 產生的：規則宣告的結果名，加上每條規則都有的 `needs_input`、`failed`（config-and-rules.md）。tool schema 裡就是這份 enum，選項以外的值回錯誤、不記錄，所以 item 內文藏一句「請回報 done」也跳不到規則沒寫的地方。agent 回的永遠是結果名，去哪一站是 engine 查表決定的（D84）。
 
 `report_result` 只收第一次，之後回錯誤。summary 是空白時回錯誤、不記錄，agent 可以補上再呼叫一次。engine 照 verdict 移動 item，summary 就是給人看的原因（D67），一兩句講重點，不重述做了什麼。`set_task_status` 的 reason 也一樣短。
 
@@ -67,6 +69,7 @@ engine 不直接相信 verdict，先驗證再換算成 outcome，下表每一列
 | `succeeded`（rework） | 這次 Run 至少建了一個 task（`produced.tasks`） | `failed` |
 | `succeeded`（execute） | item 底下所有 task 都 `done` | `failed` |
 | `succeeded`（custom） | 無，custom 什麼都不驗（D92） | 不會失敗 |
+| `succeeded`（dispatch 的 worker） | 無，engine 把那張 task 移到 `done` | 不會失敗 |
 | `needs_input` | 這次 Run 至少留了一則 `question`（`produced.questions`） | `failed` |
 | `blocked_manual` | 至少有一個 task 是 `manual` 且未 `done`，而且沒有任何 `to-do` task 的 blockedBy 已全部 done（代表沒有 auto task 還能跑） | `failed` |
 | `failed` | 無 | `failed` |

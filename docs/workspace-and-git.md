@@ -24,7 +24,9 @@ git 策略算實作，會因人而異，所以 engine 不管 git。engine 只負
 
 - item branch：`feature/<ITEM-KEY>`，例如 `feature/PROJ-123`。
 - task branch：`task/<TASK-KEY>`，例如 `task/PROJ-124`。
-- task 做完 merge 回 item branch，由 orchestrator 執行。
+- task 做完 merge 回 item branch。`execute` 由 orchestrator 執行；`dispatch` 由做那張 task 的 agent 自己 merge 回去再 push，下一張從 item branch 開始，前面做的都在（D102）。
+- `dispatch` 的 agent 發現 item branch 還不存在就建一個。平行的 task 每張開自己的 worktree，不在同一份 checkout 上切 branch。
+- 平行之後要整合的，splitter 可以多開一張 blockedBy 那幾張的整合 task。engine 不知道它是整合用的，它只是一張普通的 task。
 - 一張 item 動到多個 repo 時，每個 repo 都用同樣的 branch 名稱。
 - 不開 MR 也可以。agent 預設只做兩件事：確保各 repo 的 item branch 就緒，並在 item 上留一則 comment 列出 branch 名，供人 review。
 
@@ -33,7 +35,7 @@ git 策略算實作，會因人而異，所以 engine 不管 git。engine 只負
 1. 不能巢狀命名。git 不允許 `feature/PROJ-123` 與 `feature/PROJ-123/PROJ-124` 同時存在，因為 ref 是檔案，不能同時又是目錄。所以 task 用 `task/` 前綴，不放在 item branch 底下。
 2. task 各開 branch 又要平行跑，每個 task 都需要自己的 worktree，同一份 checkout 切不了兩個 branch。不用 worktree 的話 task 只能循序執行。
 
-merge 衝突要有固定的出路：orchestrator 回報 `blocked_manual`（或 `failed`），item 進 `blocked`，engine 寫一則 `system` comment 說明哪個 task 與誰衝突。
+merge 衝突要有固定的出路：orchestrator 回報 `blocked_manual`（或 `failed`），item 進 `blocked`，engine 寫一則 `system` comment 說明哪個 task 與誰衝突。`dispatch` 底下兩張平行的 task 同時 push 時，後到的被拒（non-fast-forward），agent 拉回來解衝突再 push；解不掉就回報 `needs_input`，question 寫跟哪張衝突，task 轉 `manual`。
 
 ## 目錄示意
 
