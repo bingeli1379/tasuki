@@ -87,7 +87,7 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
         "requires": { "mcpServers": [], "skills": [] }   // optional preflight, see doctor (S10)
       }
     },
-    "codex-main": { "plugin": "@tasuki/codex-cli", "options": { "auth": "inherit-login" } },
+    "codex-main": { "plugin": "@tasuki/codex-cli", "options": { "auth": "inherit-login", "sandbox": "workspace-write" } },
     "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 3 } }
   },
 
@@ -114,9 +114,9 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
 `env` 是給被 spawn 的 agent CLI 用的，engine 自己不使用裡面的值。engine 不碰 git，所以不放 GitHub / GitLab 的設定。
 
-`allowedTools` 是 CLI 自己的工具名稱清單。空陣列或省略，代表除了 runner 注入的 tasuki MCP tool 之外一律不准，因為 headless 沒有人能即時按允許。名稱格式依 CLI 而定，待驗證。`tasuki init` 產生的 config 帶範例檔那份清單（D99）。
+`allowedTools` 是 CLI 自己的工具名稱清單。codex 沒有逐個 tool 的清單，給它 `allowedTools` 會拒絕載入，改用 `sandbox`（`read-only`、`workspace-write`、`danger-full-access`，省略是 `workspace-write`）決定它的 shell 指令能碰什麼（D101）。空陣列或省略，代表除了 runner 注入的 tasuki MCP tool 之外一律不准，因為 headless 沒有人能即時按允許。名稱格式依 CLI 而定，待驗證。`tasuki init` 產生的 config 帶範例檔那份清單（D99）。
 
-`auth` 只宣告認證方式，憑證本身一律放 `env`，不另外開欄位。`inherit-login` 沿用 CLI 自己的登入，不需要任何變數。`api-key` 與 `oauth-token` 要求 `env` 裡有對應的變數，變數名稱依 CLI 而定：claude 是 `ANTHROPIC_API_KEY` 與 `CLAUDE_CODE_OAUTH_TOKEN`，`oauth-token` 的 `env` 不能同時帶 `ANTHROPIC_API_KEY`，因為 claude 會優先用它（D100）；codex 待驗證。省略時是 `inherit-login`。
+`auth` 只宣告認證方式，憑證本身一律放 `env`，不另外開欄位。`inherit-login` 沿用 CLI 自己的登入，不需要任何變數。`api-key` 與 `oauth-token` 要求 `env` 裡有對應的變數，變數名稱依 CLI 而定：claude 是 `ANTHROPIC_API_KEY` 與 `CLAUDE_CODE_OAUTH_TOKEN`，`oauth-token` 的 `env` 不能同時帶 `ANTHROPIC_API_KEY`，因為 claude 會優先用它（D100）；codex 只收 `inherit-login` 與 `api-key`（`CODEX_API_KEY`），訂閱的登入是 `CODEX_HOME` 裡的 `auth.json`，算 `inherit-login`（D101）。省略時是 `inherit-login`。
 
 ## 路徑
 
@@ -142,7 +142,7 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 從檔案讀的欄位（W4a）：`dataDir`、`server.port`、`tracker`、`store`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`agents`、`auth`。檔案裡出現這些與 `$schema`、`version`、`workspace` 以外的欄位就拒絕啟動，`workflow`、`rules`、`labels` 也一樣（D91）。`@tasuki/claude-cli` 的 options 讀 `auth`（`inherit-login`、`api-key`、`oauth-token`，D100）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires`（`mcpServers`、`skills` 兩個名字清單）給 `doctor` 第 9 條用。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+目前 server 從檔案讀的欄位（W4a）：`dataDir`、`server.port`、`tracker`、`store`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`agents`、`auth`。檔案裡出現這些與 `$schema`、`version`、`workspace` 以外的欄位就拒絕啟動，`workflow`、`rules`、`labels` 也一樣（D91）。`@tasuki/claude-cli` 的 options 讀 `auth`（`inherit-login`、`api-key`、`oauth-token`，D100）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires`（`mcpServers`、`skills` 兩個名字清單）給 `doctor` 第 9 條用。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`@tasuki/codex-cli` 的 options 讀 `auth`、`model`、`sandbox`、`env`、`inheritSettings`（省略時加 `--ignore-user-config --ignore-rules`，不讀這台機器的 codex 設定，登入照樣讀 `CODEX_HOME`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
 流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `agent` 要是檔案 `agents` 裡的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是檔案的 `limits.defaultMaxAttempts`；`prompt` 省略時是 mode 的預設，寫了就不能是空字串。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。
 
@@ -267,7 +267,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 6. `${VAR}` 都能展開。`labels.hold` 是一個不含空白的字（Jira 的 label 不能有空白）。
 7. `server.host` 非 loopback 又沒設 `auth` 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`。`allowInsecure` 兩條都豁免（D90，見 security-and-auth.md）。
 8. Jira：mapping 的每個 status 都存在於 project 的 workflow，規則用到的每一個轉移（from 到 to）在 workflow 裡目前都允許。逐條列出不合法的轉移。「規則用到的」是 engine 與 agent 會走的：認領進出 claim status、從工作中的 status 到每個結果、從 watch 放棄或要回饋、`blocked_manual` 自動接回；有 execute 或 custom 規則時再加 agent 能走的 task 轉移（`ruleTransitions`）。人的移動不算，Jira 當下不准就拒絕。Jira 看板上沒有任何一欄放 tasuki 用到的 status 時警告，那些卡片在看板上看不到（D95）。
-9. agent preflight：CLI 跑得起來（`--version`）。`requires` 列出的 MCP server 已連上、skill 有載入。claude 照 Run 的載入方式（`plugins`、`mcpServers`、`inheritSettings`）起一次，讀 stream-json 的 `init`，在問模型之前砍掉（D95）；`requires` 是空的就不起。codex 的偵測方式待驗證（S12）。
+9. agent preflight：CLI 跑得起來（`--version`）。`requires` 列出的 MCP server 已連上、skill 有載入。claude 照 Run 的載入方式（`plugins`、`mcpServers`、`inheritSettings`）起一次，讀 stream-json 的 `init`，在問模型之前砍掉（D95）；`requires` 是空的就不起。codex 只檢查 `--version`，偵測 MCP server 與 skill 的方式還沒查，所以 codex agent 不收 `requires`（D101）。
 10. agent 的 `auth` 不是 `inherit-login` 時，`env` 裡有對應的變數而且展開後不是空字串。`allowedTools` 是空的就警告，因為這個 agent 只能呼叫 tasuki 的 MCP tool，沒辦法改檔。
 11. claude agent 的 `appendSystemPrompt` 與 `appendSystemPromptFile` 不能同時設定，`appendSystemPromptFile` 指到的檔案要存在，`plugins` 的資料夾要存在，`mcpServers` 不能用 `tasuki` 這個名字。
 12. 另一個 engine：tracker 上的心跳是別的 engine 寫的，而且比三輪 poll 還新，拒絕啟動並說出是哪一個（D66、D95）。

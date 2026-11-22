@@ -63,7 +63,7 @@
 | S12a | `tasuki` CLI（`start`、`doctor`、`pause`、`resume`）、內建 plugin 跟著 CLI 裝、engine serve 看板、本機從 tarball 裝得起來（已完成，D98） | 只放一份 config 的資料夾裡 `tasuki start`，瀏覽器開 8787 就是看板 |
 | S12b | 互動式 `tasuki init`：選 tracker、agent、要不要登入，Jira 的 issue type 與 link type 向 Jira 查好寫進 config 並附上名稱（D50）；status 對照照舊在設定頁（已完成，D99） | 空資料夾 `tasuki init` 答完問題，直接 `tasuki start` 跑得起來 |
 | S12c | container image（本機 build，在 OrbStack 跑），claude-cli 加 `api-key` 與 `oauth-token` 認證（已完成，D100） | `docker run` 起來後用 token 真的派一次 claude |
-| S12d | codex runner，做到契約測試會過（作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
+| S12d | codex runner 與 testkit 的 runner 契約，做到契約測試會過（已完成，D101；作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2） | 平行跑 task，單張 task 能被停掉 |
 | S14 | 對外發佈：license、套件名稱查撞名（D23）、版本號與依賴範圍（D62、D96）、`npm publish`（core、testkit、內建 plugin、CLI）、container image 推到 registry、給使用者看的 README（含訂閱帳號與 API key 的條款）（D97） | 在一台乾淨的機器上從 npm 與 registry 裝起來，照 README 跑得起來 |
 
@@ -122,11 +122,9 @@ S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整�
 
 - `claude -p` 用 `--resume` 接回一段快滿的對話時，會不會自己壓縮（auto-compact）。`session: per-item` 的規則接了很多次之後要靠它；不會的話，要讓 runner 在 token 用量太高時改開新對話，或同一張卡接了 N 次就重開（作者 2026-11-22 提出）。
 
-- `codex` 的 headless 指令：輸出格式、session resume、工具白名單、注入 MCP 設定的方式。`claude` 已在 S8 用 2.1.323 驗過（D76）：`-p --output-format stream-json --verbose`、`--session-id` 自訂 uuid、`--resume`（找不到時 exit 1）、`--mcp-config` 給 http server 帶 header、`--allowedTools` 的格式是 `mcp__<server>` 與 `Bash(git:*)`。
-- `codex` 的 `api-key`、`oauth-token` 認證要吃哪個環境變數（D35）。claude 已在 S12c 定了：`ANTHROPIC_API_KEY` 與 `CLAUDE_CODE_OAUTH_TOKEN`，`oauth-token` 在 container 裡實際派過一次，`api-key` 還沒實際打過（D100）。
-- codex 是否支援 http 版的 MCP；只支援 stdio 時要不要加一個轉到 REST 的 shim。claude 支援（D76）。
+- codex 真的叫模型時的行為（D101，作者沒有 Codex 帳號）：`exec` 模式下 `approval_policy="never"` 能不能直接呼叫 tasuki 的 MCP tool，還是要另外設 tool 的批准；`workspace-write` 的 sandbox 預設不給網路，agent 能不能 `git push`；`api-key` 用的 `CODEX_API_KEY` 是從官方 SDK 的原始碼讀到的，沒實際打過。headless 的參數、`thread.started` 的 session、resume 找不到時的訊息、`-c` 注入 http MCP 都已經用 0.169.0 實際驗過。claude 的部分已在 S8 與 S12c 驗過（D76、D100）。
 - 長時間工具呼叫（例如跑測試）期間 CLI 有沒有輸出，決定 `idleTimeoutMinutes` 的預設值（D34）。
-- agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。claude 已在 S10 做成 `doctor` 第 9 條（D95）：stream-json 的 `init` 列出 `skills` 與帶 `status` 的 `mcp_servers`，不一定是第一行。codex 還沒查。
+- agent preflight：怎麼偵測某個 CLI 裝了哪些 MCP server 與 skill。claude 已在 S10 做成 `doctor` 第 9 條（D95）：stream-json 的 `init` 列出 `skills` 與帶 `status` 的 `mcp_servers`，不一定是第一行。codex 還沒查，codex agent 目前不收 `requires`（D101）。
 - 使用者 MCP 接 Codex（D57）：2026-11-16 用 codex-cli 0.169.0 驗過 `initialize` 與 `tools/list`（中間放 proxy 記錄請求），`tools/call` 沒驗，因為手上沒有 Codex 帳號，模型叫不起來。Claude Code 2.1.311 已實際呼叫 `create_item` 與 `list_board` 成功。
 - Jira Cloud：API token 的 rate limit。transitions API 已在 S2 實際走過（D59）；ADF 轉換（marklassian 加自寫的反向）與 comment property 已在 S3 實際走過（D61）。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。

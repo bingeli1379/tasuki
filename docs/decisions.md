@@ -993,3 +993,17 @@
 - 實測（OrbStack，arm64）：image build 成功，執行段 787MB 是兩個 CLI（claude 346MB、codex 403MB）加 npm 快取清掉之後的大小，tasuki 本身 33MB。fake runner 的 config 起來後 `/api/health` 與看板正常，container 裡 `tasuki doctor` 0 errors、`claude --version` 是 2.1.323、`codex --version` 是 0.169.0。接著作者用 `claude setup-token` 產的 token，config 寫 `oauth-token`：存一條 split 規則、把一張 item 移到 `ready-to-split`，claude 在 container 裡約 10 秒拆出兩張 task，Run `finished`、`succeeded`，item 到 `split-review`；Run log 的 `apiKeySource` 是 `none`，container 裡沒有別的登入，用的就是那個 token。`api-key` 沒有實際打過（作者沒有 Console 的 key），行為只靠單元測試與文件。
 - 過程中的事故：驗證完找殘留字串時，`grep` 沒排除 `docker/.env`，token 被印進了對話紀錄。作者已撤銷，`docker/.env` 清空。之後掃字串要先排除放 secret 的檔案。
 - 重新檢視：image 要推到 registry（S14）；兩個 CLI 要升版時（版本 pin 在 Dockerfile）；有人要跑 arm64 以外的平台時，要確認多平台 build。
+
+## D101 S12d：codex runner、testkit 的 runner 契約
+
+- 背景：S12d（2026-11-22）。D96 說 runner 的契約等第二個真的 runner 再長。作者沒有 Codex 帳號，只能做到契約測試會過（D98）。
+- 決定（作者同意）：
+  - `@tasuki/codex-cli` 跑 `codex exec --json --skip-git-repo-check --cd <workspace> --sandbox <sandbox>`，prompt 從 stdin 給（最後的參數是 `-`），`-c approval_policy="never"`，tasuki 的 MCP 用 `-c mcp_servers.tasuki.url=…` 與 `mcp_servers.tasuki.bearer_token_env_var="TASUKI_MCP_TOKEN"`，run token 放在那個環境變數，不出現在命令列。選項放在 `resume <id>` 前面，跟官方 TypeScript SDK（`@openai/codex-sdk` 0.169.0）的排法一樣。
+  - codex 不能事先指定 session id，runner 讀 `--json` 的第一個事件 `thread.started` 的 `thread_id` 再呼叫 `onSession`。RunnerPort 本來就是事後回報（`onSession`），core 不用改。resume 時 stderr 出現 `no rollout found for thread id`（exit 1）就開新的，跟 claude 一樣。
+  - options：`auth`（`inherit-login` 或 `api-key`，後者要 `env.CODEX_API_KEY`；codex 沒有 OAuth token 那種變數，訂閱就是 `CODEX_HOME` 的 `auth.json`）、`model`、`sandbox`（預設 `workspace-write`）、`env`、`inheritSettings`（預設 false，加 `--ignore-user-config --ignore-rules`，登入照樣讀 `CODEX_HOME`）。傳給 CLI 的環境變數是 claude 那份加上 `CODEX_HOME`。
+  - 給 codex `allowedTools` 直接拒絕載入，叫人改用 `sandbox`。另一種是把常見的 tool 名稱翻成 sandbox 等級，但那個對應是編出來的；默默忽略又會讓人以為擋住了。`requires` 也拒絕，因為還不知道怎麼偵測 codex 的 MCP server 與 skill；doctor 只檢查 `--version`。
+  - testkit 加 `describeRunnerContract`：成功時 exit 是 0、log 有內容、`onActivity` 與 `onSession` 有被呼叫；resume 的 session 不在時開新的並回報新的 id；`terminate` 之後 `exit` 會結束；CLI 不存在時 exit 沒有 code。每個 runner 提供一支假 CLI 演 `succeed`、`hang`、`no-session`，傳給 CLI 的參數仍由各自的測試驗。claude-cli 與 codex-cli 都跑這份。testkit 的 tsconfig 加上 node 的型別，對外的 `.d.ts` 沒有用到任何 `node:` 型別。
+  - CLI 的依賴、`pack-cli.ts`、init 的 agent 選單都加上 codex，init 寫 `"sandbox": "workspace-write"`。
+- 實測（codex-cli 0.169.0，沒登入，暫時的 `CODEX_HOME`）：用 build 好的 runner 帶真的參數跑真的 codex，沒有任何參數錯誤，第一行是 `thread.started`，session 有回報；log 有 `rmcp` 連不上的錯誤，表示注入的 http MCP 被讀進去了（故意指到連不到的 port）。resume 一個不存在的 id，codex 印 `no rollout found`，runner 開新的並回報新的 thread id。`codex mcp list --json` 讀 `-c` 注入的 server 是 `streamable_http`、`auth_status: bearer_token`。單元測試 10 條（含契約 4 條、process tree 的 terminate），claude-cli 加跑契約後 16 條。從 tarball 裝好的 `tasuki` 對只有 codex agent 的 config 跑 `doctor` 0 errors。`pnpm test` 471 條、`pnpm check` 沒有錯誤、`verify:plugin-example` 31 條過。
+- 沒驗的：真的叫模型（沒帳號），所以 MCP tool 在 `approval_policy="never"` 下會不會被擋、`workspace-write` 沒網路時能不能 `git push`、`CODEX_API_KEY` 實際能不能登入，都留在 plan.md 待驗證。
+- 重新檢視：有 Codex 帳號時；codex 出了逐個 tool 的權限設定時。
