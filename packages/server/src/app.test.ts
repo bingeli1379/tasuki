@@ -9,6 +9,9 @@ import {
   STORE_MIGRATIONS,
   TRACKER_MIGRATIONS,
 } from '@tasuki/sqlite'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
 import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
@@ -646,5 +649,27 @@ describe('the flow settings (D91)', () => {
     expect(await moved.json()).toEqual({
       error: `move these off the statuses removed or renamed first: ${item.ref} (needs-answers)`,
     })
+  })
+})
+
+describe('the built board', () => {
+  it('serves the page and its assets at / next to the API', async () => {
+    const webDir = mkdtempSync(join(tmpdir(), 'tasuki-web-'))
+    mkdirSync(join(webDir, 'assets'))
+    writeFileSync(join(webDir, 'index.html'), '<div id="app"></div>')
+    writeFileSync(join(webDir, 'assets', 'app.js'), 'export {}')
+    const app = createApp({
+      tracker: memoryTracker(),
+      store: memoryStore(),
+      flow: liveFlow(mapping),
+      agents: [],
+      tokens: createRunTokens(),
+      webDir,
+    })
+    const page = await app.request('/')
+    expect(page.headers.get('Content-Type')).toContain('text/html')
+    expect(await page.text()).toBe('<div id="app"></div>')
+    expect((await app.request('/assets/app.js')).status).toBe(200)
+    expect(await (await app.request('/api/health')).json()).toEqual({ ok: true })
   })
 })

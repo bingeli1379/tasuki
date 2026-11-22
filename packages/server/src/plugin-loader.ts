@@ -33,16 +33,27 @@ async function step<T>(plugin: string, what: string, run: () => T | Promise<T>):
   }
 }
 
-// Plugins resolve from the config's folder, the way a project resolves its own dependencies.
-// Any failure refuses to start (D48).
+// Plugins resolve from the config's folder, the way a project resolves its own dependencies,
+// then from where the engine is installed, which is where the built-in ones come along with a
+// global install (D98). Any failure refuses to start (D48).
+function resolvePlugin(name: string, configDir: string): string {
+  try {
+    return createRequire(join(configDir, 'package.json')).resolve(name)
+  } catch (e) {
+    try {
+      return createRequire(import.meta.url).resolve(name)
+    } catch {
+      throw e
+    }
+  }
+}
+
 async function load<R extends 'tracker' | 'store' | 'runner' | 'auth'>(
   name: string,
   configDir: string,
   role: R,
 ): Promise<NonNullable<Plugin[R]>> {
-  const entry = await step(name, 'resolve', () =>
-    createRequire(join(configDir, 'package.json')).resolve(name),
-  )
+  const entry = await step(name, 'resolve', () => resolvePlugin(name, configDir))
   const mod = await step(
     name,
     'import',

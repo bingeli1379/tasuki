@@ -220,6 +220,37 @@ importers:
         specifier: workspace:*
         version: link:../core
 
+  packages/cli:
+    dependencies:
+      '@tasuki/auth-builtin':
+        specifier: workspace:*
+        version: link:../auth-builtin
+      '@tasuki/auth-http':
+        specifier: workspace:*
+        version: link:../auth-http
+      '@tasuki/claude-cli':
+        specifier: workspace:*
+        version: link:../claude-cli
+      '@tasuki/core':
+        specifier: workspace:*
+        version: link:../core
+      '@tasuki/fake-runner':
+        specifier: workspace:*
+        version: link:../fake-runner
+      '@tasuki/jira-cloud':
+        specifier: workspace:*
+        version: link:../jira-cloud
+      '@tasuki/server':
+        specifier: workspace:*
+        version: link:../server
+      '@tasuki/sqlite':
+        specifier: workspace:*
+        version: link:../sqlite
+    devDependencies:
+      '@tasuki/web':
+        specifier: workspace:*
+        version: link:../web
+
   packages/core: {}
 
   packages/fake-runner:

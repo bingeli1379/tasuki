@@ -48,6 +48,7 @@ import {
   type StorePort,
   type TrackerPort,
 } from '@tasuki/core'
+import { serveStatic } from '@hono/node-server/serve-static'
 import { Hono, type Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
@@ -92,6 +93,8 @@ export interface AppDeps {
   // The host agents reach /agent-mcp at, when the engine is bound to one address that is not
   // loopback.
   agentHost?: string
+  // The built board, served at / (S12); unset in development, where Vite serves it.
+  webDir?: string
 }
 
 const SESSION_COOKIE = 'tasuki_session'
@@ -142,6 +145,7 @@ export function createApp({
   auth,
   publicUrl,
   agentHost,
+  webDir,
 }: AppDeps): Hono<{ Variables: { actor: Account } }> {
   const signedIn = new AsyncLocalStorage<Account>()
   const tracker =
@@ -563,5 +567,7 @@ export function createApp({
     await createAgentMcpServer({ tracker, store, run, rule }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
+  // The board has no client-side routes: / and its assets are all there is.
+  if (webDir !== undefined) app.use(serveStatic({ root: webDir }))
   return app
 }
