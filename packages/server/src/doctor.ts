@@ -8,6 +8,7 @@ import {
   type TrackerPort,
 } from '@tasuki/core'
 import { hostname } from 'node:os'
+import { styleText } from 'node:util'
 import { loadConfig } from './config'
 import { loadFlow, type LiveFlow } from './flow'
 import { loadAuth, loadRunner, loadStore, loadTracker, NO_STATUSES } from './plugin-loader'
@@ -88,7 +89,10 @@ export async function engineCheck(
 }
 
 export function printFindings(findings: readonly Finding[]): void {
-  for (const f of findings) console.log(`${f.level}: ${f.where}: ${f.message}`)
+  for (const f of findings)
+    console.log(
+      `${styleText(f.level === 'error' ? ['red', 'bold'] : 'yellow', `${f.level}:`)} ${styleText('dim', `${f.where}:`)} ${f.message}`,
+    )
 }
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : String(e))
@@ -103,7 +107,8 @@ export async function runDoctor(configPath: string, clock: Clock): Promise<numbe
   const report = (): number => {
     printFindings(findings)
     const errors = findings.filter((f) => f.level === 'error').length
-    console.log(`doctor: ${errors} errors, ${findings.length - errors} warnings`)
+    const summary = `doctor: ${errors} errors, ${findings.length - errors} warnings`
+    console.log(styleText(errors > 0 ? 'red' : 'green', summary))
     return errors > 0 ? 1 : 0
   }
   let config: ReturnType<typeof loadConfig>
