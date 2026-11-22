@@ -12,7 +12,7 @@ export interface ItemDetail {
   attachments: Attachment[]
   // Oldest first.
   tasks: TaskEntry[]
-  // Newest first.
+  // Newest first, with the live Runs on its tasks in front when a dispatch rule runs them.
   runs: Run[]
 }
 
@@ -23,11 +23,13 @@ export async function getItem(
 ): Promise<ItemDetail> {
   // get first, so a missing ref is one NotFound rather than four.
   const item = await tracker.get(ref)
-  const [comments, attachments, tasks, runs] = await Promise.all([
+  const [comments, attachments, tasks, own, live] = await Promise.all([
     tracker.comments(ref),
     tracker.attachments(ref),
     listTasks(tracker, ref),
     store.runsFor(ref),
+    store.liveRuns(),
   ])
-  return { item, comments, attachments, tasks, runs }
+  const onTasks = live.filter((r) => r.item === ref && r.target !== ref)
+  return { item, comments, attachments, tasks, runs: [...onTasks, ...own] }
 }

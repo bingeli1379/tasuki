@@ -5,6 +5,7 @@ import type { StorePort } from '../ports/store'
 import type { TrackerPort } from '../ports/tracker'
 import { NotFound } from '../not-found'
 import { StatusConflict } from '../status-conflict'
+import { recoverTaskRun } from './dispatch'
 import { releaseTasks } from './release-tasks'
 
 export interface RecoverDeps {
@@ -25,6 +26,10 @@ export async function recoverRuns(
   const expired = (await store.liveRuns()).filter((r) => Date.parse(r.leaseUntil) < now)
   for (const run of expired) {
     const rule = rules.find((r) => r.id === run.rule)
+    if (run.target !== run.item) {
+      await recoverTaskRun({ tracker, store }, rule, run)
+      continue
+    }
     // Deleted from the tracker while its Run was alive: nothing is left to send back, and
     // letting NotFound out would stop every round from here on.
     const item = await tracker.get(run.target).catch((e: unknown) => {

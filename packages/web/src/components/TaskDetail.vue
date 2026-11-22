@@ -50,6 +50,12 @@ const comments = computed(() =>
     }))
     .reverse(),
 )
+// A dispatch rule's agent on this task; once Stop was pressed there is nothing more to press.
+const stoppable = computed(() => {
+  const run = detail.value?.runs[0]
+  return run?.state === 'running' && run.cancelMode !== 'hard'
+})
+
 // The person's edges of the task diagram (state-machine.md, D74).
 const moves = computed((): { label: string; to: string }[] => {
   switch (detail.value?.task.status) {
@@ -130,6 +136,18 @@ const move = (to: string): Promise<void> =>
     // What the write returned is shown at once; the log line it left comes in with a read
     // in the background, which costs Jira seconds.
     if (detail.value) detail.value.task = { ...detail.value.task, ...moved }
+    edits++
+    void load()
+  }, `${props.taskRef} was moved by someone else`)
+
+// Only this task's agent ends, and the person takes the task over (D102).
+const stop = (): Promise<void> =>
+  act(async () => {
+    const stopped = await call<TaskDetail['task']>(
+      `/api/tasks/${encodeURIComponent(props.taskRef)}/stop`,
+      { method: 'POST' },
+    )
+    if (detail.value) detail.value.task = { ...detail.value.task, ...stopped }
     edits++
     void load()
   }, `${props.taskRef} was moved by someone else`)
@@ -232,6 +250,15 @@ const authorOf = (c: Comment): string =>
                 />
               </h2>
               <span class="flex shrink-0 gap-2">
+                <UButton
+                  v-if="stoppable"
+                  label="Stop"
+                  color="error"
+                  variant="outline"
+                  size="sm"
+                  :disabled="busy"
+                  @click="stop"
+                />
                 <UButton
                   v-for="m in moves"
                   :key="m.to"

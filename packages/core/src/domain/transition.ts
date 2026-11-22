@@ -1,5 +1,5 @@
 import { exitFor, runningStatus, type Rule } from './rule'
-import { AGENT_MOVES } from './task'
+import { AGENT_MOVES, DISPATCH_MOVES } from './task'
 import type { Kind } from './work-unit'
 
 // A move between two logical statuses, which a tracker with a workflow may not allow.
@@ -34,6 +34,13 @@ export function ruleTransitions(rules: readonly Rule[]): Transition[] {
     if (rule.mode === 'execute' || rule.mode === 'custom')
       for (const [from, targets] of Object.entries(AGENT_MOVES))
         for (const to of targets) add('task', from, to)
+    // The engine claims a task, moves it by the worker's verdict, and gives up on one that
+    // kept failing, from to-do or a stale in-progress (D102).
+    if (rule.mode === 'dispatch') {
+      add('task', 'to-do', 'in-progress')
+      for (const to of Object.values(DISPATCH_MOVES)) add('task', 'in-progress', to)
+      add('task', 'to-do', 'manual')
+    }
   }
   return [...found.values()]
 }

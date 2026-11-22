@@ -19,6 +19,7 @@ const at = (ms: number): string => new Date(ms).toISOString()
 
 const newRun = (target: string, extra: Partial<NewRun> = {}): NewRun => ({
   target,
+  item: target,
   rule: 'split',
   agent: 'fake',
   attempt: 1,
@@ -54,6 +55,7 @@ export function describeStoreContract(
       expect(run).toEqual({
         id: expect.any(String),
         target: 'T-1',
+        item: 'T-1',
         rule: 'split',
         agent: 'fake',
         attempt: 2,
@@ -66,6 +68,13 @@ export function describeStoreContract(
         lastActivityAt: at(T0),
       })
       expect(await store.getRun(run.id)).toEqual(run)
+    })
+
+    it('keeps the item a Run works for apart from its target: a dispatched task (D102)', async () => {
+      const run = await store.createRun(newRun('T-2', { item: 'T-1' }))
+      expect(run).toMatchObject({ target: 'T-2', item: 'T-1' })
+      expect((await store.liveRuns())[0]).toMatchObject({ target: 'T-2', item: 'T-1' })
+      expect(await store.runsFor('T-1')).toEqual([])
     })
 
     it('getRun throws NotFound for an unknown id', async () => {

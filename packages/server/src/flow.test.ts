@@ -207,7 +207,7 @@ describe('parseFlow', () => {
     ],
     [
       { ...split, mode: 'judge' },
-      'rules[0] (split).mode must be one of split, execute, rework, review, custom',
+      'rules[0] (split).mode must be one of split, execute, dispatch, rework, review, custom',
     ],
     [
       { ...split, outcomes: { needs_input: 'needs-answers' } },
@@ -312,6 +312,36 @@ describe('parseFlow', () => {
         rules: [custom],
       }),
     ).toThrow('workflow.taskStatuses must map in-progress, in-review: rule custom runs tasks')
+  })
+
+  it('keeps a dispatch rule to what the engine can reach, and maps the four task statuses it moves (D102)', () => {
+    const dispatch = {
+      id: 'dispatch',
+      watch: 'in-progress',
+      agent: 'fake',
+      mode: 'dispatch',
+      outcomes: { succeeded: 'in-review', blocked_manual: 'blocked' },
+    }
+    expect(parse(withRules([dispatch])).rules[0]).toMatchObject({
+      mode: 'dispatch',
+      prompt: defaultPrompt('dispatch'),
+    })
+    expect(() => parse(withRules([{ ...dispatch, claim: 'refining' }]))).toThrow(
+      'rules[0] (dispatch).claim: a dispatch rule keeps the item in watch',
+    )
+    expect(() =>
+      parse(withRules([{ ...dispatch, outcomes: { ...dispatch.outcomes, approve: 'done' } }])),
+    ).toThrow(
+      'rules[0] (dispatch).outcomes.approve: a dispatch rule ends only on succeeded or blocked_manual',
+    )
+    expect(() =>
+      parse({
+        workflow: stations(['refining', 'in-progress', 'in-review', 'blocked'], {
+          taskStatuses: { 'to-do': 'T', manual: 'M', 'in-review': 'R' },
+        }),
+        rules: [dispatch],
+      }),
+    ).toThrow('workflow.taskStatuses must map in-progress, done: rule dispatch runs tasks')
   })
 
   it('refuses two rules watching the same status, or with the same name', () => {

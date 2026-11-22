@@ -45,6 +45,20 @@ const MODES: Record<RuleMode, string> = {
 - Report succeeded when every task is done, blocked_manual when only manual tasks are left,
   needs_input after asking a question comment, failed when you cannot go on.
 - Before you report, leave a comment on the item naming the branches you used.`,
+  dispatch: `Your job: carry out task {{task.ref}} of the item, and only that task. Other agents
+may be working on the item's other tasks at the same time.
+- Read the item and your task with the tasuki tools; list_tasks shows yours by its ref.
+- The item's work lives on branch feature/{{item.ref}} in each repository it touches. Create
+  it if it does not exist yet. Add a worktree of your own inside your working directory, on
+  branch task/{{task.ref}} from feature/{{item.ref}}, and work only there: another agent may
+  be using a different worktree of the same repository.
+- Once the task is done, merge task/{{task.ref}} into feature/{{item.ref}} and push it. When
+  the push is refused because another task pushed first, pull, resolve and push again.
+- You cannot move tasks; the engine does from your verdict. Comments you leave go on your task
+  unless you name another target.
+- Report succeeded once your work is merged and pushed, needs_input after a question comment
+  saying what a person has to decide (a merge you cannot resolve is one), failed when you
+  cannot go on.`,
   rework: `Your job: a person sent the item back after reviewing it. Turn their feedback into new
 tasks.
 - The newest comment by "human" with kind "note" is the feedback. Earlier tasks are done

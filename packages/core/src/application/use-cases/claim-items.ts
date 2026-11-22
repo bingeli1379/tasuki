@@ -5,6 +5,7 @@ import { RunConflict } from '../run-conflict'
 import type { StorePort } from '../ports/store'
 import type { TrackerPort } from '../ports/tracker'
 import { StatusConflict } from '../status-conflict'
+import { claimTasks } from './dispatch'
 
 export interface ClaimDeps {
   tracker: TrackerPort
@@ -35,6 +36,8 @@ export async function claimItems(
 ): Promise<Claimed[]> {
   const live = await store.liveRuns()
   const busy = new Set(live.map((r) => r.target))
+  // An item whose tasks are running is not claimed by another rule (invariant 1).
+  const busyItems = new Set(live.map((r) => r.item))
   let slots = limits.maxConcurrentRuns - live.length
   const claimed: Claimed[] = []
   const waiting = await tracker.list(
@@ -44,7 +47,15 @@ export async function claimItems(
   for (const rule of rules) {
     for (const item of waiting.filter((i) => i.status === rule.watch)) {
       if (slots <= 0) return claimed
-      if (busy.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
+      if (rule.mode === 'dispatch') {
+        if (busy.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
+        const runs = await claimTasks({ tracker, store }, rule, item, busy, slots, limits)
+        for (const run of runs) busy.add(run.target)
+        slots -= runs.length
+        claimed.push(...runs.map((run) => ({ run, rule })))
+        continue
+      }
+      if (busyItems.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
       const runs = await store.runsFor(item.ref)
       if (rule.mode === 'rework' && !(await hasFeedback(tracker, item.ref, runs[0]))) {
         await askForFeedback(tracker, named, rule, item.ref)
@@ -58,6 +69,7 @@ export async function claimItems(
       try {
         run = await store.createRun({
           target: item.ref,
+          item: item.ref,
           rule: rule.id,
           agent: rule.agent,
           attempt,
@@ -70,6 +82,7 @@ export async function claimItems(
         throw e
       }
       busy.add(item.ref)
+      busyItems.add(item.ref)
       if (attempt > rule.maxAttempts) {
         await giveUp(tracker, store, named, rule, run)
         continue

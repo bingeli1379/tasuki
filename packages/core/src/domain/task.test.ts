@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { agentMoveRefusal, isRunnable, personMoveRefusal, type TaskNode } from './task'
+import {
+  agentMoveRefusal,
+  isDispatchable,
+  isRunnable,
+  personMoveRefusal,
+  type TaskNode,
+} from './task'
 
 const task = (ref: string, status: string, blockedBy: string[] = []): TaskNode => ({
   ref,
@@ -13,6 +19,16 @@ describe('isRunnable', () => {
     expect(isRunnable(all[2] as TaskNode, all)).toBe(true)
     expect(isRunnable(task('D', 'to-do', ['A', 'B']), all)).toBe(false)
     expect(isRunnable(task('E', 'manual'), all)).toBe(false)
+  })
+})
+
+describe('isDispatchable (D102)', () => {
+  it('takes a stale in-progress task like a to-do one, never one a live Run is on', () => {
+    const all = [task('A', 'done'), task('B', 'in-progress', ['A']), task('C', 'to-do', ['B'])]
+    expect(isDispatchable(all[1] as TaskNode, all, new Set())).toBe(true)
+    expect(isDispatchable(all[1] as TaskNode, all, new Set(['B']))).toBe(false)
+    expect(isDispatchable(all[2] as TaskNode, all, new Set())).toBe(false)
+    expect(isDispatchable(task('D', 'manual'), all, new Set())).toBe(false)
   })
 })
 

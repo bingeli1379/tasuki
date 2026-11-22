@@ -1021,4 +1021,12 @@
   - git 接力照 D10 留在 prompt：每張 task 做完自己 merge 回 `feature/<KEY>` 再 push，平行的各開 worktree，push 撞到就拉回來解，解不掉回報 `needs_input`。要整合的由 splitter 多開一張整合 task，engine 不知道它特別。
 - 理由：要 hard 停單張，process 就得在 engine 手上。MCP 是 agent 呼叫 engine，engine 插不進正在想事情的 orchestrator；Claude Code 的 Channels 能讓 MCP server 推事件進 session，但它是 stdio、research preview，就算推到了，停不停 subagent 還是 LLM 決定，仍是 soft。`execute` 留著給想讓 agent 自己指揮的人，不用為了 M2 拿掉。
 - 代價：engine 多一段排程與 task 層的 attempt；task 之間的接力全靠 git，agent 沒照 prompt merge 回去，下一張就看不到前一張的東西。
+- 實作（S13，2026-11-22）：
+  - Run 多一個 `item`：item 自己的 Run 是 target 本身，dispatch 的是 task 所屬的 item。看板的 Running、hold、item 的 Stop、改與刪 task 的檢查、不變量 1 都看它，不用每輪去 tracker 查 task 的 parent。store 的 migration 把舊的 Run 補成 `item = target`，testkit 的 store 契約多一條。
+  - core 的 `dispatch.ts` 放四件事：認領 task（`claimTasks`，由 `claimItems` 呼叫，跟其他規則共用 `maxConcurrentRuns`）、判斷 item 出口（`settleDispatched`，每輪在復原與接回之後、暫停檢查之前跑，因為它不起 agent）、task Run 結束（`finishTaskRun`）、lease 過期（`recoverTaskRun`）。
+  - 停單張走同一個 `stopRun`：ref 是 task 就只停它的 Run 並轉 `manual`，是 item 就照舊貼 hold、停掉它所有的 Run。REST 多一條 `POST /api/tasks/:ref/stop`，使用者 MCP 的 `stop_run` 收 task ref。task 詳情（REST 與 `get_task`）多了 `runs`，item 詳情的 `runs` 把 task 上存活的放前面，看板的 task 詳情有 Stop。
+  - prompt 多一個 `{{task.ref}}`。`dispatch` 的預設 prompt 叫 agent 開自己的 worktree、做完 merge 回 `feature/<item>` 再 push。
+  - 讀檔時 `dispatch` 規則不收 `claim` 與自己宣告的結果，設定頁選 Dispatch 時也不顯示這兩樣。doctor 第 8 條多列 dispatch 會走的 task 轉移。
+  - fake runner 在 dispatch 時從 task 自己的標題讀 `[fake:...]`，只回報，不碰 task。
+- 實測：`pnpm test` 490 條、`pnpm check` 沒有錯誤。engine 的整合測試多 8 條：沒有互相等待的 task 一起跑、其餘照順序、全 done 送 `in-review`；`needs_input` 轉 manual、item 進 `blocked`、人做完後接回；失敗兩次後第三輪轉 manual；Stop 只停那一張；人移走 task 或 item 時 soft cancel，而且 split 規則在 task 的 agent 還在時不認領；hold 停掉所有 task 的 agent；lease 過期送回 `to-do` 再跑 attempt 2；worker 只有讀與留言的 tool。E2E 的 sqlite 18 條過，多的一條是 `parallel` 站：在 split-review 把一張 task 改名成 `[fake:hang]`、送到 `parallel`、在 task 詳情按 Stop、標成 done，另一張由自己的 agent 做完，item 到 `In Review` 顯示 2/2。Jira 沒有跑：KAN 沒有 `parallel` 這個 status，E2E 的 Jira 流程把 dispatch 規則拿掉；Jira 的 task workflow 允不允許 `in-progress → done` 這類轉移，要用 doctor 對 KAN 查。
 - 重新檢視：Channels 能在 headless 用、要給 `execute` 加快 soft stop 時（plan.md 待驗證）；要讓 AI 審單張 task 時（目前 dispatch 不走 `in-review`）；要限制單張 item 的平行數時。

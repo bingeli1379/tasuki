@@ -90,9 +90,11 @@ export async function listBoard(
       }
   return {
     columns,
-    running: live.map((r) => r.target),
+    running: [...new Set(live.map((r) => r.item))],
     failed,
-    stopping: live.filter((r) => r.cancelRequestedAt !== undefined).map((r) => r.target),
+    stopping: [
+      ...new Set(live.filter((r) => r.cancelRequestedAt !== undefined).map((r) => r.item)),
+    ],
     tasks: counts,
     holdLabel,
     paused,

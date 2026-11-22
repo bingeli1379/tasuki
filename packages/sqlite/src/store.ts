@@ -36,6 +36,7 @@ function toRun(row: Row): Run {
   return {
     id: String(row['id']),
     target: String(row['target']),
+    item: String(row['item']),
     rule: String(row['rule']),
     agent: String(row['agent']),
     attempt: Number(row['attempt']),
@@ -109,12 +110,13 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
       const now = clock.now().toISOString()
       try {
         db.prepare(
-          `INSERT INTO run (id, target, rule, agent, attempt, from_status, workspace, state,
+          `INSERT INTO run (id, target, item, rule, agent, attempt, from_status, workspace, state,
              lease_until, started_at, last_activity_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', ?, ?, ?)`,
         ).run(
           id,
           run.target,
+          run.item,
           run.rule,
           run.agent,
           run.attempt,

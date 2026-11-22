@@ -114,6 +114,15 @@ const rules = [
     mode: 'review',
     outcomes: { approve: 'in-review', changes: 'ready-to-rework' },
   },
+  // M2 (S13): the engine runs each task on its own, at a station of its own so execute keeps
+  // in-progress. KAN has no such status, so the Jira flow leaves it out.
+  {
+    id: 'dispatch',
+    watch: 'parallel',
+    agent: 'fake',
+    mode: 'dispatch',
+    outcomes: { succeeded: 'in-review', blocked_manual: 'blocked' },
+  },
 ]
 
 function engine(name: string, port: number, config: object): string {
@@ -131,6 +140,7 @@ const stations = [
   ...DEFAULT_WORKFLOW.statuses,
   { id: 'triage', handledBy: 'person', outcomes: ['ready-to-split'] },
   { id: 'ai-review', name: 'AI Review' },
+  { id: 'parallel' },
 ]
 
 // Keyed by the KAN status ids the env maps each logical name to.
@@ -176,7 +186,10 @@ const trackers = [
               },
             },
           },
-          flow: { workflow: jiraWorkflow(), rules },
+          flow: {
+            workflow: jiraWorkflow(),
+            rules: rules.filter((r) => r.mode !== 'dispatch'),
+          },
         },
       ]
     : []),

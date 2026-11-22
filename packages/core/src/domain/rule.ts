@@ -3,13 +3,16 @@ import { isRunnable, type TaskNode } from './task'
 
 // custom: every tool, nothing checked, the prompt alone says what to do; it still has to say
 // where a finished item goes (D92).
-export type RuleMode = 'split' | 'execute' | 'rework' | 'review' | 'custom'
+// dispatch: the engine walks the task graph itself, one Run per task (M2, D102).
+export type RuleMode = 'split' | 'execute' | 'dispatch' | 'rework' | 'review' | 'custom'
 
 // What each mode itself means by an outcome, so the engine checks it before acting on it
 // (agent-contract.md). Every other outcome a rule declares is moved on as it is.
 export const MODE_OUTCOMES: Record<RuleMode, readonly string[]> = {
   split: ['succeeded'],
   execute: ['succeeded', 'blocked_manual'],
+  // Reached by the engine reading the tasks, never reported by an agent.
+  dispatch: ['succeeded', 'blocked_manual'],
   rework: ['succeeded'],
   review: [],
   custom: ['succeeded'],
@@ -43,10 +46,11 @@ export interface Rule {
 // a person wrote it and it may carry instructions, so the agent reads it through the facade.
 export function expandPrompt(
   template: string,
-  vars: { ref: string; runId: string; workspace: string; mode: RuleMode },
+  vars: { ref: string; task?: string; runId: string; workspace: string; mode: RuleMode },
 ): string {
   const values: Record<string, string> = {
     'item.ref': vars.ref,
+    'task.ref': vars.task ?? '',
     'run.id': vars.runId,
     workspace: vars.workspace,
     mode: vars.mode,
@@ -58,9 +62,14 @@ export function exitFor(rule: Rule, outcome: Outcome): string | undefined {
   return Object.hasOwn(rule.outcomes, outcome) ? rule.outcomes[outcome] : undefined
 }
 
+// What a dispatch worker reports about its one task; the rule's outcomes are the item's.
+export const WORKER_VERDICTS: readonly string[] = ['succeeded', 'needs_input', 'failed']
+
 // What the agent may report: every outcome of the rule but the one only the engine reaches.
 export const verdictsOf = (rule: Rule): string[] =>
-  Object.keys(rule.outcomes).filter((o) => o !== 'max_attempts')
+  rule.mode === 'dispatch'
+    ? [...WORKER_VERDICTS]
+    : Object.keys(rule.outcomes).filter((o) => o !== 'max_attempts')
 
 // The status the item is in while its Run is alive.
 export const runningStatus = (rule: Rule): string => rule.claim ?? rule.watch

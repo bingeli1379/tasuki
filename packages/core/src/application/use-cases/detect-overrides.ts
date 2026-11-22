@@ -28,9 +28,19 @@ export async function detectOverrides(
       throw e
     })
     if (item === undefined) continue
-    const by = item.labels.includes(holdLabel)
+    // A dispatched task: its own status and its item's both count (D102).
+    const parent =
+      run.target === run.item
+        ? item
+        : await tracker.get(run.item).catch((e: unknown) => {
+            if (e instanceof NotFound) return undefined
+            throw e
+          })
+    if (parent === undefined) continue
+    const by = parent.labels.includes(holdLabel)
       ? 'hold'
-      : item.status !== runningStatus(rule)
+      : parent.status !== runningStatus(rule) ||
+          (run.target !== run.item && item.status !== 'in-progress')
         ? 'moved'
         : undefined
     if (by === undefined) continue

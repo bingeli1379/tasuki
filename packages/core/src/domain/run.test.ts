@@ -1,9 +1,10 @@
 import { describe, expect, it } from 'vite-plus/test'
-import { nextAttempt, type Outcome, type Run } from './run'
+import { nextAttempt, nextTaskAttempt, type Outcome, type Run } from './run'
 
 const run = (attempt: number, outcome: Outcome): Run => ({
   id: 'r',
   target: 'X-1',
+  item: 'X-1',
   rule: 'split',
   agent: 'a',
   attempt,
@@ -35,4 +36,20 @@ describe('nextAttempt (D38)', () => {
   it('starts over after max_attempts, so pulling the item back out of blocked resets it', () => {
     expect(nextAttempt(run(4, 'max_attempts'))).toBe(1)
   })
+})
+
+describe('nextTaskAttempt (D102)', () => {
+  it.each<Outcome>(['abandoned', 'failed'])(
+    'counts up after %s: the task goes back to to-do and would be tried for ever',
+    (outcome) => {
+      expect(nextTaskAttempt(run(2, outcome))).toBe(3)
+    },
+  )
+
+  it.each<Outcome>(['succeeded', 'needs_input', 'cancelled', 'max_attempts'])(
+    'starts over after %s: a person handed the task back',
+    (outcome) => {
+      expect(nextTaskAttempt(run(2, outcome))).toBe(1)
+    },
+  )
 })

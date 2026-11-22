@@ -17,7 +17,8 @@ import { setTimeout as sleep } from 'node:timers/promises'
 // [fake:no_tasks] claims success without making any. Anything else splits the item into two
 // tasks, unless it already has some, and succeeds; [fake:manual] makes the second one manual.
 // Executing, it walks every task it can run to done, then reports succeeded, or
-// blocked_manual when manual tasks are left. Reworking, it makes one task, Rework, carrying
+// blocked_manual when manual tasks are left. Dispatched, it reads the marker off its task's
+// title instead and only reports, since the engine moves the task. Reworking, it makes one task, Rework, carrying
 // the latest comment a person left. Reviewing, it leaves a note and reports the rule's first
 // outcome.
 const plugin: Plugin = definePlugin({
@@ -43,7 +44,13 @@ const plugin: Plugin = definePlugin({
             return JSON.parse(text) as T
           }
           try {
-            const { title } = await call<{ title: string }>('get_item')
+            // Dispatched, it works on one task, whose own title carries the marker (D102).
+            const { title } =
+              spec.mode === 'dispatch'
+                ? ((await call<{ ref: string; title: string }[]>('list_tasks')).find(
+                    (t) => t.ref === spec.target,
+                  ) ?? { title: '' })
+                : await call<{ title: string }>('get_item')
             const marker = /\[fake:([a-z_]+)\]/.exec(title)?.[1]
             if (marker === 'hang') await new Promise(() => {})
             await sleep(seconds * 1000)
@@ -90,6 +97,8 @@ const plugin: Plugin = definePlugin({
                 title: 'Rework',
                 body: feedback === '' ? 'Made by the fake runner.' : feedback,
               })
+            } else if (spec.mode === 'dispatch') {
+              // Nothing to build: the engine moves the task by the verdict.
             } else if (verdict === 'succeeded' && marker !== 'no_tasks') {
               // Splitting again after being sent back keeps what is there (D30).
               if ((await call<unknown[]>('list_tasks')).length === 0) {

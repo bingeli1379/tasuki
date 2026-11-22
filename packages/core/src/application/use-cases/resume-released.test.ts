@@ -31,6 +31,7 @@ const item = (labels: string[] = []): WorkUnit => ({
 const cancelled = (by?: CancelReason): Run => ({
   id: 'r1',
   target: 'X-1',
+  item: 'X-1',
   rule: 'split',
   agent: 'a',
   attempt: 1,

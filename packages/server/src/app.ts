@@ -445,6 +445,10 @@ export function createApp({
   app.post('/api/items/:ref/stop', async (c) =>
     c.json(await stopRun({ tracker, store }, flow.current().holdLabel, c.req.param('ref'))),
   )
+  // A task a dispatch rule runs: only its Run ends, and the task becomes manual (D102).
+  app.post('/api/tasks/:ref/stop', async (c) =>
+    c.json(await stopRun({ tracker, store }, flow.current().holdLabel, c.req.param('ref'))),
+  )
   app.put('/api/items/:ref/hold', async (c) =>
     c.json(await holdItem({ tracker, store }, flow.current().holdLabel, c.req.param('ref'))),
   )
@@ -477,7 +481,7 @@ export function createApp({
     })
     return c.json(comment, 201)
   })
-  app.get('/api/tasks/:ref', async (c) => c.json(await getTask(tracker, c.req.param('ref'))))
+  app.get('/api/tasks/:ref', async (c) => c.json(await getTask(tracker, store, c.req.param('ref'))))
   app.post('/api/tasks/:ref/transition', async (c) => {
     const body = await c.req.json<{ from?: unknown; to?: unknown }>()
     if (typeof body.from !== 'string' || typeof body.to !== 'string')
