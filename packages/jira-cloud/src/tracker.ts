@@ -9,6 +9,8 @@ import {
   type CommentAuthor,
   type CommentKind,
   type Dependency,
+  type DoctorFinding,
+  type Heartbeat,
   type Kind,
   type Origin,
   type PluginContext,
@@ -19,6 +21,31 @@ import { createHash } from 'node:crypto'
 import { adfToMarkdown, markdownToAdf, mediaIds, type AdfDoc, type MediaMap } from './adf'
 import { JiraHttpError, type JiraFetch, type JiraRequest } from './client'
 import type { JiraOptions } from './options'
+
+// A project property: Jira keeps it with the project, outside any issue (D66).
+const HEARTBEAT = 'tasuki.heartbeat'
+const KINDS: readonly Kind[] = ['item', 'task']
+
+interface JiraWorkflow {
+  name: string
+  statuses: { statusReference: string }[]
+  // GLOBAL: from any status. DIRECTED: from the ones its links name.
+  transitions: {
+    type: 'GLOBAL' | 'DIRECTED' | 'INITIAL'
+    toStatusReference: string
+    links?: { fromStatusReference: string }[]
+  }[]
+}
+
+// Whether the workflow lets an issue in `from` go to `to`.
+export function allowsMove(workflow: JiraWorkflow, from: string, to: string): boolean {
+  return workflow.transitions.some(
+    (t) =>
+      t.toStatusReference === to &&
+      (t.type === 'GLOBAL' ||
+        (t.type === 'DIRECTED' && (t.links ?? []).some((l) => l.fromStatusReference === from))),
+  )
+}
 
 const FIELDS = [
   'summary',
@@ -528,6 +555,96 @@ export function createJiraTracker(
         key: s.id,
         name: s.name,
       }))
+    },
+
+    async doctor(transitions) {
+      const findings: DoctorFinding[] = []
+      const project = await jira<{ id: string }>('GET', `/project/${options.project}`)
+      for (const kind of KINDS) {
+        const wanted = transitions.filter((t) => t.kind === kind)
+        if (wanted.length === 0) continue
+        const issueTypeId = options.issueTypes[kind]
+        const { workflows } = await jira<{ workflows: JiraWorkflow[] }>('POST', '/workflows', {
+          projectAndIssueTypes: [{ projectId: project.id, issueTypeId }],
+        })
+        const workflow = workflows[0]
+        if (workflow === undefined) {
+          findings.push({
+            level: 'error',
+            message: `no workflow for ${kind} issue type ${issueTypeId}`,
+          })
+          continue
+        }
+        const held = new Set(workflow.statuses.map((s) => s.statusReference))
+        const mapped = ctx.statuses.mapped(kind)
+        for (const { from, to } of wanted) {
+          // A status keyed to nothing in the workflow is reported once, by listStatuses.
+          if (!mapped.includes(from) || !mapped.includes(to)) continue
+          const keys = [
+            ctx.statuses.toTracker(kind, from),
+            ctx.statuses.toTracker(kind, to),
+          ] as const
+          if (!keys.every((k) => held.has(k))) continue
+          if (!allowsMove(workflow, ...keys))
+            findings.push({
+              level: 'error',
+              message: `${kind} ${from} → ${to}: workflow "${workflow.name}" has no transition from status ${keys[0]} to ${keys[1]}`,
+            })
+        }
+      }
+      // A status no board column shows is a card nobody sees on the Jira board (plan.md 14).
+      // One the project lacks is listStatuses' to report, as above.
+      const types = await jira<{ statuses: { id: string }[] }[]>(
+        'GET',
+        `/project/${options.project}/statuses`,
+      )
+      const inProject = new Set(types.flatMap((t) => t.statuses.map((st) => st.id)))
+      const { values: boards } = await jira<{ values: { id: number; name: string }[] }>(
+        'GET',
+        `/rest/agile/1.0/board?projectKeyOrId=${options.project}`,
+      )
+      for (const board of boards) {
+        const config = await jira<{ columnConfig: { columns: { statuses: { id: string }[] }[] } }>(
+          'GET',
+          `/rest/agile/1.0/board/${board.id}/configuration`,
+        )
+        const shown = new Set(
+          config.columnConfig.columns.flatMap((c) => c.statuses.map((s) => s.id)),
+        )
+        for (const kind of KINDS)
+          for (const status of ctx.statuses.mapped(kind)) {
+            const key = ctx.statuses.toTracker(kind, status)
+            if (inProject.has(key) && !shown.has(key))
+              findings.push({
+                level: 'warning',
+                message: `board "${board.name}" has no column for ${kind} status ${status} (${key}): those cards do not show on it`,
+              })
+          }
+      }
+      return findings
+    },
+
+    async readHeartbeat() {
+      try {
+        const { value } = await jira<{ value: Heartbeat }>(
+          'GET',
+          `/project/${options.project}/properties/${HEARTBEAT}`,
+        )
+        return value
+      } catch (e) {
+        if (e instanceof JiraHttpError && e.status === 404) return undefined
+        throw e
+      }
+    },
+
+    async writeHeartbeat(beat) {
+      const path = `/project/${options.project}/properties/${HEARTBEAT}`
+      if (beat !== undefined) return void (await jira('PUT', path, beat))
+      try {
+        await jira('DELETE', path)
+      } catch (e) {
+        if (!(e instanceof JiraHttpError && e.status === 404)) throw e
+      }
     },
 
     async deleteAttachment(target, id) {

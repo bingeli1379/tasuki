@@ -41,6 +41,8 @@
 | lease | Run 的存活租約，定期續約。同一張 item 同時最多一個存活的 Run，防重複派發和當機復原都靠它。 |
 | attempt | 同一張 item 在同一條 rule 上的第幾次 Run。只有前一次 Run 是 `abandoned` 才往上加，其他結果之後都從 1 重新算（見 D38）。 |
 | workspace | engine 給每張 item 的工作目錄，Run 的 cwd。 |
+| heartbeat | engine 每輪寫在 tracker 上的 `{ engineId, lastSeen }`，第二個 engine 看到它還新鮮就拒絕啟動（D66、D95）。sqlite 沒有。 |
+| doctor | 啟動前的檢查：config、plugin 載入、流程對 tracker 的 workflow、agent preflight、另一個 engine。全部列完才結束，有錯就 exit 1（D95）。 |
 
 ## Agent
 

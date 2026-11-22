@@ -237,7 +237,7 @@ packages/
   auth-builtin/ auth plugin: accounts kept in the store
   auth-http/    auth plugin: asks an external API
   server/       composition root, REST, MCP facade (/agent-mcp), user MCP (/mcp), engine
-                (Poller and Run supervision), plugin loader, config loading
+                (Poller and Run supervision), plugin loader, config loading, doctor (D95)
   web/          Vue 3 + Vite SPA
   cli/          init, doctor, start
 ```

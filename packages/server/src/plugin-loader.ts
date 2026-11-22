@@ -5,12 +5,23 @@ import {
   type Plugin,
   type PluginContext,
   type RunnerPort,
+  type StatusMap,
   type StorePort,
   type TrackerPort,
 } from '@tasuki/core'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
+
+// What a store is handed for ctx.statuses: the mapping lives in the flow, which the store holds,
+// so the store is loaded before there is one, and it never needs one.
+export const NO_STATUSES: StatusMap = {
+  toTracker: () => {
+    throw new Error('a store has no status mapping')
+  },
+  fromTracker: () => undefined,
+  mapped: () => [],
+}
 
 async function step<T>(plugin: string, what: string, run: () => T | Promise<T>): Promise<T> {
   try {

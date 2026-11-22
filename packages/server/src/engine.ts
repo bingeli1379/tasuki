@@ -1,4 +1,5 @@
 import {
+  beat,
   claimItems,
   detectOverrides,
   expandPrompt,
@@ -40,6 +41,8 @@ export interface EngineDeps {
   tokens: RunTokens
   // Where agents reach the MCP facade.
   mcpUrl: string
+  // What its heartbeat on the tracker says it is (D66).
+  engineId: string
   log?: (message: string) => void
 }
 
@@ -142,6 +145,8 @@ export function createEngine(deps: EngineDeps): Engine {
       if (ticking) return
       ticking = true
       try {
+        // Stopped or paused, it still holds the project: a second engine must not start.
+        await beat(tracker, clock, deps.engineId)
         // A station keyed to a status the tracker lacks would fail at the first move, so
         // nothing runs until the settings page maps it (D91).
         if (deps.flow.unmatched.length > 0) return

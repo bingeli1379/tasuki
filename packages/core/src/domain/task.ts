@@ -15,7 +15,7 @@ export const isRunnable = (task: TaskNode, all: readonly TaskNode[]): boolean =>
 
 // The task diagram in state-machine.md, as the agent may walk it. Only a person moves a
 // task out of manual, and done is final (invariant 4).
-const AGENT_MOVES: Readonly<Record<string, readonly string[]>> = {
+export const AGENT_MOVES: Readonly<Record<string, readonly string[]>> = {
   'to-do': ['in-progress', 'manual'],
   'in-progress': ['in-review', 'to-do', 'manual'],
   'in-review': ['done', 'in-progress'],

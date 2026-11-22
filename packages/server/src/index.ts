@@ -1,22 +1,41 @@
 import { serve } from '@hono/node-server'
-import { needsSetup, unmatchedStatuses, type Clock, type RunnerPort } from '@tasuki/core'
+import {
+  clearHeartbeat,
+  needsSetup,
+  unmatchedStatuses,
+  type Clock,
+  type RunnerPort,
+} from '@tasuki/core'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createApp, type AppAuth } from './app'
 import { isLoopback, loadConfig } from './config'
+import {
+  agentChecks,
+  engineCheck,
+  engineIdOf,
+  printFindings,
+  runDoctor,
+  trackerChecks,
+} from './doctor'
 import { createEngine } from './engine'
 import { loadFlow } from './flow'
-import { loadAuth, loadRunner, loadStore, loadTracker } from './plugin-loader'
+import { loadAuth, loadRunner, loadStore, loadTracker, NO_STATUSES } from './plugin-loader'
 import { createRunTokens } from './run-tokens'
 import { createLoginThrottle, createSetupToken, createSignIns } from './sign-ins'
 
 const systemClock: Clock = { now: () => new Date() }
 
 try {
-  const { values } = parseArgs({
+  const { values, positionals } = parseArgs({
     options: { config: { type: 'string', default: 'tasuki.config.jsonc' } },
+    allowPositionals: true,
   })
+  const command = positionals[0] ?? 'start'
+  if (command !== 'start' && command !== 'doctor')
+    throw new Error(`unknown command ${command}: start or doctor`)
+  if (command === 'doctor') process.exit(await runDoctor(values.config, systemClock))
   const config = loadConfig(values.config)
   const base = { clock: systemClock, configDir: config.configDir, dataDir: config.dataDir }
   // The store holds the flow, and the flow says how the tracker keys its statuses, so the
@@ -24,13 +43,7 @@ try {
   // none of it.
   const store = await loadStore(config.store.plugin, config.store.options, config.configDir, {
     ...base,
-    statuses: {
-      toTracker: () => {
-        throw new Error('a store has no status mapping')
-      },
-      fromTracker: () => undefined,
-      mapped: () => [],
-    },
+    statuses: NO_STATUSES,
   })
   const flow = await loadFlow(store, {
     agents: Object.keys(config.agents),
@@ -43,10 +56,19 @@ try {
     config.configDir,
     ctx,
   )
+  const engineId = engineIdOf(config.dataDir)
+  const second = await engineCheck(tracker, systemClock, engineId, config.pollSeconds)
+  if (second[0] !== undefined) throw new Error(second[0].message)
   flow.unmatched = await unmatchedStatuses(tracker, flow.current().statuses)
   const runners: Record<string, RunnerPort> = {}
   for (const [name, agent] of Object.entries(config.agents))
     runners[name] = await loadRunner(agent.plugin, agent.options, config.configDir, ctx)
+  // What the file sets has to work before anything runs; what the flow asks of the tracker
+  // is put right on the settings page, so it is only printed (D95).
+  const agentFindings = await agentChecks(runners)
+  printFindings([...(await trackerChecks(tracker, config.tracker.plugin, flow)), ...agentFindings])
+  if (agentFindings.some((f) => f.level === 'error'))
+    throw new Error('an agent cannot run: see the errors above, or run doctor')
   const tokens = createRunTokens()
   let auth: AppAuth | undefined
   let setupToken: string | undefined
@@ -102,7 +124,15 @@ try {
     runners,
     tokens,
     mcpUrl: `http://${agentHost}:${config.port}/agent-mcp`,
+    engineId,
   })
+  // A clean stop frees the project at once instead of three poll rounds later.
+  for (const signal of ['SIGINT', 'SIGTERM'] as const)
+    process.once(signal, () => {
+      void clearHeartbeat(tracker, engineId)
+        .catch((e: unknown) => console.error(`clearing the heartbeat: ${String(e)}`))
+        .finally(() => process.exit(0))
+    })
   // The first round runs at start, so Runs a crash left behind are recovered right away.
   await engine.tick()
   setInterval(() => void engine.tick(), config.pollSeconds * 1000)
@@ -131,10 +161,6 @@ try {
         .join(', ') || 'none'
     }`,
   )
-  if (flow.unmatched.length > 0)
-    console.log(
-      `not a status in the tracker: ${flow.unmatched.join(', ')}; no agent starts until the settings page maps them`,
-    )
   console.log(`tasuki listening on ${listening}`)
   if (config.publicUrl !== undefined) console.log(`public url: ${config.publicUrl}`)
 } catch (e) {

@@ -4,7 +4,26 @@ import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vite-plus/test'
 import { createClient, createFetch, JiraHttpError } from './client'
 import { parseOptions } from './options'
-import { createJiraTracker } from './tracker'
+import { allowsMove, createJiraTracker } from './tracker'
+
+describe('jira-cloud allowsMove', () => {
+  const workflow = {
+    name: 'w',
+    statuses: [],
+    transitions: [
+      { type: 'INITIAL' as const, toStatusReference: '1' },
+      { type: 'GLOBAL' as const, toStatusReference: '2' },
+      { type: 'DIRECTED' as const, toStatusReference: '3', links: [{ fromStatusReference: '2' }] },
+    ],
+  }
+
+  it('a global transition is open from anywhere, a directed one from its links only', () => {
+    expect(allowsMove(workflow, '3', '2')).toBe(true)
+    expect(allowsMove(workflow, '2', '3')).toBe(true)
+    expect(allowsMove(workflow, '1', '3')).toBe(false)
+    expect(allowsMove(workflow, '2', '1')).toBe(false)
+  })
+})
 
 // Runs against a real Jira test project when the repo-root .env has the JIRA_* settings; skipped in CI.
 const envFile = new URL('../../../.env', import.meta.url)
@@ -55,6 +74,18 @@ if (configured) {
         )
         expect(listed?.every((s) => s.name !== '')).toBe(true)
       }
+    })
+  })
+
+  describe('jira-cloud doctor', () => {
+    it('finds every move allowed and every status on the board, in the test project', async () => {
+      const tracker = createJiraTracker(ctx, options, jira, jiraFetch)
+      expect(
+        await tracker.doctor?.([
+          { kind: 'item', from: 'ready-to-split', to: 'split-review' },
+          { kind: 'task', from: 'to-do', to: 'in-progress' },
+        ]),
+      ).toEqual([])
     })
   })
 

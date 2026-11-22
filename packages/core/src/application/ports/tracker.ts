@@ -1,6 +1,8 @@
 import type { Attachment } from '../../domain/attachment'
 import type { Comment, CommentAuthor, CommentKind } from '../../domain/comment'
+import type { Transition } from '../../domain/transition'
 import type { Dependency, Kind, Origin, Ref, WorkUnit } from '../../domain/work-unit'
+import type { DoctorFinding } from './doctor'
 
 export interface NewItem {
   title: string
@@ -41,6 +43,13 @@ export interface NewAttachment {
 export interface TrackerStatus {
   key: string
   name: string
+}
+
+// The engine running rules on the project, written every poll round (D66).
+export interface Heartbeat {
+  // The same across restarts of one engine: its machine and data dir.
+  engineId: string
+  lastSeen: string
 }
 
 // Each call takes effect on its own; there is no transaction across calls (D47).
@@ -90,4 +99,12 @@ export interface TrackerPort {
   // The statuses units of this kind can be in. Left out by a tracker that takes any key,
   // as sqlite does (D91).
   listStatuses?(kind: Kind): Promise<TrackerStatus[]>
+  // What only the tracker can check (doctor, check 8): each move the rules make is one its
+  // workflow allows, in logical statuses; one keyed to a status it lacks is left to
+  // listStatuses. Left out by a tracker that allows any move.
+  doctor?(transitions: readonly Transition[]): Promise<DoctorFinding[]>
+  // Left out, with writeHeartbeat, by a tracker only one process can have open, as sqlite.
+  readHeartbeat?(): Promise<Heartbeat | undefined>
+  // undefined clears it, so the next engine need not wait for it to go stale.
+  writeHeartbeat?(beat: Heartbeat | undefined): Promise<void>
 }
