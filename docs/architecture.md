@@ -243,11 +243,14 @@ packages/
   web/          Vue 3 + Vite SPA
   cli/          the `tasuki` bin: start, doctor, pause, resume, init; depends on every
                 built-in plugin and carries the built board (D98)
+Dockerfile      the container image: the CLI from its tarballs, plus the claude and codex CLIs (D100)
+docker/         compose.yaml and the config it mounts, an example to start from
 examples/
   tracker-memory/  third-party tracker plugin, installed from packed tarballs outside the workspace
 scripts/
   verify-plugin-example.ts  packs core and testkit, installs them into a copy of the example, runs its contract
-  verify-cli-install.ts     packs the CLI with what it ships, installs it outside the workspace, drives `tasuki`
+  pack-cli.ts               packs the CLI with what it ships and installs it into a folder
+  verify-cli-install.ts     installs the CLI outside the workspace with pack-cli.ts, drives `tasuki`
 ```
 
 一個技術一個套件，載入方式與契約見 plugins.md（D44）。store 預設是 `sqlite`，所以 Jira 模式下也要裝 `sqlite`，除非換成別的 store plugin（D88）。auth 的內建實作分成 `auth-builtin` 與 `auth-http`，不登入是省略 `auth`（D89）。

@@ -982,3 +982,14 @@
   - 找不到 config 時的錯誤訊息提示跑 `tasuki init`（config-and-rules.md 路徑一節）。
 - 實測：先用 readline 版，把答案 pipe 進去打 KAN（新的暫存資料夾，環境裡拿掉 `JIRA_*`）：查出 item `10009`（故事）、task `10007`（Subtask）、link `10000`（Blocks），`.env` 權限 `-rw-------`。接著同一個資料夾 `tasuki doctor` 0 errors，14 個 warning 都是 status 還沒在設定頁對照。換成 clack 後在 100 欄的 pty 裡用方向鍵與空白鍵走完 sqlite 加 claude 加 auth-builtin，寫出的 config 正確。單元測試 mock 掉 clack，4 條：sqlite 的 config 讓 `runDoctor` 回 0；Jira 錯的 token 與錯的 project 都會重問，寫出的 id、名稱註解、`.env` 內容與權限都對；取消時不寫檔；已經有 config 時不動它。
 - 重新檢視：第三方 tracker 也想在 init 問自己的問題時（要給 plugin 一個 init 的 hook）；有腳本要不互動地產生 config 時。
+
+## D100 S12c：container image、claude 的 `api-key` 與 `oauth-token`
+
+- 背景：S12c（2026-11-22）。architecture.md 說雲端是 container image、agent 用 API key，可是 claude-cli 只收 `inherit-login`，container 裡沒有登入可以沿用。D35 的待驗證是兩種認證各吃哪個環境變數。
+- 決定（作者同意）：
+  - claude-cli 的 `auth` 收 `inherit-login`、`api-key`、`oauth-token`。後兩種要求 `options.env` 裡有非空的 `ANTHROPIC_API_KEY` 或 `CLAUDE_CODE_OAUTH_TOKEN`（對過 code.claude.com/docs/en/authentication）。`-p` 底下 API key 的優先序在 OAuth token 前面，所以 `oauth-token` 的 `env` 裡帶了 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN` 就拒絕，不讓它默默改用 API 計費。變數照舊只從 `options.env` 進 agent（D35），engine 自己的環境不會漏過去。
+  - 根目錄的 `Dockerfile` 分兩段：build 段裝 workspace、`pnpm build`，再用 `scripts/pack-cli.ts` 從 tarball 把 CLI 裝到 `/opt/tasuki`，跟 npm 使用者拿到的是同一包。執行段是 `node:24.22.0-bookworm-slim`，裝 git、ssh client，以及全域的 `@anthropic-ai/claude-code@2.1.323`（D76 驗過的版本）與 `@openai/codex@0.169.0`，用 `node` 使用者跑，config 掛在 `/instance`，狀態在 `/data` volume。`verify-cli-install.ts` 也改成呼叫 `pack-cli.ts`，打包只有一份。
+  - `docker/compose.yaml` 與 `docker/tasuki.config.jsonc` 是範例：綁 `0.0.0.0` 加 `allowInsecure`，host 端只開在 `127.0.0.1`（security-and-auth.md 的 Docker 一條、D90）。agent 預設 `api-key`，照 security-and-auth.md「雲端部署的預設」與「`claude setup-token` 這類繞法不寫進官方文件」。`oauth-token` 照樣支援，選哪種是使用者的事。
+- 實測（OrbStack，arm64）：image build 成功，執行段 787MB 是兩個 CLI（claude 346MB、codex 403MB）加 npm 快取清掉之後的大小，tasuki 本身 33MB。fake runner 的 config 起來後 `/api/health` 與看板正常，container 裡 `tasuki doctor` 0 errors、`claude --version` 是 2.1.323、`codex --version` 是 0.169.0。接著作者用 `claude setup-token` 產的 token，config 寫 `oauth-token`：存一條 split 規則、把一張 item 移到 `ready-to-split`，claude 在 container 裡約 10 秒拆出兩張 task，Run `finished`、`succeeded`，item 到 `split-review`；Run log 的 `apiKeySource` 是 `none`，container 裡沒有別的登入，用的就是那個 token。`api-key` 沒有實際打過（作者沒有 Console 的 key），行為只靠單元測試與文件。
+- 過程中的事故：驗證完找殘留字串時，`grep` 沒排除 `docker/.env`，token 被印進了對話紀錄。作者已撤銷，`docker/.env` 清空。之後掃字串要先排除放 secret 的檔案。
+- 重新檢視：image 要推到 registry（S14）；兩個 CLI 要升版時（版本 pin 在 Dockerfile）；有人要跑 arm64 以外的平台時，要確認多平台 build。
