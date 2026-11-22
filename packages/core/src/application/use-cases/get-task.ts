@@ -1,7 +1,7 @@
 import type { Comment } from '../../domain/comment'
 import type { Ref } from '../../domain/work-unit'
 import { NotFound } from '../not-found'
-import type { StoragePort } from '../ports/storage'
+import type { TrackerPort } from '../ports/tracker'
 import { listTasks, type TaskEntry } from './list-tasks'
 
 export interface TaskDetail {
@@ -10,12 +10,12 @@ export interface TaskDetail {
   comments: Comment[]
 }
 
-export async function getTask(storage: StoragePort, ref: Ref): Promise<TaskDetail> {
-  const unit = await storage.get(ref)
+export async function getTask(tracker: TrackerPort, ref: Ref): Promise<TaskDetail> {
+  const unit = await tracker.get(ref)
   if (unit.kind !== 'task' || unit.parent === undefined) throw new NotFound(`${ref} is not a task`)
   const [tasks, comments] = await Promise.all([
-    listTasks(storage, unit.parent),
-    storage.comments(ref),
+    listTasks(tracker, unit.parent),
+    tracker.comments(ref),
   ])
   return { task: tasks.find((t) => t.ref === ref) ?? { ...unit, blockedBy: [] }, comments }
 }

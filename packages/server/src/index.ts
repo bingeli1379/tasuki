@@ -5,12 +5,8 @@ import { parseArgs } from 'node:util'
 import { createApp } from './app'
 import { loadConfig } from './config'
 import { createEngine } from './engine'
-import { loadRunner, loadTracker } from './plugin-loader'
+import { loadRunner, loadStore, loadTracker } from './plugin-loader'
 import { createRunTokens } from './run-tokens'
-import { openDatabase } from './runtime-store/database'
-import { migrate } from './runtime-store/migrate'
-import { RUNTIME_MIGRATIONS } from './runtime-store/migrations'
-import { createRuntimeStore } from './runtime-store/run-store'
 
 const systemClock: Clock = { now: () => new Date() }
 
@@ -21,12 +17,9 @@ try {
   const config = loadConfig(values.config)
   const statuses = createStatusMap(config.statuses)
 
-  const dbPath = join(config.dataDir, 'runtime.db')
-  const db = openDatabase(dbPath)
-  migrate(db, RUNTIME_MIGRATIONS)
-  const runtime = createRuntimeStore(db, systemClock, join(config.dataDir, 'logs'))
   const ctx = { clock: systemClock, configDir: config.configDir, dataDir: config.dataDir, statuses }
-  const storage = await loadTracker(
+  const store = await loadStore(config.store.plugin, config.store.options, config.configDir, ctx)
+  const tracker = await loadTracker(
     config.tracker.plugin,
     config.tracker.options,
     config.configDir,
@@ -40,9 +33,8 @@ try {
   // Loopback only until auth lands (S9, security-and-auth.md).
   serve({
     fetch: createApp({
-      db,
-      storage,
-      runtime,
+      tracker,
+      store,
       statuses,
       workflow: config.workflow,
       rules: config.rules,
@@ -53,14 +45,15 @@ try {
     hostname: '127.0.0.1',
   })
   const engine = createEngine({
-    storage,
-    runtime,
+    tracker,
+    store,
     clock: systemClock,
     rules: config.rules,
     named: itemStatusNames(config.workflow),
     limits: config.limits,
     holdLabel: config.holdLabel,
     workspaceRoot: join(config.dataDir, 'workspaces'),
+    logDir: join(config.dataDir, 'logs'),
     runners,
     tokens,
     mcpUrl: `http://127.0.0.1:${config.port}/agent-mcp`,
@@ -72,6 +65,7 @@ try {
   setInterval(() => void engine.enforce(), 1000)
   console.log(`data dir: ${config.dataDir}`)
   console.log(`tracker: ${config.tracker.plugin}`)
+  console.log(`store: ${config.store.plugin}`)
   console.log(`rules: ${config.rules.map((r) => r.id).join(', ') || 'none'}`)
   console.log(`tasuki listening on http://127.0.0.1:${config.port}`)
 } catch (e) {

@@ -13,10 +13,11 @@ const write = (config: string, env?: string): string => {
 }
 
 describe('loadConfig', () => {
-  it('defaults to the sqlite tracker and resolves dataDir against the config folder', () => {
+  it('defaults to the sqlite tracker and store, and resolves dataDir against the config folder', () => {
     const path = write('{ "version": 1, }')
     const config = loadConfig(path)
     expect(config.tracker).toEqual({ plugin: '@tasuki/sqlite', options: {} })
+    expect(config.store).toEqual({ plugin: '@tasuki/sqlite', options: {} })
     expect(config.dataDir).toBe(join(config.configDir, 'data'))
     expect(config.statuses.item?.['refining']).toBe('Refining')
     expect(config.statuses.task?.['to-do']).toBe('To Do')

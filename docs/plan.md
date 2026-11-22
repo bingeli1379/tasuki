@@ -7,7 +7,7 @@
 這份 plan 描述整個產品，不分版本。實作的順序只看下面的切片清單。
 
 - engine：Poller、規則比對、Run 管理（lease、取消、復原）、結果驗證與轉移。
-- plugin：tracker、runner、auth 三個角色都可以由第三方套件擴充。內建的 sqlite、Jira Cloud、claude-cli、codex-cli 走同一條路（D44，見 plugins.md）。
+- plugin：tracker、store、runner、auth 四個角色都可以由第三方套件擴充。內建的 sqlite、Jira Cloud、claude-cli、codex-cli 走同一條路（D44，見 plugins.md）。
 - MCP facade（http）。
 - REST API、auth（none、static、http）。
 - 前端：kanban（讀取與拖拉移動）、item 詳情（task、comment、Run）、Run log、Stop 按鈕。
@@ -54,7 +54,7 @@
 | S8 | 真的 claude runner（plugin）、規則的 prompt 與 session、預設 prompt（MCP facade 與 run token 在 S4 就有了）（已完成，D76）。之後補了 prompt 三層與 agent 自帶 plugin、MCP（D77） | 在玩具 repo 上用真的 claude 跑一次 |
 | W1 | status 自訂與角色、`handledBy`、站上給人的 `outcomes`，還在檔案裡設定（已完成，D78、D81，custom-workflow.md） | config 加一站，看板多一欄，眼睛和雷達標對 |
 | W2 | 規則宣告 `outcomes`（`on` 併進來）、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
-| W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約 | 行為不變，契約測試多一套 |
+| W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約（已完成，D88） | 行為不變，契約測試多一套 |
 | S9 | auth（`none`、`static`、`http`）、session cookie 與 CSRF、`/mcp` 的個人 API token、登入防暴力、`Host` 檢查（D60） | 登入畫面、ttl 過期、產生與撤銷 token、沒登入打 API 被拒 |
 | W4 | 流程設定進 store、設定頁、熱重載、修改歷史（要 S9 的 auth） | 在網頁上改規則和 prompt，下一輪就生效，看得到誰改了什麼 |
 | S10 | `doctor`，含擋第二個 engine 的心跳（D66） | 啟動前列出 config、plugin、Jira workflow 的問題；同一個 project 已經有別的 engine 在跑時拒絕啟動 |
@@ -65,7 +65,7 @@
 ## 測試策略
 
 - 狀態機與 verdict 驗證是純函式，用表格驅動測試，直接對應 state-machine.md 與 agent-contract.md 的表格。
-- StoragePort 寫成契約測試，sqlite 與 Jira adapter 都要通過同一套。Jira 用測試 project 或錄製的 fixture。
+- TrackerPort 與 StorePort 寫成契約測試，tracker 的 sqlite 與 Jira、store 的 sqlite 各自通過同一套。Jira 用測試 project 或錄製的 fixture。
 - RunnerPort 用假 runner（腳本化的 agent 行為）做端到端，不呼叫真的 LLM。
 - 時間一律走 `Clock`，lease 與 session ttl 用假時鐘撥快。
 - 真 LLM 的測試只做手動煙霧測試，不進 CI。

@@ -36,6 +36,8 @@ export interface Config {
   dataDir: string
   port: number
   tracker: PluginRef
+  // Where the engine keeps its Runs and the pause (D78).
+  store: PluginRef
   workflow: Workflow
   // What the tracker plugin is handed: each station's and task status's tracker key.
   statuses: StatusMapping
@@ -296,6 +298,7 @@ export function loadConfig(path: string): Config {
   const raw = expandEnv(parseJsonc(readFileSync(file, 'utf8')), '') as Raw
   const server = (raw['server'] ?? {}) as Raw
   const tracker = pluginRef(raw['tracker'] ?? { plugin: '@tasuki/sqlite' }, 'tracker')
+  const store = pluginRef(raw['store'] ?? { plugin: '@tasuki/sqlite' }, 'store')
 
   const claimed = (Array.isArray(raw['rules']) ? raw['rules'] : []).map((r: unknown) =>
     isObject(r) ? r['claim'] : undefined,
@@ -360,6 +363,7 @@ export function loadConfig(path: string): Config {
     dataDir: resolve(configDir, typeof raw['dataDir'] === 'string' ? raw['dataDir'] : './data'),
     port: typeof server['port'] === 'number' ? server['port'] : 8787,
     tracker,
+    store,
     workflow,
     statuses,
     pollSeconds: positive(

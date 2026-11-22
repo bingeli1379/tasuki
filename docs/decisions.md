@@ -772,3 +772,18 @@
 - 取代：D81「人的決定按鈕改成站上的 `outcomes`：按鈕字到下一站」的寫法；按鈕不能再自訂文字。
 - 實測：`pnpm test` 343 條、`vp check` 與全部 typecheck 沒有錯誤，sqlite E2E 12 條全過。
 - 重新檢視：有人需要按鈕寫目標站以外的字時（例如多語系）。
+
+## D88 store 是 plugin 角色，port 改名 `TrackerPort` 與 `StorePort`
+
+- 背景：W3，照 D78 把 store 從 `server` 搬成 plugin 的一個角色（2026-11-22）。
+- 決定：
+  - `RuntimeStorePort` 改名 `StorePort`，`StoragePort` 改名 `TrackerPort`，use case 的依賴欄位跟著從 `storage`、`runtime` 改成 `tracker`、`store`。不改的話 `StorePort` 跟 `StoragePort` 只差三個字母，一定會看錯；保留 `RuntimeStorePort` 的話，W4 把流程設定放進來就名不副實（作者選的）。testkit 的 `describeStorageContract` 改名 `describeTrackerContract`。
+  - `Plugin` 多一個 `store` 工廠，config 多一個 `store`（`plugin` 加 `options`），省略時是 `@tasuki/sqlite`，跟 `tracker` 一樣。
+  - `@tasuki/sqlite` 同時提供 tracker 與 store，store 開 `<dataDir>/store.db`，migration 帶在 plugin 裡（`store-migrations.ts`），server 那份重複的開 DB 加 migration 的小程式刪掉。檔名從 `runtime.db` 改成 `store.db`，不寫轉換（D45 之後不顧兼容）；migration 鏈原封不動，舊檔改名就接得上。
+  - Run 的 log 檔由 engine 命名（`<dataDir>/logs/<runId>.log`），不再由 store 決定。log 是 engine 那台機器上的檔案，換成遠端的 store 時它看不到那個資料夾。`Run.logPath` 拿掉，`run.log_path` 用一條 migration `DROP COLUMN`，engine 多一個 `logDir` 依賴。
+  - testkit 多一套 `describeStoreContract`：setup 每條測試給一個空的 store 與契約控制的 clock，涵蓋一張 item 一個存活的 Run、lease、取消的升級規則、結果只收第一次、最新在前的排序（同一毫秒也一樣）、`latestRunsEndedIn`、暫停旗標。sqlite 通過。
+  - `/api/health` 只回 `{ ok: true }`。schema 版本是 sqlite 的細節，web 早就不顯示，只剩 E2E 拿它確認 server 起來了。
+- 後果：D44 的「Jira 模式下 `sqlite` 套件不是必裝」不再成立，除非換成別的 store plugin。plugins.md「RuntimeStore 不是 plugin」那條拿掉。
+- 沒做的：custom-workflow.md 驗收條件 6 的「假 store plugin 換掉 sqlite、engine 照常跑」。契約已經讓第二個實作有東西可以對，真的第二個實作等 postgres。
+- 實測：`pnpm test` 353 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite 與 jira 共 24 條全過。故意把排序的 `rowid DESC` 改成 `ASC`，store 契約有兩條會紅。
+- 重新檢視：W4 把流程設定加進 `StorePort` 時，看契約會不會大到第三方寫不動（D78 的重新檢視條件）。

@@ -43,7 +43,6 @@ export interface Run {
   startedAt: string
   lastActivityAt: string
   finishedAt?: string
-  logPath: string
 }
 
 // D38: only a Run that died (abandoned) counts towards the next attempt. Anything else,

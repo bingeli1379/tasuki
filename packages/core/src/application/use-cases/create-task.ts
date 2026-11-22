@@ -1,12 +1,12 @@
 import type { Run } from '../../domain/run'
 import type { Ref, WorkUnit } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
-import type { RuntimeStorePort } from '../ports/runtime-store'
-import type { StoragePort } from '../ports/storage'
+import type { StorePort } from '../ports/store'
+import type { TrackerPort } from '../ports/tracker'
 
 export interface CreateTaskDeps {
-  storage: StoragePort
-  runtime: RuntimeStorePort
+  tracker: TrackerPort
+  store: StorePort
 }
 
 export interface CreateTaskInput {
@@ -21,20 +21,20 @@ const INITIAL = ['to-do', 'manual']
 
 // A splitting agent adds a task to the item its Run works on.
 export async function createTask(
-  { storage, runtime }: CreateTaskDeps,
+  { tracker, store }: CreateTaskDeps,
   run: Run,
   input: CreateTaskInput,
 ): Promise<WorkUnit> {
   if (input.title.trim() === '') throw new InvalidInput('title is empty')
   if (!INITIAL.includes(input.status))
     throw new InvalidInput(`a new task starts in ${INITIAL.join(' or ')}`)
-  const task = await storage.createTask(run.target, {
+  const task = await tracker.createTask(run.target, {
     title: input.title.trim(),
     body: input.body,
     status: input.status,
     origin: 'splitter',
     blockedBy: input.blockedBy,
   })
-  await runtime.bumpProduced(run.id, 'tasks')
+  await store.bumpProduced(run.id, 'tasks')
   return task
 }

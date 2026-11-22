@@ -36,7 +36,7 @@ export interface NewAttachment {
 }
 
 // Each call takes effect on its own; there is no transaction across calls (D47).
-export interface StoragePort {
+export interface TrackerPort {
   // May lag behind writes by a few seconds: Jira serves it from a search index.
   // Callers that just wrote must use what the write returned, not re-list.
   // Every unit in any of the statuses, oldest first, in one query: Jira rate-limits per call.

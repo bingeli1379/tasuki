@@ -1,6 +1,6 @@
 import type { WorkUnit } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
-import type { StoragePort } from '../ports/storage'
+import type { TrackerPort } from '../ports/tracker'
 
 export interface CreateItemInput {
   title: string
@@ -8,12 +8,12 @@ export interface CreateItemInput {
 }
 
 export async function createItem(
-  storage: StoragePort,
+  tracker: TrackerPort,
   entry: string,
   input: CreateItemInput,
 ): Promise<WorkUnit> {
   const title = input.title.trim()
   if (title === '') throw new InvalidInput('title is required')
   // Only humans create items, and every item starts at the entry station (state-machine.md).
-  return storage.createItem({ title, body: input.body, status: entry })
+  return tracker.createItem({ title, body: input.body, status: entry })
 }

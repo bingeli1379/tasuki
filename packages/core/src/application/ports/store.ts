@@ -12,9 +12,9 @@ export interface NewRun {
   leaseSeconds: number
 }
 
-// The engine's own state, always a local sqlite. Not a plugin role (architecture.md).
+// The engine's own state: Runs and the global pause. A plugin role, like the tracker (D78).
 // The store stamps every time from the Clock.
-export interface RuntimeStorePort {
+export interface StorePort {
   // Throws RunConflict when the target already has a live Run (invariant 1).
   createRun(run: NewRun): Promise<Run>
   // Throws NotFound for an unknown id.

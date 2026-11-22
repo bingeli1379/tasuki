@@ -1,4 +1,4 @@
-export const RUNTIME_MIGRATIONS: readonly string[] = [
+export const STORE_MIGRATIONS: readonly string[] = [
   // S4. Columns for cancel, session, produced and usage arrive with the slices that use them.
   `CREATE TABLE run (
     id               TEXT PRIMARY KEY,
@@ -103,4 +103,6 @@ export const RUNTIME_MIGRATIONS: readonly string[] = [
   ALTER TABLE run_next RENAME TO run;
   CREATE UNIQUE INDEX one_live_run ON run(target) WHERE state = 'running';
   CREATE INDEX run_by_target ON run(target, started_at DESC);`,
+  // W3: the engine names a Run's log file itself; a store on another machine cannot see it.
+  `ALTER TABLE run DROP COLUMN log_path;`,
 ]

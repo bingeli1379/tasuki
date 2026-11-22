@@ -8,7 +8,7 @@
 - W1 之後能自訂的：item 的 status、順序、顯示名、誰處理（`handledBy`）、人在每站的按鈕（`outcomes`）、兩個角色（D81，D86 從五個減成兩個）。
 - W2 之後能自訂的：規則有哪些結果、各去哪一站（規則的 `outcomes`），多了只讀與留言的 `review` mode（D84）。
 - config 只能寫在檔案裡，改了要重啟，前端看不到也改不了。
-- runtime store 寫死是 sqlite，第三方沒辦法換成別的 DB。
+- store 寫死是 sqlite，第三方沒辦法換成別的 DB（W3 改成 plugin，D88）。
 
 ## 1. stage 的三種
 
@@ -90,9 +90,9 @@ split、execute、rework 照舊。使用者要的站大多是「agent 看一看�
 
 ## 6. store 也是 plugin
 
-現在能當 plugin 的只有 tracker（與 runner、auth），runtime store 寫死是 sqlite。要讓第三方接自己的 DB，store 要變成 plugin 的一個角色，跟 tracker 走同一條路（D44）：
+原本能當 plugin 的只有 tracker（與 runner、auth），store 寫死是 sqlite。要讓第三方接自己的 DB，store 要變成 plugin 的一個角色，跟 tracker 走同一條路（D44）。W3 做完了 Run 與暫停旗標的部分（D88），流程設定的讀寫等 W4：
 
-- 一個 port，涵蓋現在的 `RuntimeStore` 加上流程設定的讀寫。
+- 一個 port（`StorePort`），涵蓋 Run、暫停旗標，W4 再加上流程設定的讀寫。
 - `testkit` 多一套 store 的契約測試，內建的 sqlite 與第三方都要通過。
 - migration 由 plugin 自己帶，engine 不寫任何 SQL。
 - 內建的 sqlite 是第一個 store plugin，postgres 之後是第二個。
@@ -118,7 +118,7 @@ tracker 的 sqlite 與 store 的 sqlite 仍是兩個 plugin、兩個檔案，各
 |---|---|---|
 | W1 | status 自訂與角色、`handledBy`、站上的 `outcomes`，還在檔案裡設定（已完成，D81） | config 加一站，看板多一欄，眼睛和雷達標對 |
 | W2 | 規則宣告 `outcomes`、`review` mode（已完成，D84） | 加一站 AI review，agent 依結果把 item 送到不同地方 |
-| W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約 | 行為不變，契約測試多一套 |
+| W3 | store 變成 plugin 角色，sqlite 搬過去，`testkit` 加 store 契約（已完成，D88） | 行為不變，契約測試多一套 |
 | W4 | 流程設定進 store、設定頁、熱重載（S9 之後） | 在網頁上改規則和 prompt，下一輪就生效 |
 | 之後 | postgres store plugin | 換成 postgres 照常跑 |
 

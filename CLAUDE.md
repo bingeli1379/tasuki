@@ -72,7 +72,7 @@
 - 不要把 Jira 或 sqlite 的細節漏進 domain 或 MCP tool 的名稱。
 - 檔案依概念命名（`work-unit.ts`、`run.ts`），不放 `types.ts`、`utils.ts` 這類依技術分類的雜物間。依賴只往內，`domain` 不 import `application`。
 - 相對路徑 import 不寫副檔名（D43）。
-- tracker、runner、auth 都是 plugin。內建的與第三方走同一條載入路徑，不准內建的偷用 `core` 沒公開的東西（D44）。
+- tracker、store、runner、auth 都是 plugin。內建的與第三方走同一條載入路徑，不准內建的偷用 `core` 沒公開的東西（D44）。
 
 ## 設計取向
 

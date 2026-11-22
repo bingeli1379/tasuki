@@ -1,8 +1,8 @@
 import type { Rule } from '../../domain/rule'
 import type { Roles, Workflow } from '../../domain/workflow'
 import type { Ref, WorkUnit } from '../../domain/work-unit'
-import type { RuntimeStorePort } from '../ports/runtime-store'
-import type { StoragePort } from '../ports/storage'
+import type { StorePort } from '../ports/store'
+import type { TrackerPort } from '../ports/tracker'
 
 export interface BoardColumn {
   status: string
@@ -32,23 +32,23 @@ export interface Board {
 // One column per station, in the order the workflow lists them. Tasks come from one more
 // list, not one read per item.
 export async function listBoard(
-  storage: StoragePort,
-  runtime: RuntimeStorePort,
+  tracker: TrackerPort,
+  store: StorePort,
   workflow: Workflow,
   taskStatuses: readonly string[],
   rules: readonly Rule[],
   holdLabel: string,
 ): Promise<Board> {
   const [items, tasks] = await Promise.all([
-    storage.list(
+    tracker.list(
       'item',
       workflow.statuses.map((s) => s.id),
     ),
-    storage.list('task', taskStatuses),
+    tracker.list('task', taskStatuses),
   ])
   // After the tracker, which takes seconds on Jira: read alongside it, a Run that ended
   // meanwhile shows as Running on a card already in its outcome's column.
-  const [live, paused] = await Promise.all([runtime.liveRuns(), runtime.isPaused()])
+  const [live, paused] = await Promise.all([store.liveRuns(), store.isPaused()])
   const watched = new Set(rules.map((r) => r.watch))
   // A station a person waits on and a rule watches is the engine's (D68).
   const columns = workflow.statuses.map((station) => ({

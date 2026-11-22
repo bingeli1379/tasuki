@@ -1,10 +1,10 @@
 import { MAX_ATTACHMENT_BYTES, type Attachment } from '../../domain/attachment'
 import type { Ref } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
-import type { NewAttachment, StoragePort } from '../ports/storage'
+import type { NewAttachment, TrackerPort } from '../ports/tracker'
 
 export async function addAttachment(
-  storage: StoragePort,
+  tracker: TrackerPort,
   ref: Ref,
   file: NewAttachment,
 ): Promise<Attachment> {
@@ -14,7 +14,7 @@ export async function addAttachment(
   if (file.data.byteLength === 0) throw new InvalidInput('file is empty')
   if (file.data.byteLength > MAX_ATTACHMENT_BYTES)
     throw new InvalidInput(`file is larger than ${MAX_ATTACHMENT_BYTES / 1024 / 1024} MB`)
-  return storage.addAttachment(ref, {
+  return tracker.addAttachment(ref, {
     filename,
     mimeType: file.mimeType === '' ? 'application/octet-stream' : file.mimeType,
     data: file.data,

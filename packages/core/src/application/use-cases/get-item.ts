@@ -2,8 +2,8 @@ import type { Attachment } from '../../domain/attachment'
 import type { Comment } from '../../domain/comment'
 import type { Run } from '../../domain/run'
 import type { Ref, WorkUnit } from '../../domain/work-unit'
-import type { RuntimeStorePort } from '../ports/runtime-store'
-import type { StoragePort } from '../ports/storage'
+import type { StorePort } from '../ports/store'
+import type { TrackerPort } from '../ports/tracker'
 import { listTasks, type TaskEntry } from './list-tasks'
 
 export interface ItemDetail {
@@ -17,17 +17,17 @@ export interface ItemDetail {
 }
 
 export async function getItem(
-  storage: StoragePort,
-  runtime: RuntimeStorePort,
+  tracker: TrackerPort,
+  store: StorePort,
   ref: Ref,
 ): Promise<ItemDetail> {
   // get first, so a missing ref is one NotFound rather than four.
-  const item = await storage.get(ref)
+  const item = await tracker.get(ref)
   const [comments, attachments, tasks, runs] = await Promise.all([
-    storage.comments(ref),
-    storage.attachments(ref),
-    listTasks(storage, ref),
-    runtime.runsFor(ref),
+    tracker.comments(ref),
+    tracker.attachments(ref),
+    listTasks(tracker, ref),
+    store.runsFor(ref),
   ])
   return { item, comments, attachments, tasks, runs }
 }

@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vite-plus/test'
 import type { Rule } from '../../domain/rule'
 import type { CancelReason, Run } from '../../domain/run'
 import type { WorkUnit } from '../../domain/work-unit'
-import { runtimeStub } from '../../testing/runtime-stub'
-import { storageStub } from '../../testing/storage-stub'
+import { storeStub } from '../../testing/store-stub'
+import { trackerStub } from '../../testing/tracker-stub'
 import { resumeReleased } from './resume-released'
 
 const split: Rule = {
@@ -42,14 +42,13 @@ const cancelled = (by?: CancelReason): Run => ({
   leaseUntil: '',
   startedAt: '',
   lastActivityAt: '',
-  logPath: '',
 })
 
 const setup = (runs: Run[], labels: string[] = []) => {
   const moves: string[] = []
   const deps = {
     named: (s: string) => s,
-    storage: storageStub({
+    tracker: trackerStub({
       list: () => Promise.resolve([item(labels)]),
       transition: (ref, from, to) => {
         moves.push(`${ref} ${from}->${to}`)
@@ -57,7 +56,7 @@ const setup = (runs: Run[], labels: string[] = []) => {
       },
       addComment: (c) => Promise.resolve({ id: '1', ...c, createdAt: '' }),
     }),
-    runtime: runtimeStub({ latestRunsEndedIn: () => Promise.resolve(runs) }),
+    store: storeStub({ latestRunsEndedIn: () => Promise.resolve(runs) }),
   }
   return { deps, moves }
 }
@@ -77,7 +76,7 @@ describe('resumeReleased', () => {
   // A Run cancelled because a person moved the item: they decide where it goes.
   it('asks the tracker nothing when no Run was stopped or held', async () => {
     const t = setup([cancelled(), cancelled('moved')])
-    t.deps.storage = storageStub({})
+    t.deps.tracker = trackerStub({})
     expect(await resumeReleased(t.deps, [split], 'hold')).toEqual([])
   })
 })

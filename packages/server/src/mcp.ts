@@ -19,17 +19,17 @@ import {
   updateItem,
   updateTask,
   type Rule,
-  type RuntimeStorePort,
+  type StorePort,
   type StatusMap,
   type Workflow,
-  type StoragePort,
+  type TrackerPort,
 } from '@tasuki/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
 
 export interface McpDeps {
-  storage: StoragePort
-  runtime: RuntimeStorePort
+  tracker: TrackerPort
+  store: StorePort
   statuses: StatusMap
   workflow: Workflow
   rules: readonly Rule[]
@@ -43,8 +43,8 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 // The user's own AI client (Claude Code, Codex) acting as the user: the same use cases as
 // the board, so whatever a person can do on the board this can do too (D57).
 export function createMcpServer({
-  storage,
-  runtime,
+  tracker,
+  store,
   statuses,
   workflow,
   rules,
@@ -72,7 +72,7 @@ export function createMcpServer({
         'Items created a few seconds ago may not be listed yet when the tracker is Jira.',
     },
     async () =>
-      json(await listBoard(storage, runtime, workflow, statuses.mapped('task'), rules, holdLabel)),
+      json(await listBoard(tracker, store, workflow, statuses.mapped('task'), rules, holdLabel)),
   )
   server.registerTool(
     'create_item',
@@ -83,7 +83,7 @@ export function createMcpServer({
         body: z.string().optional().describe('Plain text, may span lines'),
       },
     },
-    async ({ title, body }) => json(await createItem(storage, entry, { title, body: body ?? '' })),
+    async ({ title, body }) => json(await createItem(tracker, entry, { title, body: body ?? '' })),
   )
   server.registerTool(
     'move_item',
@@ -99,7 +99,7 @@ export function createMcpServer({
         to: z.string().describe('Logical status to move it to; must be a board column'),
       },
     },
-    async (input) => json(await moveItem(storage, workflow, input)),
+    async (input) => json(await moveItem(tracker, workflow, input)),
   )
   server.registerTool(
     'request_rework',
@@ -115,7 +115,7 @@ export function createMcpServer({
         feedback: z.string().describe('Markdown; must not be blank'),
       },
     },
-    async (input) => json(await requestRework(storage, workflow, input)),
+    async (input) => json(await requestRework(tracker, workflow, input)),
   )
   server.registerTool(
     'hold_item',
@@ -126,7 +126,7 @@ export function createMcpServer({
         'has not after a grace period. The item stays in its status. Returns the item.',
       inputSchema: { ref: z.string().describe('The item ref') },
     },
-    async ({ ref }) => json(await holdItem({ storage, runtime }, holdLabel, ref)),
+    async ({ ref }) => json(await holdItem({ tracker, store }, holdLabel, ref)),
   )
   server.registerTool(
     'release_item',
@@ -136,7 +136,7 @@ export function createMcpServer({
         'whose agent was stopped picks up where its rule starts. Returns the item.',
       inputSchema: { ref: z.string().describe('The item ref') },
     },
-    async ({ ref }) => json(await releaseItem(storage, holdLabel, ref)),
+    async ({ ref }) => json(await releaseItem(tracker, holdLabel, ref)),
   )
   server.registerTool(
     'stop_run',
@@ -147,7 +147,7 @@ export function createMcpServer({
         'the agent left them. Fails when no agent is running on it. Returns the item.',
       inputSchema: { ref: z.string().describe('The item ref') },
     },
-    async ({ ref }) => json(await stopRun({ storage, runtime }, holdLabel, ref)),
+    async ({ ref }) => json(await stopRun({ tracker, store }, holdLabel, ref)),
   )
   server.registerTool(
     'pause_engine',
@@ -160,7 +160,7 @@ export function createMcpServer({
         kill: z.boolean().optional().describe('Also stop every agent working now (default false)'),
       },
     },
-    async ({ kill }) => json({ stopped: await pauseEngine(runtime, kill === true) }),
+    async ({ kill }) => json({ stopped: await pauseEngine(store, kill === true) }),
   )
   server.registerTool(
     'resume_engine',
@@ -170,7 +170,7 @@ export function createMcpServer({
         'those whose agent was stopped by pausing.',
     },
     async () => {
-      await resumeEngine(runtime)
+      await resumeEngine(store)
       return json({ ok: true })
     },
   )
@@ -188,7 +188,7 @@ export function createMcpServer({
         'cannot express (a Jira mention, table...): keep the token as is to keep that content.',
       inputSchema: { ref: z.string().describe('The item ref, e.g. TSK-12') },
     },
-    async ({ ref }) => json(await getItem(storage, runtime, ref)),
+    async ({ ref }) => json(await getItem(tracker, store, ref)),
   )
   server.registerTool(
     'update_item',
@@ -206,7 +206,7 @@ export function createMcpServer({
     },
     async ({ ref, version, title, body }) =>
       json(
-        await updateItem(storage, {
+        await updateItem(tracker, {
           ref,
           expectedVersion: version,
           ...(title === undefined ? {} : { title }),
@@ -223,7 +223,7 @@ export function createMcpServer({
       inputSchema: { ref: z.string().describe('The item ref') },
     },
     async ({ ref }) => {
-      await deleteItem({ storage, runtime }, ref)
+      await deleteItem({ tracker, store }, ref)
       return json({ deleted: ref })
     },
   )
@@ -236,7 +236,7 @@ export function createMcpServer({
         'engine say why the engine or an agent moved it. `version` is what update_task needs.',
       inputSchema: { ref: z.string().describe('The task ref, e.g. TSK-13') },
     },
-    async ({ ref }) => json(await getTask(storage, ref)),
+    async ({ ref }) => json(await getTask(tracker, ref)),
   )
   server.registerTool(
     'move_task',
@@ -254,7 +254,7 @@ export function createMcpServer({
         to: z.string().describe('manual, to-do or done'),
       },
     },
-    async (input) => json(await moveTask({ storage, runtime }, input)),
+    async (input) => json(await moveTask({ tracker, store }, input)),
   )
   server.registerTool(
     'update_task',
@@ -273,7 +273,7 @@ export function createMcpServer({
     async ({ ref, version, title, body }) =>
       json(
         await updateTask(
-          { storage, runtime },
+          { tracker, store },
           {
             ref,
             expectedVersion: version,
@@ -292,7 +292,7 @@ export function createMcpServer({
       inputSchema: { ref: z.string() },
     },
     async ({ ref }) => {
-      await deleteTask({ storage, runtime }, ref)
+      await deleteTask({ tracker, store }, ref)
       return json({ deleted: ref })
     },
   )
@@ -302,7 +302,7 @@ export function createMcpServer({
       description: 'Comment on an item or a task as the user. Markdown. Returns the comment.',
       inputSchema: { ref: z.string(), body: z.string() },
     },
-    async ({ ref, body }) => json(await addComment(storage, { ref, body })),
+    async ({ ref, body }) => json(await addComment(tracker, { ref, body })),
   )
   server.registerTool(
     'add_attachment',
@@ -319,7 +319,7 @@ export function createMcpServer({
     },
     async ({ ref, filename, mimeType, base64 }) =>
       json(
-        await addAttachment(storage, ref, {
+        await addAttachment(tracker, ref, {
           filename,
           mimeType,
           data: new Uint8Array(Buffer.from(base64, 'base64')),
@@ -335,7 +335,7 @@ export function createMcpServer({
       inputSchema: { ref: z.string(), id: z.string().describe('The attachment id') },
     },
     async ({ ref, id }) => {
-      await deleteAttachment(storage, ref, id)
+      await deleteAttachment(tracker, ref, id)
       return json({ deleted: id })
     },
   )
@@ -346,7 +346,7 @@ export function createMcpServer({
       inputSchema: { ref: z.string(), id: z.string() },
     },
     async ({ ref, id }) => {
-      const { attachment, data } = await storage.readAttachment(ref, id)
+      const { attachment, data } = await tracker.readAttachment(ref, id)
       const base64 = Buffer.from(data).toString('base64')
       return attachment.mimeType.startsWith('image/')
         ? { content: [{ type: 'image', data: base64, mimeType: attachment.mimeType }] }

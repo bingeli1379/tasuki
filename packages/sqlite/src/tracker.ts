@@ -10,7 +10,7 @@ import {
   type Kind,
   type Origin,
   type PluginContext,
-  type StoragePort,
+  type TrackerPort,
   type WorkUnit,
 } from '@tasuki/core'
 import type { DatabaseSync } from 'node:sqlite'
@@ -63,7 +63,7 @@ export function createSqliteTracker(
   ctx: PluginContext,
   db: DatabaseSync,
   refPrefix: string,
-): StoragePort {
+): TrackerPort {
   function get(ref: string): WorkUnit {
     const row = db.prepare('SELECT * FROM work_unit WHERE ref = ?').get(ref)
     if (row === undefined) throw new NotFound(`${ref} does not exist`)

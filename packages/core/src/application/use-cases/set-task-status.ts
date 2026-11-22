@@ -3,7 +3,7 @@ import { taskStatusName as named } from '../../domain/workflow'
 import { agentMoveRefusal } from '../../domain/task'
 import type { Ref, WorkUnit } from '../../domain/work-unit'
 import { InvalidInput } from '../invalid-input'
-import type { StoragePort } from '../ports/storage'
+import type { TrackerPort } from '../ports/tracker'
 import { listTasks } from './list-tasks'
 
 export interface SetTaskStatusInput {
@@ -15,19 +15,19 @@ export interface SetTaskStatusInput {
 // An executing agent moves one of its item's tasks. Every move leaves the reason on the
 // task, so a person sees why without reading the log (D67).
 export async function setTaskStatus(
-  storage: StoragePort,
+  tracker: TrackerPort,
   run: Run,
   input: SetTaskStatusInput,
 ): Promise<WorkUnit> {
   const reason = input.reason.trim()
   if (reason === '') throw new InvalidInput('reason is empty')
-  const tasks = await listTasks(storage, run.target)
+  const tasks = await listTasks(tracker, run.target)
   const task = tasks.find((t) => t.ref === input.task)
   if (task === undefined) throw new InvalidInput(`${input.task} is not a task of ${run.target}`)
   const refusal = agentMoveRefusal(task, input.status, tasks)
   if (refusal !== undefined) throw new InvalidInput(refusal)
-  const moved = await storage.transition(task.ref, task.status, input.status)
-  await storage.addComment({
+  const moved = await tracker.transition(task.ref, task.status, input.status)
+  await tracker.addComment({
     target: task.ref,
     author: 'engine',
     kind: 'system',

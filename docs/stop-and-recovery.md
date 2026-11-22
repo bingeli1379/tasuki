@@ -33,14 +33,14 @@
 | 機制 | Run 標記取消，MCP 的寫入類 tool 回 `RUN_CANCELLED`，agent 讀到就收手 | 標記取消，並對整個 process tree 送 SIGTERM |
 | 寬限 | 超過 `softGraceSeconds`（草稿：300）還沒結束，升級成 hard | 超過 `hardGraceSeconds`（草稿：10）還沒結束，送 SIGKILL |
 
-取消與升級不靠 Poller：engine 每秒看一次本機的 runtime store（不碰 tracker），hard 的送 SIGTERM，soft 超過寬限就升級成 hard，SIGTERM 之後超過寬限送 SIGKILL。按下 Stop 到 agent 收到訊號最多一秒。
+取消與升級不靠 Poller：engine 每秒看一次本機的 store（不碰 tracker），hard 的送 SIGTERM，soft 超過寬限就升級成 hard，SIGTERM 之後超過寬限送 SIGKILL。按下 Stop 到 agent 收到訊號最多一秒。
 
 取消後 Run 的 outcome 是 `cancelled`，item 的 status 不動，task 也不送回（不變量 6）。item 停在哪就在哪，由人決定下一步。engine 留一則 system comment，寫是誰停的（Stop、hold、被移走）與 agent 的 summary。
 
 `hold` 被拿掉之後：
 
 - item 停在 watch status（例如 `in-progress`）且沒有存活的 Run：Poller 會再起一個 Run，續跑。
-- item 停在 claim status（例如 `splitting`）且沒有存活的 Run：復原機制把它送回 watch status，再被 Poller 撿起。只看最近一次 Run 是被 Stop 或 hold 取消的 item，先問本機的 runtime store，沒有就不碰 tracker（core 的 `resumeReleased`）。
+- item 停在 claim status（例如 `splitting`）且沒有存活的 Run：復原機制把它送回 watch status，再被 Poller 撿起。只看最近一次 Run 是被 Stop 或 hold 取消的 item，先問 store，沒有就不碰 tracker（core 的 `resumeReleased`）。
 
 ### M1 的限制
 
@@ -57,7 +57,7 @@ engine 只看得到 orchestrator 這一個 process，看不到裡面的 subagent
 - `pause`（預設）：讓執行中的 Run 自然跑完。
 - `pause --kill`：對所有存活的 Run 送 hard cancel（`by = 'pause'`）。不貼 `hold`，恢復之後自己接著跑：停在 watch status 的直接被撿起，停在 claim status 的由 `resumeReleased` 送回 watch status（暫停中就先送回去等著）。
 
-暫停只擋認領。lease 復原、偵測 hold 與移走、自動接回、取消與寬限都照跑，它們不會開新的 Run，停掉反而讓 item 卡在半路。旗標存在 runtime store，server 重開還是暫停的。看板上方有 Pause（含 Pause and stop all agents）與 Resume，暫停中顯示一條提示；使用者 MCP 是 `pause_engine`（`kill` 可選）與 `resume_engine`。CLI 的 `pause` 指令跟 S12 的 CLI 一起做，呼叫同一個 use case（D73）。
+暫停只擋認領。lease 復原、偵測 hold 與移走、自動接回、取消與寬限都照跑，它們不會開新的 Run，停掉反而讓 item 卡在半路。旗標存在 store，server 重開還是暫停的。看板上方有 Pause（含 Pause and stop all agents）與 Resume，暫停中顯示一條提示；使用者 MCP 是 `pause_engine`（`kill` 可選）與 `resume_engine`。CLI 的 `pause` 指令跟 S12 的 CLI 一起做，呼叫同一個 use case（D73）。
 
 ## Lease 與當機復原
 

@@ -14,7 +14,6 @@ const run = (attempt: number, outcome: Outcome): Run => ({
   leaseUntil: '',
   startedAt: '',
   lastActivityAt: '',
-  logPath: '',
 })
 
 describe('nextAttempt (D38)', () => {

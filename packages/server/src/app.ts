@@ -25,18 +25,16 @@ import {
   updateItem,
   updateTask,
   type Rule,
-  type RuntimeStorePort,
+  type StorePort,
   type StatusMap,
   type Workflow,
-  type StoragePort,
+  type TrackerPort,
 } from '@tasuki/core'
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
-import type { DatabaseSync } from 'node:sqlite'
 import { createAgentMcpServer } from './agent-mcp'
 import { createMcpServer } from './mcp'
 import type { RunTokens } from './run-tokens'
-import { schemaVersion } from './runtime-store/migrate'
 
 // encodeURIComponent leaves ' ( ) * alone, which RFC 5987 does not allow unencoded.
 const encodeRfc5987 = (value: string): string =>
@@ -48,9 +46,8 @@ const encodeRfc5987 = (value: string): string =>
 const INLINE_IMAGES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 
 export interface AppDeps {
-  db: DatabaseSync
-  storage: StoragePort
-  runtime: RuntimeStorePort
+  tracker: TrackerPort
+  store: StorePort
   statuses: StatusMap
   workflow: Workflow
   rules: readonly Rule[]
@@ -59,9 +56,8 @@ export interface AppDeps {
 }
 
 export function createApp({
-  db,
-  storage,
-  runtime,
+  tracker,
+  store,
   statuses,
   workflow,
   rules,
@@ -77,13 +73,13 @@ export function createApp({
       return c.json({ error: e.message, item: e.current }, 409)
     return c.json({ error: e.message }, 500)
   })
-  app.get('/api/health', (c) => c.json({ ok: true, schemaVersion: schemaVersion(db) }))
+  app.get('/api/health', (c) => c.json({ ok: true }))
   app.get('/api/board', async (c) =>
-    c.json(await listBoard(storage, runtime, workflow, statuses.mapped('task'), rules, holdLabel)),
+    c.json(await listBoard(tracker, store, workflow, statuses.mapped('task'), rules, holdLabel)),
   )
   app.post('/api/items', async (c) => {
     const body = await c.req.json<{ title?: unknown; body?: unknown }>()
-    const item = await createItem(storage, workflow.roles.entry, {
+    const item = await createItem(tracker, workflow.roles.entry, {
       title: typeof body.title === 'string' ? body.title : '',
       body: typeof body.body === 'string' ? body.body : '',
     })
@@ -94,7 +90,7 @@ export function createApp({
     if (typeof body.from !== 'string' || typeof body.to !== 'string')
       throw new InvalidInput('from and to are required')
     return c.json(
-      await moveItem(storage, workflow, {
+      await moveItem(tracker, workflow, {
         ref: c.req.param('ref'),
         from: body.from,
         to: body.to,
@@ -105,7 +101,7 @@ export function createApp({
     const body = await c.req.json<{ from?: unknown; feedback?: unknown }>()
     if (typeof body.from !== 'string') throw new InvalidInput('from is required')
     return c.json(
-      await requestRework(storage, workflow, {
+      await requestRework(tracker, workflow, {
         ref: c.req.param('ref'),
         from: body.from,
         feedback: typeof body.feedback === 'string' ? body.feedback : '',
@@ -114,34 +110,32 @@ export function createApp({
   })
   app.post('/api/engine/pause', async (c) => {
     const body = await c.req.json<{ kill?: unknown }>().catch(() => ({}) as { kill?: unknown })
-    return c.json({ stopped: await pauseEngine(runtime, body.kill === true) })
+    return c.json({ stopped: await pauseEngine(store, body.kill === true) })
   })
   app.post('/api/engine/resume', async (c) => {
-    await resumeEngine(runtime)
+    await resumeEngine(store)
     return c.json({ ok: true })
   })
   app.post('/api/items/:ref/stop', async (c) =>
-    c.json(await stopRun({ storage, runtime }, holdLabel, c.req.param('ref'))),
+    c.json(await stopRun({ tracker, store }, holdLabel, c.req.param('ref'))),
   )
   app.put('/api/items/:ref/hold', async (c) =>
-    c.json(await holdItem({ storage, runtime }, holdLabel, c.req.param('ref'))),
+    c.json(await holdItem({ tracker, store }, holdLabel, c.req.param('ref'))),
   )
   app.delete('/api/items/:ref/hold', async (c) =>
-    c.json(await releaseItem(storage, holdLabel, c.req.param('ref'))),
+    c.json(await releaseItem(tracker, holdLabel, c.req.param('ref'))),
   )
   app.delete('/api/items/:ref', async (c) => {
-    await deleteItem({ storage, runtime }, c.req.param('ref'))
+    await deleteItem({ tracker, store }, c.req.param('ref'))
     return c.json({ ok: true })
   })
-  app.get('/api/items/:ref', async (c) =>
-    c.json(await getItem(storage, runtime, c.req.param('ref'))),
-  )
+  app.get('/api/items/:ref', async (c) => c.json(await getItem(tracker, store, c.req.param('ref'))))
   app.patch('/api/items/:ref', async (c) => {
     const body = await c.req.json<{ expectedVersion?: unknown; title?: unknown; body?: unknown }>()
     if (typeof body.expectedVersion !== 'string')
       throw new InvalidInput('expectedVersion is required')
     return c.json(
-      await updateItem(storage, {
+      await updateItem(tracker, {
         ref: c.req.param('ref'),
         expectedVersion: body.expectedVersion,
         ...(typeof body.title === 'string' ? { title: body.title } : {}),
@@ -151,22 +145,19 @@ export function createApp({
   })
   app.post('/api/items/:ref/comments', async (c) => {
     const body = await c.req.json<{ body?: unknown }>()
-    const comment = await addComment(storage, {
+    const comment = await addComment(tracker, {
       ref: c.req.param('ref'),
       body: typeof body.body === 'string' ? body.body : '',
     })
     return c.json(comment, 201)
   })
-  app.get('/api/tasks/:ref', async (c) => c.json(await getTask(storage, c.req.param('ref'))))
+  app.get('/api/tasks/:ref', async (c) => c.json(await getTask(tracker, c.req.param('ref'))))
   app.post('/api/tasks/:ref/transition', async (c) => {
     const body = await c.req.json<{ from?: unknown; to?: unknown }>()
     if (typeof body.from !== 'string' || typeof body.to !== 'string')
       throw new InvalidInput('from and to are required')
     return c.json(
-      await moveTask(
-        { storage, runtime },
-        { ref: c.req.param('ref'), from: body.from, to: body.to },
-      ),
+      await moveTask({ tracker, store }, { ref: c.req.param('ref'), from: body.from, to: body.to }),
     )
   })
   app.patch('/api/tasks/:ref', async (c) => {
@@ -175,7 +166,7 @@ export function createApp({
       throw new InvalidInput('expectedVersion is required')
     return c.json(
       await updateTask(
-        { storage, runtime },
+        { tracker, store },
         {
           ref: c.req.param('ref'),
           expectedVersion: body.expectedVersion,
@@ -186,12 +177,12 @@ export function createApp({
     )
   })
   app.delete('/api/tasks/:ref', async (c) => {
-    await deleteTask({ storage, runtime }, c.req.param('ref'))
+    await deleteTask({ tracker, store }, c.req.param('ref'))
     return c.json({ ok: true })
   })
   app.post('/api/tasks/:ref/comments', async (c) => {
     const body = await c.req.json<{ body?: unknown }>()
-    const comment = await addComment(storage, {
+    const comment = await addComment(tracker, {
       ref: c.req.param('ref'),
       body: typeof body.body === 'string' ? body.body : '',
     })
@@ -207,7 +198,7 @@ export function createApp({
     async (c) => {
       const file = (await c.req.parseBody())['file']
       if (!(file instanceof File)) throw new InvalidInput('send the file as multipart field "file"')
-      const attachment = await addAttachment(storage, c.req.param('ref'), {
+      const attachment = await addAttachment(tracker, c.req.param('ref'), {
         filename: file.name,
         mimeType: file.type,
         data: new Uint8Array(await file.arrayBuffer()),
@@ -216,11 +207,11 @@ export function createApp({
     },
   )
   app.delete('/api/items/:ref/attachments/:id', async (c) => {
-    await deleteAttachment(storage, c.req.param('ref'), c.req.param('id'))
+    await deleteAttachment(tracker, c.req.param('ref'), c.req.param('id'))
     return c.json({ ok: true })
   })
   app.get('/api/items/:ref/attachments/:id', async (c) => {
-    const { attachment, data } = await storage.readAttachment(c.req.param('ref'), c.req.param('id'))
+    const { attachment, data } = await tracker.readAttachment(c.req.param('ref'), c.req.param('id'))
     // Attachments are anyone's upload, so only raster images display in the page. Anything
     // else, SVG included (it can carry script), downloads as an opaque file.
     const inline = INLINE_IMAGES.has(attachment.mimeType)
@@ -235,7 +226,7 @@ export function createApp({
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ storage, runtime, statuses, workflow, rules, holdLabel }).connect(
+    await createMcpServer({ tracker, store, statuses, workflow, rules, holdLabel }).connect(
       transport,
     )
     return transport.handleRequest(c.req.raw)
@@ -244,12 +235,12 @@ export function createApp({
   app.all('/agent-mcp', async (c) => {
     const token = /^Bearer (.+)$/.exec(c.req.header('Authorization') ?? '')?.[1]
     const runId = token === undefined ? undefined : tokens.resolve(token)
-    const run = runId === undefined ? undefined : await runtime.getRun(runId)
+    const run = runId === undefined ? undefined : await store.getRun(runId)
     const rule = rules.find((r) => r.id === run?.rule)
     if (run?.state !== 'running' || rule === undefined)
       return c.json({ error: 'not a live run token' }, 401)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createAgentMcpServer({ storage, runtime, run, rule }).connect(transport)
+    await createAgentMcpServer({ tracker, store, run, rule }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   return app

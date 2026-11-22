@@ -12,12 +12,12 @@ import {
   type RunExit,
   type RunHandle,
   type RunnerPort,
-  type RuntimeStorePort,
+  type StorePort,
   type StatusNames,
-  type StoragePort,
+  type TrackerPort,
 } from '@tasuki/core'
 import { mkdir, readFile } from 'node:fs/promises'
-import { dirname } from 'node:path'
+import { join } from 'node:path'
 import type { Limits } from './config'
 import { CONTRACT } from './prompts'
 import type { RunTokens } from './run-tokens'
@@ -26,8 +26,8 @@ const TAIL_LINES = 20
 const TAIL_CHARS = 2000
 
 export interface EngineDeps {
-  storage: StoragePort
-  runtime: RuntimeStorePort
+  tracker: TrackerPort
+  store: StorePort
   clock: Clock
   rules: readonly Rule[]
   // How a status reads in the comments the engine writes.
@@ -35,6 +35,8 @@ export interface EngineDeps {
   limits: Limits
   holdLabel: string
   workspaceRoot: string
+  // Each Run's log is <logDir>/<run id>.log, on this machine whichever store holds the Run.
+  logDir: string
   // One per agent name in config.
   runners: Readonly<Record<string, RunnerPort>>
   tokens: RunTokens
@@ -55,7 +57,7 @@ export interface Engine {
 }
 
 export function createEngine(deps: EngineDeps): Engine {
-  const { storage, runtime, clock, rules, limits, tokens, log = console.error } = deps
+  const { tracker, store, clock, rules, limits, tokens, log = console.error } = deps
   const inFlight = new Set<Promise<void>>()
   // The agents this engine started that have not exited yet, by Run id.
   const agents = new Map<string, { handle: RunHandle; termAt?: number; killed?: boolean }>()
@@ -76,18 +78,19 @@ export function createEngine(deps: EngineDeps): Engine {
     const token = tokens.issue(run.id)
     const renew = setInterval(
       () => {
-        runtime.renewLease(run.id, limits.leaseSeconds).catch((e: unknown) => log(String(e)))
+        store.renewLease(run.id, limits.leaseSeconds).catch((e: unknown) => log(String(e)))
       },
       (limits.leaseSeconds * 1000) / 3,
     )
+    const logPath = join(deps.logDir, `${run.id}.log`)
     let exit: Promise<RunExit>
     try {
       if (runner === undefined) throw new Error(`no runner for agent ${rule.agent}`)
       await mkdir(run.workspace, { recursive: true })
-      await mkdir(dirname(run.logPath), { recursive: true })
+      await mkdir(deps.logDir, { recursive: true })
       const resume =
         rule.session === 'per-item'
-          ? (await runtime.runsFor(run.target)).find(
+          ? (await store.runsFor(run.target)).find(
               (r) => r.agent === rule.agent && r.sessionId !== undefined,
             )?.sessionId
           : undefined
@@ -106,15 +109,15 @@ export function createEngine(deps: EngineDeps): Engine {
           mode: rule.mode,
         }),
         ...(resume === undefined ? {} : { resume }),
-        logPath: run.logPath,
+        logPath,
         onActivity() {
           const now = clock.now().getTime()
           if (now - touched < 1000) return
           touched = now
-          runtime.touch(run.id).catch((e: unknown) => log(String(e)))
+          store.touch(run.id).catch((e: unknown) => log(String(e)))
         },
         onSession(id) {
-          runtime.recordSession(run.id, id).catch((e: unknown) => log(String(e)))
+          store.recordSession(run.id, id).catch((e: unknown) => log(String(e)))
         },
       })
       agents.set(run.id, { handle })
@@ -129,11 +132,11 @@ export function createEngine(deps: EngineDeps): Engine {
         clearInterval(renew)
         tokens.revoke(run.id)
         await finishRun(
-          { storage, runtime, named: deps.named },
+          { tracker, store, named: deps.named },
           rule,
           run.id,
           result,
-          await logTail(run.logPath),
+          await logTail(logPath),
         )
       }),
     }
@@ -144,14 +147,14 @@ export function createEngine(deps: EngineDeps): Engine {
       if (ticking) return
       ticking = true
       try {
-        await recoverRuns({ storage, runtime, clock, named: deps.named }, rules)
-        await detectOverrides({ storage, runtime }, rules, deps.holdLabel)
+        await recoverRuns({ tracker, store, clock, named: deps.named }, rules)
+        await detectOverrides({ tracker, store }, rules, deps.holdLabel)
         // Before claiming, so an item resumed this round is picked up in the same round.
-        await resumeBlocked({ storage, runtime, named: deps.named }, rules, deps.holdLabel)
-        await resumeReleased({ storage, runtime, named: deps.named }, rules, deps.holdLabel)
+        await resumeBlocked({ tracker, store, named: deps.named }, rules, deps.holdLabel)
+        await resumeReleased({ tracker, store, named: deps.named }, rules, deps.holdLabel)
         // Paused, the round still recovers and resumes: none of that starts a Run.
-        if (await runtime.isPaused()) return
-        const claimed = await claimItems({ storage, runtime, named: deps.named }, rules, {
+        if (await store.isPaused()) return
+        const claimed = await claimItems({ tracker, store, named: deps.named }, rules, {
           maxConcurrentRuns: limits.maxConcurrentRuns,
           leaseSeconds: limits.leaseSeconds,
           workspaceRoot: deps.workspaceRoot,
@@ -173,13 +176,13 @@ export function createEngine(deps: EngineDeps): Engine {
       if (enforcing) return
       enforcing = true
       try {
-        for (const run of await runtime.liveRuns()) {
+        for (const run of await store.liveRuns()) {
           const agent = agents.get(run.id)
           if (agent === undefined || run.cancelRequestedAt === undefined) continue
           const now = clock.now().getTime()
           if (run.cancelMode === 'soft') {
             if (now - Date.parse(run.cancelRequestedAt) < limits.softGraceSeconds * 1000) continue
-            await runtime.requestCancel(run.id, 'hard', run.cancelRequestedBy ?? 'stop')
+            await store.requestCancel(run.id, 'hard', run.cancelRequestedBy ?? 'stop')
           }
           if (agent.termAt === undefined) {
             agent.termAt = now

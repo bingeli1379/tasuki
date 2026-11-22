@@ -29,12 +29,12 @@
 | 名詞 | 意思 |
 |---|---|
 | engine | 單一 process，包含 API、Poller、規則比對、派工、結果處理。 |
-| tracker store | item、task、dependency、comment 住的地方。sqlite 或 Jira 二選一，兩邊不同步。 |
-| runtime store | engine 自己的狀態（Run、paused 旗標）。永遠是本機 sqlite，Jira 模式也有。 |
+| tracker | item、task、dependency、comment 住的地方，plugin 的一個角色。sqlite 或 Jira 二選一，兩邊不同步。 |
+| store | engine 自己的狀態（Run、paused 旗標），plugin 的一個角色。預設 sqlite，Jira 模式也有（D88）。 |
 | Poller | 定時掃描 tracker 的驅動端，不是核心，只是定時呼叫 use case 的人。 |
 | rule | config 裡的一條規則：監看某個 status，命中就跑某個 agent，依 outcome 轉 status。 |
 | claim status | rule 認領 item 之後 item 暫停的 status，純粹顯示用。可以沒有。 |
-| Run | 一次 agent 執行，記錄在 runtime store。 |
+| Run | 一次 agent 執行，記錄在 store。 |
 | outcome | Run 的結果：規則 `outcomes` 裡的一個結果名（`succeeded`、`needs_input`、`blocked_manual`、`failed`，或規則自己宣告的，例如 `approve`），或只有 engine 會給的 `max_attempts`、`cancelled`、`abandoned`。 |
 | verdict | agent 用 `report_result` 回報的結論，只能是這條規則 `outcomes` 裡的結果名（`max_attempts` 除外）。mode 自己的結果與 `needs_input` engine 驗證過才換算成 outcome，規則自己宣告的照表搬（D84）。 |
 | lease | Run 的存活租約，定期續約。同一張 item 同時最多一個存活的 Run，防重複派發和當機復原都靠它。 |
@@ -60,11 +60,11 @@
 
 | 名詞 | 意思 |
 |---|---|
-| port | application 層定義的介面，例如 StoragePort。 |
-| plugin | 提供 tracker、runner、auth 其中一個以上角色的 npm 套件，與 engine 同一個 process。內建的與第三方的走同一條載入路徑。 |
-| testkit | 契約測試套件。任何 tracker、runner、auth 實作都要通過同一組，才算遵守 port。 |
+| port | application 層定義的介面，例如 TrackerPort。 |
+| plugin | 提供 tracker、store、runner、auth 其中一個以上角色的 npm 套件，與 engine 同一個 process。內建的與第三方的走同一條載入路徑。 |
+| testkit | 契約測試套件。任何 tracker、store、runner、auth 實作都要通過同一組，才算遵守 port。 |
 | adapter | port 的實作。 |
 | compare-and-set / StatusConflict | status 轉移帶著呼叫端以為的目前 status（`expectedFrom`），對不上就不轉，丟 `StatusConflict` 並附上 item 現在的樣子。人在看板上看到的是舊資料時，靠它不蓋掉別人剛做的移動。 |
 | driving adapter | 從外面呼叫 use case 的入口：REST、MCP、Poller。 |
-| driven adapter | use case 往外呼叫的實作：storage、runtime store、runner、auth、clock。 |
+| driven adapter | use case 往外呼叫的實作：tracker、store、runner、auth、clock。 |
 | soft stop / hard stop | soft 是不再派新工作、目前這步做完就停。hard 是馬上終止。 |

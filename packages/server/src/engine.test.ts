@@ -13,7 +13,14 @@ import {
   type TaskNode,
   type WorkUnit,
 } from '@tasuki/core'
-import { createSqliteTracker, migrate as migrateTracker, TRACKER_MIGRATIONS } from '@tasuki/sqlite'
+import {
+  createSqliteStore,
+  createSqliteTracker,
+  migrate,
+  openDatabase,
+  STORE_MIGRATIONS,
+  TRACKER_MIGRATIONS,
+} from '@tasuki/sqlite'
 import { appendFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -21,10 +28,6 @@ import { describe, expect, it } from 'vite-plus/test'
 import { createApp } from './app'
 import { createEngine } from './engine'
 import { createRunTokens } from './run-tokens'
-import { openDatabase } from './runtime-store/database'
-import { migrate } from './runtime-store/migrate'
-import { RUNTIME_MIGRATIONS } from './runtime-store/migrations'
-import { createRuntimeStore } from './runtime-store/run-store'
 
 const named = itemStatusNames(DEFAULT_WORKFLOW)
 const statuses = createStatusMap({
@@ -159,27 +162,27 @@ const ask: Script = async (mcp, spec) => {
   return report('needs_input')(mcp, spec)
 }
 
-// The real sqlite tracker and runtime store, a clock the test moves, and the app serving
+// The real sqlite tracker and store, a clock the test moves, and the app serving
 // the facade, so a scripted agent goes through the same HTTP path as the fake runner.
 function setup(
-  runtimeDb = openDatabase(':memory:'),
+  storeDb = openDatabase(':memory:'),
   trackerDb = openDatabase(':memory:'),
   now = { t: Date.parse('2026-11-20T12:00:00Z') },
 ) {
-  migrate(runtimeDb, RUNTIME_MIGRATIONS)
-  migrateTracker(trackerDb, TRACKER_MIGRATIONS)
+  migrate(storeDb, STORE_MIGRATIONS)
+  migrate(trackerDb, TRACKER_MIGRATIONS)
   const clock = { now: () => new Date(now.t) }
-  const storage = createSqliteTracker(
+  const tracker = createSqliteTracker(
     { clock, configDir: '', dataDir: '', statuses },
     trackerDb,
     'T',
   )
-  const runtime = createRuntimeStore(runtimeDb, clock, mkdtempSync(join(tmpdir(), 'tasuki-logs-')))
+  const store = createSqliteStore(storeDb, clock)
+  const logDir = mkdtempSync(join(tmpdir(), 'tasuki-logs-'))
   const tokens = createRunTokens()
   const app = createApp({
-    db: runtimeDb,
-    storage,
-    runtime,
+    tracker,
+    store,
     statuses,
     // What loadConfig derives from the rework rule.
     workflow: { ...DEFAULT_WORKFLOW, roles: { ...DEFAULT_WORKFLOW.roles, rework: rework.watch } },
@@ -220,8 +223,8 @@ function setup(
   const logs: string[] = []
   const engine = (rules: Rule[] = [split], maxConcurrentRuns = 2) =>
     createEngine({
-      storage,
-      runtime,
+      tracker,
+      store,
       clock,
       rules,
       named,
@@ -234,19 +237,20 @@ function setup(
       },
       holdLabel: 'hold',
       workspaceRoot: mkdtempSync(join(tmpdir(), 'tasuki-ws-')),
+      logDir,
       runners: { fake: runner },
       tokens,
       mcpUrl: 'http://localhost/agent-mcp',
       log: (m) => logs.push(m),
     })
   const readyItem = async (title = 'Login page'): Promise<WorkUnit> => {
-    const item = await storage.createItem({ title, body: '', status: 'refining' })
-    return storage.transition(item.ref, 'refining', 'ready-to-split')
+    const item = await tracker.createItem({ title, body: '', status: 'refining' })
+    return tracker.transition(item.ref, 'refining', 'ready-to-split')
   }
   // Approved in split-review: in-progress with the given tasks, each waiting for the one
   // before unless it is manual.
   const approvedItem = async (...tasks: [string, string][]): Promise<WorkUnit[]> => {
-    const item = await storage.createItem({ title: 'Login page', body: '', status: 'in-progress' })
+    const item = await tracker.createItem({ title: 'Login page', body: '', status: 'in-progress' })
     const made: WorkUnit[] = [item]
     for (const [title, status] of tasks.length > 0
       ? tasks
@@ -256,7 +260,7 @@ function setup(
         ] as [string, string][])) {
       const previous = made.at(-1)
       made.push(
-        await storage.createTask(item.ref, {
+        await tracker.createTask(item.ref, {
           title,
           body: '',
           status,
@@ -268,8 +272,8 @@ function setup(
     return made
   }
   return {
-    storage,
-    runtime,
+    tracker,
+    store,
     app,
     approvedItem,
     scripts,
@@ -280,7 +284,8 @@ function setup(
     readyItem,
     now,
     logs,
-    runtimeDb,
+    logDir,
+    storeDb,
     trackerDb,
   }
 }
@@ -292,8 +297,8 @@ describe('rule split on a fake agent', () => {
     const item = await t.readyItem()
     await t.engine().tick()
 
-    expect((await t.storage.get(item.ref)).status).toBe('splitting')
-    const [run] = await t.runtime.runsFor(item.ref)
+    expect((await t.tracker.get(item.ref)).status).toBe('splitting')
+    const [run] = await t.store.runsFor(item.ref)
     expect(run).toMatchObject({ rule: 'split', attempt: 1, state: 'running' })
     expect(t.started).toMatchObject([{ target: item.ref, mode: 'split' }])
     const board = (await (await t.app.request('/api/board')).json()) as { running: string[] }
@@ -314,8 +319,8 @@ describe('rule split on a fake agent', () => {
       await engine.tick()
       await engine.settled()
 
-      expect((await t.storage.get(item.ref)).status).toBe(to)
-      expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+      expect((await t.tracker.get(item.ref)).status).toBe(to)
+      expect((await t.store.runsFor(item.ref))[0]).toMatchObject({
         state: 'finished',
         outcome: verdict,
         verdict,
@@ -323,7 +328,7 @@ describe('rule split on a fake agent', () => {
         from: 'ready-to-split',
         to,
       })
-      const comment = (await t.storage.comments(item.ref)).find((c) => c.author === 'engine')
+      const comment = (await t.tracker.comments(item.ref)).find((c) => c.author === 'engine')
       expect(comment).toMatchObject({ kind: 'system' })
       expect(comment?.body).toBe(
         `Rule \`split\`, attempt 1: \`${verdict}\`. **Splitting** → ${named(to)}.\n\nsaid ${verdict}`,
@@ -350,9 +355,9 @@ describe('rule split on a fake agent', () => {
       [silent, 'the agent reported no verdict'],
       [crashed, 'exit code 3'],
     ] as const) {
-      expect((await t.storage.get(item.ref)).status).toBe('blocked')
-      expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
-      expect((await t.storage.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
+      expect((await t.tracker.get(item.ref)).status).toBe('blocked')
+      expect((await t.store.runsFor(item.ref))[0]?.outcome).toBe('failed')
+      expect((await t.tracker.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
     }
   })
 
@@ -368,15 +373,15 @@ describe('rule split on a fake agent', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.storage.get(item.ref)).status).toBe('blocked')
-    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
-    expect((await t.storage.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
+    expect((await t.tracker.get(item.ref)).status).toBe('blocked')
+    expect((await t.store.runsFor(item.ref))[0]?.outcome).toBe('failed')
+    expect((await t.tracker.comments(item.ref))[0]?.body).toContain(`Why: ${why}.`)
   })
 
   it('a split counts tasks an earlier run left on the item (D30)', async () => {
     const t = setup()
     const item = await t.readyItem()
-    await t.storage.createTask(item.ref, {
+    await t.tracker.createTask(item.ref, {
       title: 'from refine',
       body: '',
       status: 'manual',
@@ -387,7 +392,7 @@ describe('rule split on a fake agent', () => {
     const engine = t.engine()
     await engine.tick()
     await engine.settled()
-    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
   })
 
   it('a split agent cannot report blocked_manual, which its rule does not have: failed', async () => {
@@ -407,10 +412,10 @@ describe('rule split on a fake agent', () => {
     await engine.settled()
 
     expect(refused).toContain('verdict')
-    expect((await t.storage.get(item.ref)).status).toBe('blocked')
-    const [run] = await t.runtime.runsFor(item.ref)
+    expect((await t.tracker.get(item.ref)).status).toBe('blocked')
+    const [run] = await t.store.runsFor(item.ref)
     expect([run?.outcome, run?.verdict]).toEqual(['failed', undefined])
-    expect((await t.storage.comments(item.ref))[0]?.body).toContain(
+    expect((await t.tracker.comments(item.ref))[0]?.body).toContain(
       'Why: the agent reported no verdict.',
     )
   })
@@ -426,13 +431,13 @@ describe('rule split on a fake agent', () => {
     const item = await t.readyItem()
     const engine = t.engine()
     await engine.tick()
-    await t.storage.transition(item.ref, 'splitting', 'refining')
+    await t.tracker.transition(item.ref, 'splitting', 'refining')
     release()
     await engine.settled()
 
-    expect((await t.storage.get(item.ref)).status).toBe('refining')
-    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('cancelled')
-    expect(await t.storage.comments(item.ref)).toEqual([])
+    expect((await t.tracker.get(item.ref)).status).toBe('refining')
+    expect((await t.store.runsFor(item.ref))[0]?.outcome).toBe('cancelled')
+    expect(await t.tracker.comments(item.ref)).toEqual([])
   })
 
   it('never runs two agents on one item at once (invariant 1)', async () => {
@@ -442,11 +447,11 @@ describe('rule split on a fake agent', () => {
     const engine = t.engine()
     await engine.tick()
     // Back in the watch status while its Run is still alive, e.g. a person dragged it back.
-    await t.storage.transition(item.ref, 'splitting', 'ready-to-split')
+    await t.tracker.transition(item.ref, 'splitting', 'ready-to-split')
     await engine.tick()
 
     expect(t.started).toHaveLength(1)
-    expect(await t.runtime.liveRuns()).toHaveLength(1)
+    expect(await t.store.liveRuns()).toHaveLength(1)
   })
 
   it('starts no more agents than maxConcurrentRuns; the rest wait for the next round', async () => {
@@ -459,7 +464,7 @@ describe('rule split on a fake agent', () => {
     await engine.tick()
 
     expect(t.started.map((s) => s.target)).toEqual(['T-1'])
-    expect((await t.storage.get('T-2')).status).toBe('ready-to-split')
+    expect((await t.tracker.get('T-2')).status).toBe('ready-to-split')
   })
 })
 
@@ -473,19 +478,19 @@ describe('rule execute on a fake agent', () => {
     await engine.settled()
 
     expect(t.started).toMatchObject([{ target: item?.ref, mode: 'execute' }])
-    expect((await t.storage.get(item?.ref ?? '')).status).toBe('in-review')
-    expect((await t.storage.children(item?.ref ?? '')).map((x) => x.status)).toEqual([
+    expect((await t.tracker.get(item?.ref ?? '')).status).toBe('in-review')
+    expect((await t.tracker.children(item?.ref ?? '')).map((x) => x.status)).toEqual([
       'done',
       'done',
     ])
     expect(
-      (await t.storage.comments(schema?.ref ?? '')).map((c) => [c.author, c.kind, c.body]),
+      (await t.tracker.comments(schema?.ref ?? '')).map((c) => [c.author, c.kind, c.body]),
     ).toEqual([
       ['engine', 'system', 'The agent moved it **To Do** → **In Progress**.\n\nTo in-progress.'],
       ['engine', 'system', 'The agent moved it **In Progress** → **In Review**.\n\nTo in-review.'],
       ['engine', 'system', 'The agent moved it **In Review** → **Done**.\n\nTo done.'],
     ])
-    expect((await t.storage.comments(item?.ref ?? ''))[0]?.body).toBe(
+    expect((await t.tracker.comments(item?.ref ?? ''))[0]?.body).toBe(
       'Rule `execute`, attempt 1: `succeeded`. **In Progress** → **In Review**.\n\nsaid succeeded',
     )
   })
@@ -498,8 +503,8 @@ describe('rule execute on a fake agent', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
-    expect((await t.storage.comments(item?.ref ?? ''))[0]?.body).toContain(
+    expect((await t.tracker.get(item?.ref ?? '')).status).toBe('blocked')
+    expect((await t.tracker.comments(item?.ref ?? ''))[0]?.body).toContain(
       'Why: the agent reported succeeded but 2 of 2 tasks are not done.',
     )
   })
@@ -520,8 +525,8 @@ describe('rule execute on a fake agent', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
-    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('blocked_manual')
+    expect((await t.tracker.get(item?.ref ?? '')).status).toBe('blocked')
+    expect((await t.store.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('blocked_manual')
   })
 
   it('does not take blocked_manual while a task can still run: failed', async () => {
@@ -532,8 +537,8 @@ describe('rule execute on a fake agent', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('failed')
-    expect((await t.storage.comments(item?.ref ?? ''))[0]?.body).toContain(
+    expect((await t.store.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('failed')
+    expect((await t.tracker.comments(item?.ref ?? ''))[0]?.body).toContain(
       `Why: the agent reported blocked_manual but ${schema?.ref} can still run.`,
     )
   })
@@ -552,9 +557,9 @@ describe('rule execute on a fake agent', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
-    expect((await t.storage.get(schema?.ref ?? '')).status).toBe('to-do')
-    expect((await t.storage.comments(schema?.ref ?? '')).at(-1)?.body).toBe(
+    expect((await t.tracker.get(item?.ref ?? '')).status).toBe('blocked')
+    expect((await t.tracker.get(schema?.ref ?? '')).status).toBe('to-do')
+    expect((await t.tracker.comments(schema?.ref ?? '')).at(-1)?.body).toBe(
       "Moved **In Progress** → **To Do**: rule `execute`'s run ended `failed`.",
     )
   })
@@ -575,14 +580,14 @@ describe('rule execute on a fake agent', () => {
     const engine = t.engine([execute])
     await engine.tick()
     // Give the agent its first move before the person steps in.
-    while ((await t.storage.get(schema?.ref ?? '')).status !== 'in-progress')
+    while ((await t.tracker.get(schema?.ref ?? '')).status !== 'in-progress')
       await new Promise((r) => setTimeout(r, 5))
-    await t.storage.transition(item?.ref ?? '', 'in-progress', 'refining')
+    await t.tracker.transition(item?.ref ?? '', 'in-progress', 'refining')
     release()
     await engine.settled()
 
-    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('cancelled')
-    expect((await t.storage.get(schema?.ref ?? '')).status).toBe('in-progress')
+    expect((await t.store.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('cancelled')
+    expect((await t.tracker.get(schema?.ref ?? '')).status).toBe('in-progress')
   })
 
   it('refuses moves off the task diagram, and a blank reason', async () => {
@@ -616,7 +621,7 @@ describe('rule execute on a fake agent', () => {
     await engine.settled()
 
     expect(refused).toEqual([true, true, true, true])
-    expect((await t.storage.children(item?.ref ?? '')).map((x) => x.status)).toEqual([
+    expect((await t.tracker.children(item?.ref ?? '')).map((x) => x.status)).toEqual([
       'to-do',
       'manual',
       'to-do',
@@ -655,23 +660,23 @@ describe('rule execute on a fake agent', () => {
     })
     const [item, schema] = await first.approvedItem()
     await first.engine([execute]).tick()
-    while ((await first.storage.get(schema?.ref ?? '')).status !== 'in-progress')
+    while ((await first.tracker.get(schema?.ref ?? '')).status !== 'in-progress')
       await new Promise((r) => setTimeout(r, 5))
 
-    const second = setup(first.runtimeDb, first.trackerDb, first.now)
+    const second = setup(first.storeDb, first.trackerDb, first.now)
     second.scripts.push(hang)
     second.now.t += 121_000
     await second.engine([execute]).tick()
 
-    expect((await second.storage.get(item?.ref ?? '')).status).toBe('in-progress')
-    expect((await second.storage.get(schema?.ref ?? '')).status).toBe('to-do')
+    expect((await second.tracker.get(item?.ref ?? '')).status).toBe('in-progress')
+    expect((await second.tracker.get(schema?.ref ?? '')).status).toBe('to-do')
     expect(
-      (await second.runtime.runsFor(item?.ref ?? '')).map((r) => [r.attempt, r.outcome]),
+      (await second.store.runsFor(item?.ref ?? '')).map((r) => [r.attempt, r.outcome]),
     ).toEqual([
       [2, undefined],
       [1, 'abandoned'],
     ])
-    expect((await second.storage.comments(item?.ref ?? ''))[0]?.body).toBe(
+    expect((await second.tracker.comments(item?.ref ?? ''))[0]?.body).toBe(
       'Rule `execute`, attempt 1: the agent stopped answering. The next round tries again.',
     )
   })
@@ -682,20 +687,20 @@ describe('rule execute on a fake agent', () => {
     const [item] = await first.approvedItem()
     await first.engine([execute]).tick()
     const other = await first.readyItem('other')
-    // There is no delete in StoragePort; a person deletes the issue in Jira.
+    // There is no delete in TrackerPort; a person deletes the issue in Jira.
     first.trackerDb.exec('PRAGMA foreign_keys = OFF')
     first.trackerDb
       .prepare('DELETE FROM work_unit WHERE ref = ? OR parent = ?')
       .run(item?.ref ?? '', item?.ref ?? '')
 
-    const second = setup(first.runtimeDb, first.trackerDb, first.now)
+    const second = setup(first.storeDb, first.trackerDb, first.now)
     second.scripts.push(hang)
     second.now.t += 121_000
     await second.engine([split, execute]).tick()
 
     expect(second.logs).toEqual([])
-    expect((await second.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('abandoned')
-    expect((await second.storage.get(other.ref)).status).toBe('splitting')
+    expect((await second.store.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('abandoned')
+    expect((await second.tracker.get(other.ref)).status).toBe('splitting')
   })
 })
 
@@ -708,8 +713,8 @@ describe('an outcome a rule adds to its mode', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.storage.get(item?.ref ?? '')).status).toBe('refining')
-    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('needs_design')
+    expect((await t.tracker.get(item?.ref ?? '')).status).toBe('refining')
+    expect((await t.store.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('needs_design')
   })
 
   it('leaves the built-in ones checked as before', async () => {
@@ -720,7 +725,7 @@ describe('an outcome a rule adds to its mode', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.runtime.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('failed')
+    expect((await t.store.runsFor(item?.ref ?? ''))[0]?.outcome).toBe('failed')
   })
 })
 
@@ -747,23 +752,23 @@ describe('auto-resume (state-machine.md)', () => {
     const engine = t.engine([execute])
     await engine.tick()
     await engine.settled()
-    expect((await t.storage.get(ref)).status).toBe('blocked')
+    expect((await t.tracker.get(ref)).status).toBe('blocked')
 
     // Still manual: the next round leaves it.
     await engine.tick()
     await engine.settled()
     expect(t.started).toHaveLength(1)
 
-    await t.storage.transition(manual?.ref ?? '', 'manual', 'done')
+    await t.tracker.transition(manual?.ref ?? '', 'manual', 'done')
     await engine.tick()
     await engine.settled()
     expect(t.started).toHaveLength(2)
-    expect((await t.storage.get(ref)).status).toBe('in-review')
-    expect((await t.runtime.runsFor(ref)).map((r) => [r.attempt, r.outcome])).toEqual([
+    expect((await t.tracker.get(ref)).status).toBe('in-review')
+    expect((await t.store.runsFor(ref)).map((r) => [r.attempt, r.outcome])).toEqual([
       [1, 'succeeded'],
       [1, 'blocked_manual'],
     ])
-    expect((await t.storage.comments(ref)).map((c) => c.body)).toContain(
+    expect((await t.tracker.comments(ref)).map((c) => c.body)).toContain(
       'No task is manual any more. Moved **Blocked** → **In Progress** for rule `execute` to carry on.',
     )
   })
@@ -777,14 +782,14 @@ describe('auto-resume (state-machine.md)', () => {
     await engine.settled()
     await engine.tick()
     await engine.settled()
-    expect((await t.storage.get(item?.ref ?? '')).status).toBe('blocked')
+    expect((await t.tracker.get(item?.ref ?? '')).status).toBe('blocked')
     expect(t.started).toHaveLength(1)
   })
 })
 
 describe('rule review on a fake agent', () => {
   const reviewItem = (t: ReturnType<typeof setup>): Promise<WorkUnit> =>
-    t.storage.createItem({ title: 'Login page', body: '', status: 'in-review' })
+    t.tracker.createItem({ title: 'Login page', body: '', status: 'in-review' })
 
   it('only reads and comments, and can report only the outcomes its rule names', async () => {
     const t = setup()
@@ -825,15 +830,15 @@ describe('rule review on a fake agent', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.storage.get(item.ref)).status).toBe('ready-to-rework')
-    const [run] = await t.runtime.runsFor(item.ref)
+    expect((await t.tracker.get(item.ref)).status).toBe('ready-to-rework')
+    const [run] = await t.store.runsFor(item.ref)
     expect([run?.verdict, run?.outcome, run?.from, run?.to]).toEqual([
       'changes',
       'changes',
       'in-review',
       'ready-to-rework',
     ])
-    expect((await t.storage.comments(item.ref)).map((c) => c.body)).toEqual([
+    expect((await t.tracker.comments(item.ref)).map((c) => c.body)).toEqual([
       'The error message leaks the user id.',
       expect.stringContaining('`changes`. **In Review** → **Ready to Rework**.'),
     ])
@@ -858,8 +863,8 @@ describe('rule review on a fake agent', () => {
       await engine.settled()
 
       expect(refused).toBe(true)
-      expect((await t.storage.get(item.ref)).status).toBe('blocked')
-      expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
+      expect((await t.tracker.get(item.ref)).status).toBe('blocked')
+      expect((await t.store.runsFor(item.ref))[0]?.outcome).toBe('failed')
     },
   )
 
@@ -871,8 +876,8 @@ describe('rule review on a fake agent', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('failed')
-    expect((await t.storage.comments(item.ref))[0]?.body).toContain(
+    expect((await t.store.runsFor(item.ref))[0]?.outcome).toBe('failed')
+    expect((await t.tracker.comments(item.ref))[0]?.body).toContain(
       'Why: the agent reported needs_input but asked no question.',
     )
   })
@@ -883,7 +888,7 @@ describe('rule rework on a fake agent', () => {
   const reviewedItem = async (t: ReturnType<typeof setup>): Promise<WorkUnit> => {
     const [item, ...tasks] = await t.approvedItem(['Schema', 'done'])
     for (const task of tasks) expect(task.status).toBe('done')
-    return t.storage.transition(item?.ref ?? '', 'in-progress', 'in-review')
+    return t.tracker.transition(item?.ref ?? '', 'in-progress', 'in-review')
   }
   const send = (t: ReturnType<typeof setup>, ref: string, feedback: string) =>
     t.app.request(`/api/items/${ref}/rework`, {
@@ -904,15 +909,15 @@ describe('rule rework on a fake agent', () => {
     })
     const item = await reviewedItem(t)
     expect((await send(t, item.ref, 'The button is the wrong colour.')).status).toBe(200)
-    expect((await t.storage.get(item.ref)).status).toBe('ready-to-rework')
+    expect((await t.tracker.get(item.ref)).status).toBe('ready-to-rework')
 
     const engine = t.engine([rework])
     await engine.tick()
     await engine.settled()
     expect(feedback).toBe('The button is the wrong colour.')
-    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
     // The done task stays done; the fix is a new task (invariant 4).
-    expect((await t.storage.children(item.ref)).map((c) => [c.title, c.status])).toEqual([
+    expect((await t.tracker.children(item.ref)).map((c) => [c.title, c.status])).toEqual([
       ['Schema', 'done'],
       ['Fix it', 'to-do'],
     ])
@@ -926,34 +931,34 @@ describe('rule rework on a fake agent', () => {
     const engine = t.engine([rework])
     await engine.tick()
     await engine.settled()
-    expect((await t.storage.get(item.ref)).status).toBe('blocked')
+    expect((await t.tracker.get(item.ref)).status).toBe('blocked')
   })
 
   it('moved there in the tracker with no word on what to fix, it waits in blocked for one', async () => {
     const t = setup()
     const item = await reviewedItem(t)
-    await t.storage.transition(item.ref, 'in-review', 'ready-to-rework')
+    await t.tracker.transition(item.ref, 'in-review', 'ready-to-rework')
     const engine = t.engine([rework])
     await engine.tick()
     expect(t.started).toHaveLength(0)
-    expect((await t.storage.get(item.ref)).status).toBe('blocked')
-    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+    expect((await t.tracker.get(item.ref)).status).toBe('blocked')
+    expect((await t.tracker.comments(item.ref)).at(-1)?.body).toBe(
       'Rule `rework` needs a comment saying what to rework, and none was left since the last run. Moved **Ready to Rework** → **Blocked**: write one, then move it back to **Ready to Rework**.',
     )
 
     // A note written straight in the tracker is feedback too.
     t.scripts.push(splitInto('Fix it'))
-    await t.storage.addComment({
+    await t.tracker.addComment({
       target: item.ref,
       author: 'human',
       kind: 'note',
       body: 'Fix the colour.',
     })
-    await t.storage.transition(item.ref, 'blocked', 'ready-to-rework')
+    await t.tracker.transition(item.ref, 'blocked', 'ready-to-rework')
     await engine.tick()
     await engine.settled()
     expect(t.started).toHaveLength(1)
-    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
   })
 
   it('a send-back without feedback is a 400 and the item stays', async () => {
@@ -961,7 +966,7 @@ describe('rule rework on a fake agent', () => {
     const item = await reviewedItem(t)
     const res = await send(t, item.ref, ' ')
     expect(res.status).toBe(400)
-    expect((await t.storage.get(item.ref)).status).toBe('in-review')
+    expect((await t.tracker.get(item.ref)).status).toBe('in-review')
   })
 })
 
@@ -969,7 +974,7 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
   // The engine process dies mid-Run: a new one on the same databases finds a Run nobody
   // renews any more.
   const restart = (t: ReturnType<typeof setup>): ReturnType<typeof setup> =>
-    setup(t.runtimeDb, t.trackerDb, t.now)
+    setup(t.storeDb, t.trackerDb, t.now)
 
   it('sends the item back to ready-to-split, and the next round runs attempt 2', async () => {
     const first = setup()
@@ -981,17 +986,17 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
     second.scripts.push(hang)
     second.now.t += 60_000
     await second.engine().tick()
-    expect((await second.runtime.runsFor(item.ref))[0]?.state).toBe('running')
+    expect((await second.store.runsFor(item.ref))[0]?.state).toBe('running')
 
     second.now.t += 61_000
     await second.engine().tick()
-    const runs = await second.runtime.runsFor(item.ref)
+    const runs = await second.store.runsFor(item.ref)
     expect(runs.map((r) => [r.attempt, r.state, r.outcome])).toEqual([
       [2, 'running', undefined],
       [1, 'finished', 'abandoned'],
     ])
-    expect((await second.storage.get(item.ref)).status).toBe('splitting')
-    expect((await second.storage.comments(item.ref))[0]?.body).toBe(
+    expect((await second.tracker.get(item.ref)).status).toBe('splitting')
+    expect((await second.tracker.comments(item.ref))[0]?.body).toBe(
       'Rule `split`, attempt 1: the agent stopped answering. Moved **Splitting** → **Ready to Split** to try again.',
     )
   })
@@ -1010,27 +1015,27 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
     t.now.t += 121_000
     await t.engine().tick()
 
-    expect((await t.storage.get(item.ref)).status).toBe('blocked')
-    const runs = await t.runtime.runsFor(item.ref)
+    expect((await t.tracker.get(item.ref)).status).toBe('blocked')
+    const runs = await t.store.runsFor(item.ref)
     expect(runs.map((r) => [r.attempt, r.outcome])).toEqual([
       [3, 'max_attempts'],
       [2, 'abandoned'],
       [1, 'abandoned'],
     ])
-    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+    expect((await t.tracker.comments(item.ref)).at(-1)?.body).toBe(
       'Rule `split` gave up after 2 attempts that never finished. Moved **Ready to Split** → **Blocked**.',
     )
 
-    await t.storage.transition(item.ref, 'blocked', 'ready-to-split')
+    await t.tracker.transition(item.ref, 'blocked', 'ready-to-split')
     t.scripts.push(splitInto())
     const engine = t.engine()
     await engine.tick()
     await engine.settled()
-    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+    expect((await t.store.runsFor(item.ref))[0]).toMatchObject({
       attempt: 1,
       outcome: 'succeeded',
     })
-    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
   })
 
   it('leaves an item a person already moved out of the claim status where it is', async () => {
@@ -1038,13 +1043,13 @@ describe('lease expiry (stop-and-recovery.md, D38)', () => {
     first.scripts.push(hang)
     const item = await first.readyItem()
     await first.engine().tick()
-    await first.storage.transition(item.ref, 'splitting', 'refining')
+    await first.tracker.transition(item.ref, 'splitting', 'refining')
 
     const second = restart(first)
     second.now.t += 121_000
     await second.engine().tick()
-    expect((await second.storage.get(item.ref)).status).toBe('refining')
-    expect((await second.runtime.runsFor(item.ref))[0]?.outcome).toBe('abandoned')
+    expect((await second.tracker.get(item.ref)).status).toBe('refining')
+    expect((await second.store.runsFor(item.ref))[0]?.outcome).toBe('abandoned')
   })
 })
 
@@ -1080,13 +1085,13 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     await engine.settled()
 
     expect(t.signals).toEqual(['SIGTERM'])
-    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+    expect((await t.store.runsFor(item.ref))[0]).toMatchObject({
       outcome: 'cancelled',
       cancelMode: 'hard',
       cancelRequestedBy: 'stop',
     })
-    expect(await t.storage.get(item.ref)).toMatchObject({ status: 'splitting', labels: ['hold'] })
-    expect((await t.storage.comments(item.ref)).at(-1)?.body).toBe(
+    expect(await t.tracker.get(item.ref)).toMatchObject({ status: 'splitting', labels: ['hold'] })
+    expect((await t.tracker.comments(item.ref)).at(-1)?.body).toBe(
       'Rule `split`, attempt 1: `cancelled`, a person pressed Stop. The engine moved nothing.',
     )
     await engine.tick()
@@ -1096,12 +1101,12 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     await engine.tick()
     await engine.settled()
     expect(t.started).toHaveLength(2)
-    expect((await t.storage.get(item.ref)).status).toBe('split-review')
-    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
+    expect((await t.store.runsFor(item.ref))[0]).toMatchObject({
       attempt: 1,
       outcome: 'succeeded',
     })
-    expect((await t.storage.comments(item.ref)).map((c) => c.body)).toContain(
+    expect((await t.tracker.comments(item.ref)).map((c) => c.body)).toContain(
       'The hold is off. Moved **Splitting** → **Ready to Split** for rule `split` to start again.',
     )
   })
@@ -1113,23 +1118,23 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     const engine = t.engine()
     await engine.tick()
     // On Jira the label lands seconds before the hard cancel; a round can come in between.
-    await t.storage.addLabel(item.ref, 'hold')
+    await t.tracker.addLabel(item.ref, 'hold')
     await engine.tick()
     await stop(t, item.ref)
     await engine.enforce()
     await engine.settled()
-    expect((await t.runtime.runsFor(item.ref))[0]).toMatchObject({
+    expect((await t.store.runsFor(item.ref))[0]).toMatchObject({
       cancelMode: 'hard',
       cancelRequestedBy: 'stop',
     })
-    expect((await t.storage.comments(item.ref)).at(-1)?.body).toContain('a person pressed Stop')
+    expect((await t.tracker.comments(item.ref)).at(-1)?.body).toContain('a person pressed Stop')
   })
 
   it('Stop with no agent on the item is a 400 and puts nothing on hold', async () => {
     const t = setup()
     const item = await t.readyItem()
     expect((await stop(t, item.ref)).status).toBe(400)
-    expect((await t.storage.get(item.ref)).labels).toEqual([])
+    expect((await t.tracker.get(item.ref)).labels).toEqual([])
   })
 
   it('an agent that ignores SIGTERM gets SIGKILL after hardGraceSeconds', async () => {
@@ -1148,7 +1153,7 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     await engine.enforce()
     await engine.settled()
     expect(t.signals).toEqual(['SIGTERM', 'SIGKILL'])
-    expect((await t.runtime.runsFor(item.ref))[0]?.outcome).toBe('cancelled')
+    expect((await t.store.runsFor(item.ref))[0]?.outcome).toBe('cancelled')
   })
 
   it("hold refuses the agent's writes and ignores its report; past softGraceSeconds it is ended", async () => {
@@ -1169,15 +1174,15 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     await engine.enforce()
     await engine.settled()
     expect(t.signals).toEqual(['SIGTERM'])
-    const [run] = await t.runtime.runsFor(item.ref)
+    const [run] = await t.store.runsFor(item.ref)
     expect(run).toMatchObject({
       outcome: 'cancelled',
       cancelMode: 'hard',
       cancelRequestedBy: 'hold',
     })
     expect(run?.verdict).toBeUndefined()
-    expect(await t.storage.children(item.ref)).toEqual([])
-    expect((await t.storage.get(item.ref)).status).toBe('splitting')
+    expect(await t.tracker.children(item.ref)).toEqual([])
+    expect((await t.tracker.get(item.ref)).status).toBe('splitting')
   })
 
   it('a hold set in the tracker by hand, or a person moving the item, is noticed by the round', async () => {
@@ -1189,11 +1194,11 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     await engine.tick()
     expect(t.started).toHaveLength(2)
 
-    await t.storage.addLabel(held?.ref ?? '', 'hold')
-    await t.storage.transition(moved.ref, 'splitting', 'refining')
+    await t.tracker.addLabel(held?.ref ?? '', 'hold')
+    await t.tracker.transition(moved.ref, 'splitting', 'refining')
     await engine.tick()
     expect(
-      (await t.runtime.liveRuns())
+      (await t.store.liveRuns())
         .map((r) => [r.target, r.cancelMode, r.cancelRequestedBy])
         .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     ).toEqual([
@@ -1205,11 +1210,11 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     t.now.t += 300_000
     await engine.enforce()
     await engine.settled()
-    expect((await t.storage.comments(moved.ref)).at(-1)?.body).toBe(
+    expect((await t.tracker.comments(moved.ref)).at(-1)?.body).toBe(
       'Rule `split`, attempt 1: `cancelled`, the item was moved while it ran. The engine moved nothing.',
     )
-    expect((await t.storage.get(moved.ref)).status).toBe('refining')
-    expect((await t.storage.get(held?.ref ?? '')).status).toBe('in-progress')
+    expect((await t.tracker.get(moved.ref)).status).toBe('refining')
+    expect((await t.tracker.get(held?.ref ?? '')).status).toBe('in-progress')
   })
 
   it('leaves an item on hold alone until it is released', async () => {
@@ -1222,7 +1227,7 @@ describe('stopping a run (stop-and-recovery.md)', () => {
     await hold(t, item.ref, 'DELETE')
     await engine.tick()
     await engine.settled()
-    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
   })
 
   it('an item is deleted with its tasks, but not while an agent works on it', async () => {
@@ -1262,14 +1267,14 @@ describe('global pause (stop-and-recovery.md)', () => {
     expect(t.started).toHaveLength(0)
     expect(await (await t.app.request('/api/board')).json()).toMatchObject({ paused: true })
 
-    const again = setup(t.runtimeDb, t.trackerDb, t.now)
+    const again = setup(t.storeDb, t.trackerDb, t.now)
     const engine = again.engine()
     await engine.tick()
     expect(again.started).toHaveLength(0)
     expect((await resume(again)).status).toBe(200)
     await engine.tick()
     await engine.settled()
-    expect((await again.storage.get(item.ref)).status).toBe('split-review')
+    expect((await again.tracker.get(item.ref)).status).toBe('split-review')
   })
 
   it('lets a Run already working finish', async () => {
@@ -1288,7 +1293,7 @@ describe('global pause (stop-and-recovery.md)', () => {
     go()
     await engine.settled()
     expect(t.signals).toEqual([])
-    expect((await t.storage.get(item.ref)).status).toBe('split-review')
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
   })
 
   it('with kill stops every Run; resumed, each item starts over where its rule starts', async () => {
@@ -1306,7 +1311,7 @@ describe('global pause (stop-and-recovery.md)', () => {
     await engine.settled()
     expect(t.signals).toEqual(['SIGTERM', 'SIGTERM'])
     for (const ref of [split1.ref, exec?.ref ?? ''])
-      expect((await t.runtime.runsFor(ref))[0]).toMatchObject({
+      expect((await t.store.runsFor(ref))[0]).toMatchObject({
         outcome: 'cancelled',
         cancelRequestedBy: 'pause',
       })
@@ -1314,9 +1319,9 @@ describe('global pause (stop-and-recovery.md)', () => {
     // Still paused: the split item goes back to wait in ready-to-split, nothing starts.
     await engine.tick()
     expect(t.started).toHaveLength(2)
-    expect((await t.storage.get(split1.ref)).status).toBe('ready-to-split')
-    expect((await t.storage.get(exec?.ref ?? '')).status).toBe('in-progress')
-    expect((await t.storage.comments(split1.ref)).at(-1)?.body).toBe(
+    expect((await t.tracker.get(split1.ref)).status).toBe('ready-to-split')
+    expect((await t.tracker.get(exec?.ref ?? '')).status).toBe('in-progress')
+    expect((await t.tracker.comments(split1.ref)).at(-1)?.body).toBe(
       'Stopped by pausing the engine. Moved **Splitting** → **Ready to Split** for rule `split` to start again.',
     )
 
@@ -1324,8 +1329,8 @@ describe('global pause (stop-and-recovery.md)', () => {
     await engine.tick()
     await engine.settled()
     expect(t.started).toHaveLength(4)
-    expect((await t.storage.get(split1.ref)).status).toBe('split-review')
-    expect((await t.storage.get(exec?.ref ?? '')).status).toBe('in-review')
+    expect((await t.tracker.get(split1.ref)).status).toBe('split-review')
+    expect((await t.tracker.get(exec?.ref ?? '')).status).toBe('in-review')
   })
 })
 
@@ -1350,7 +1355,7 @@ describe('the MCP facade for agents', () => {
     await engine.tick()
     await engine.settled()
 
-    expect((await t.runtime.runsFor('T-1'))[0]?.outcome).toBe('succeeded')
+    expect((await t.store.runsFor('T-1'))[0]?.outcome).toBe('succeeded')
     await expect(mcp?.callTool({ name: 'get_item', arguments: {} })).rejects.toThrow()
   })
 
@@ -1370,7 +1375,7 @@ describe('the MCP facade for agents', () => {
       ['Endpoint', 'to-do', 'splitter', [detail.tasks[0]?.ref]],
       ['Page', 'to-do', 'splitter', [detail.tasks[1]?.ref]],
     ])
-    expect((await t.runtime.runsFor(item.ref))[0]?.produced).toEqual({ questions: 0, tasks: 3 })
+    expect((await t.store.runsFor(item.ref))[0]?.produced).toEqual({ questions: 0, tasks: 3 })
     const board = (await (await t.app.request('/api/board')).json()) as {
       tasks: Record<string, unknown>
     }
@@ -1379,8 +1384,8 @@ describe('the MCP facade for agents', () => {
 
   it('cannot reach another item: not its tasks, not its comments', async () => {
     const t = setup()
-    const other = await t.storage.createItem({ title: 'other', body: '', status: 'refining' })
-    const theirs = await t.storage.createTask(other.ref, {
+    const other = await t.tracker.createItem({ title: 'other', body: '', status: 'refining' })
+    const theirs = await t.tracker.createTask(other.ref, {
       title: 'theirs',
       body: '',
       status: 'to-do',
@@ -1404,8 +1409,8 @@ describe('the MCP facade for agents', () => {
     await engine.settled()
 
     expect(errors).toEqual([true, true, true, true])
-    expect(await t.storage.children(item.ref)).toEqual([])
-    expect(await t.storage.comments(other.ref)).toEqual([])
+    expect(await t.tracker.children(item.ref)).toEqual([])
+    expect(await t.tracker.comments(other.ref)).toEqual([])
   })
 
   it('has no tool that moves the item (invariant 2)', async () => {
@@ -1448,7 +1453,7 @@ describe('what the engine hands a runner (S8)', () => {
     ])
     await engine.tick()
     await engine.settled()
-    const [run] = await t.runtime.runsFor(item.ref)
+    const [run] = await t.store.runsFor(item.ref)
     const prompt = t.started[0]?.prompt ?? ''
     // The contract always comes first, so a rule's own prompt cannot drop report_result.
     expect(prompt.startsWith(`You are run by tasuki`)).toBe(true)
@@ -1457,7 +1462,7 @@ describe('what the engine hands a runner (S8)', () => {
     expect(
       prompt.endsWith(`Split ${item.ref} (split), run ${run?.id} in ${run?.workspace}. {{x}}`),
     ).toBe(true)
-    expect(t.started[0]?.logPath).toBe(run?.logPath)
+    expect(t.started[0]?.logPath).toBe(join(t.logDir, `${run?.id}.log`))
   })
 
   it('per-item resumes the session this agent last had on the item; fresh never does', async () => {
@@ -1471,7 +1476,7 @@ describe('what the engine hands a runner (S8)', () => {
     t.scripts.push(inSession('s-1'), inSession('s-2'), inSession('s-3'))
     const item = await t.readyItem()
     const again = async (rule: Rule) => {
-      await t.storage.transition(item.ref, 'blocked', 'ready-to-split')
+      await t.tracker.transition(item.ref, 'blocked', 'ready-to-split')
       const engine = t.engine([rule])
       await engine.tick()
       await engine.settled()
@@ -1483,11 +1488,7 @@ describe('what the engine hands a runner (S8)', () => {
     await again(split)
 
     expect(t.started.map((s) => s.resume)).toEqual([undefined, 's-1', undefined])
-    expect((await t.runtime.runsFor(item.ref)).map((r) => r.sessionId)).toEqual([
-      's-3',
-      's-2',
-      's-1',
-    ])
+    expect((await t.store.runsFor(item.ref)).map((r) => r.sessionId)).toEqual(['s-3', 's-2', 's-1'])
   })
 
   it('puts the end of the log in the comment when the agent died or never reported', async () => {
@@ -1509,12 +1510,12 @@ describe('what the engine hands a runner (S8)', () => {
     await engine.settled()
 
     for (const item of [crashed, silent]) {
-      const body = (await t.storage.comments(item.ref))[0]?.body ?? ''
+      const body = (await t.tracker.comments(item.ref))[0]?.body ?? ''
       expect(body).toContain('The end of the log:\n\n```\n')
       expect(body).toContain('API Error: overloaded\n```')
       // The last 20 lines, not all of it.
       expect(body.match(/noise/g)).toHaveLength(19)
     }
-    expect((await t.storage.comments(reported.ref))[0]?.body).not.toContain('The end of the log')
+    expect((await t.tracker.comments(reported.ref))[0]?.body).not.toContain('The end of the log')
   })
 })
