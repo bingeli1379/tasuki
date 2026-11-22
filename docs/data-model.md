@@ -104,7 +104,7 @@ type Outcome =
 | Comment | `comment` 表 | comment |
 | labels | JSON 欄位 | labels |
 | assignee | 欄位 | assignee |
-| comment 的 author / kind | 欄位 | agent 與 engine 的 comment 帶 comment property `tasuki`（`{ author, kind }`），內文第一行是看得見的「tasuki · agent」之類的標記；人按按鈕留的 `system` 紀錄也帶 property，但沒有標記（D74）；沒有 property 的是人寫的 note（D61） |
+| comment 的 author / kind | 欄位 | agent 與 engine 的 comment 帶 comment property `tasuki`（`{ author, kind }`），內文第一行是看得見的「tasuki · agent」之類的標記；人按按鈕留的 `system` 紀錄也帶 property，但沒有標記（D74）；登入的人寫的 comment 帶 property，`name` 是他的顯示名（D89）；沒有 property 的是人寫的 note（D61） |
 | body | markdown | ADF，adapter 負責 markdown 與 ADF 互轉（D61） |
 | Attachment | `attachment` 表，內容是 BLOB | issue 的附件 |
 | body 裡的圖 | `![x](attachment:<id>)` 原樣存 | ADF 的 media 節點，用附件的 media id（D61） |

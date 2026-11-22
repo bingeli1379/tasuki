@@ -801,7 +801,10 @@
   - 第一個 admin 用 setup token：store 沒有啟用中的 `admin` 時，啟動 log 印一次性 token，builtin 用它建第一個帳號，http 登入後用它升級自己。token 只在記憶體，有 admin 就作廢。
   - session ttl 預設 7 天。session 記著發出時的 ttl，跟現在的設定不同就失效，所以改 ttl 會讓之前的 cookie 全部失效。
   - 防暴力：同一個帳號連錯 5 次以內不延遲，第 6 次起 1 秒、2 秒、4 秒加倍到 30 秒。
-  - S9 拆成 S9a（builtin、access、帳號管理、session、CSRF、`Host`、防暴力）、S9b（個人 API token）、S9c（http、開放非 loopback）。
+  - S9 拆成 S9a（builtin、access、帳號管理、session、CSRF、`Host`、防暴力、個人 API token）與 S9c（http、開放非 loopback）。原本的 S9b（API token）併進 S9a：作者平常用 Claude Code 接 `/mcp`，設了 auth 卻還沒有 token 的話 `/mcp` 整個 401。
+  - 實作時定的：setup token 除了印在 log，也寫進 `<dataDir>/setup-token`（像 Jenkins），E2E 與 container 都讀得到。`Secure` cookie 只在 https 時加。管帳號與 API token 只在看板，不進使用者 MCP（D57 的例外，密碼不該進 AI 的對話紀錄）。Jira 上人寫的 comment 把登入者的名字放進 comment property。密碼至少 8 個字元、不設組合規則；NIST SP 800-63B-4 對只有密碼的登入要求 15 個字元，作者試用後選擇維持 8。builtin 的帳號不另設顯示名，看到的就是帳號名，少一格表單也不會有「改不了名字」的問題；外部帳號照用外部系統給的顯示名（員編與真名常常不同）。
+  - 人的名字不是一個個 use case 傳進去的：server 每個登入的請求用 `AsyncLocalStorage` 記著是誰，交給 use case 的 tracker 包一層，`human` 的 comment 自動帶上 `authorName`。use case 不用改簽名，engine 自己寫的 comment 跑在請求外，不會被蓋上名字。
+  - `Host` 與 `Origin` 檢查不登入時也做，DNS rebinding 與跨站 `POST` 在不登入時最危險。`auth-builtin` 的工廠多拿到 `store`（`AuthContext`）。
 - 理由：
   - 身分跟權限分開，換 auth plugin（以後的 OIDC、LDAP）不用碰權限；帳號放 store，接自己的 DB 就是換 store plugin（D88）。
   - `static` 把帳號寫在 config，又在網頁上管 access，兩邊會打架。builtin 取代它，也就不需要產生 hash 的 CLI。
@@ -809,4 +812,5 @@
   - 第一個 admin 不讓「第一個打開網頁的人」當，綁在非 loopback 時誰先搶到就是誰的；不用 CLI，container 看 log 比 exec 進去容易。
   - `auth-http` 不是 SSO，密碼會經過 tasuki。作者的公司情境是登入頁打公司帳密、tasuki 去問公司的 API，所以先做它；公司只開 OIDC 時另做 plugin。
   - 改 ttl 要在驗證時比對而不是啟動時清，因為 W4 之後 ttl 會在執行中被改。
+- 實測：`pnpm test` 387 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite、jira、auth 共 25 條全過。把「5 次不延遲」改成 4、把「ttl 不同就失效」拿掉，server 測試各有一條會紅。
 - 重新檢視：需要比 `member` 更小的權限（唯讀、只看部分 item）時；公司只提供 OIDC 或 SAML 時；W4 做設定頁時確認 `maintainer` 能改的範圍。

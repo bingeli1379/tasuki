@@ -38,7 +38,7 @@ auth 是 plugin 的一個角色，config 寫法跟其他角色一樣（`plugin` 
 | plugin | 帳號在哪 | 行為 |
 |---|---|---|
 | 省略 | 沒有帳號 | 不登入，本機用。每個請求都當成 `admin`，看板不顯示管理帳號的頁面。 |
-| `@tasuki/auth-builtin` | tasuki 的 store | tasuki 自己管帳號：`admin` 在看板上建帳號、重設密碼。不提供預設帳號或預設密碼。 |
+| `@tasuki/auth-builtin` | tasuki 的 store | tasuki 自己管帳號：`admin` 在看板上建帳號、重設密碼。不提供預設帳號或預設密碼。帳號沒有另外的顯示名，大家看到的就是帳號名。 |
 | `@tasuki/auth-http` | 外部系統 | 登入頁收到的帳密轉給使用者提供的 API。契約草稿：`POST <url>` 帶 `{ username, password }`，成功回 `200 { userId, displayName }`，失敗回 4xx。 |
 
 `auth-http` 不是 SSO：使用者每次都在 tasuki 的登入頁打帳密，密碼會經過 tasuki，所以非 loopback 時一定要在 HTTPS proxy 後面，engine 也不把它寫進 log。公司只開 OIDC 或 SAML 時，另做一個 `auth-oidc` 之類的 plugin，權限那一半不用動。
@@ -55,15 +55,16 @@ auth 是 plugin 的一個角色，config 寫法跟其他角色一樣（`plugin` 
 - 外部帳號第一次登入成功時，store 建一筆帳號，access 是 `member`。之後由 `admin` 升級。
 - 停用的帳號不能登入，它的 session 與個人 API token 立刻失效。外部帳號只能停用不能刪，刪了下次登入又會建回來。
 - 最後一個 `admin` 不能被降級或停用，不然就沒有人能管帳號了。
-- 身分用來記錄操作者（`cancelRequestedBy`、`system` comment、comment 的 `authorName`）。
+- 身分用來記錄操作者：人寫的 comment 與按鈕留的 `system` 紀錄帶登入者的顯示名（`authorName`）。Jira 上 tasuki 寫的 comment 都顯示 engine 的帳號，所以名字放在 comment property `tasuki` 的 `name`，看板讀它；Jira 網頁照樣顯示 engine 的帳號。
+- 管帳號（建帳號、重設密碼、改 access、停用）與個人 API token 只在看板上做，不進使用者 MCP，是 D57 的例外：重設密碼走 MCP，密碼就會留在 AI 的對話紀錄裡。
 
 ### 第一個 admin
 
 builtin 與 http 用同一招：
 
-1. engine 啟動時發現 store 裡沒有任何啟用中的 `admin`，就產生一次性的 setup token，印在啟動 log。
+1. engine 啟動時發現 store 裡沒有任何啟用中的 `admin`，就產生一次性的 setup token，印在啟動 log，也寫進 `<dataDir>/setup-token`（權限 600）。跟 Jenkins 的 initialAdminPassword 一樣，container 的主人看 log 或讀檔都拿得到。
 2. builtin：在登入頁貼 setup token，建第一個帳號，它就是 `admin`。http：先用外部帳號登入，再貼 setup token 把自己升成 `admin`。
-3. 有 `admin` 之後 token 立刻作廢。token 只在記憶體裡，engine 重啟時如果還是沒有 `admin`，就再印一個新的。
+3. 有 `admin` 之後 token 立刻作廢，檔案也刪掉。engine 重啟時如果還是沒有 `admin`，就再產生一個新的；已經有 `admin` 時啟動會把殘留的檔案刪掉。
 
 不讓「第一個打開網頁的人自動變 admin」，因為綁在非 loopback 時誰先搶到就是誰的。不做 CLI 指令，因為 container 裡看 log 比 exec 進去容易。
 
@@ -71,9 +72,9 @@ builtin 與 http 用同一招：
 
 登入成功後 engine 發自己的 session token。
 
-- 看板用 cookie 帶 session：`HttpOnly`（前端 JavaScript 讀不到，XSS 偷不走）、`Secure`、`SameSite=Lax`。`Lax` 而不是 `Strict`，是為了從 Slack 或信件點連結進看板時還是登入狀態。
+- 看板用 cookie 帶 session：`HttpOnly`（前端 JavaScript 讀不到，XSS 偷不走）、`Secure`、`SameSite=Lax`。`Secure` 只在 `publicUrl` 是 https 時加，因為有些瀏覽器在 `http://localhost` 不收 `Secure` cookie，只綁 loopback 時就登不進去（D89）。`Lax` 而不是 `Strict`，是為了從 Slack 或信件點連結進看板時還是登入狀態。
 - session 存在 store，cookie 裡只放隨機值，DB 只存它的 hash。登出或過期就刪掉，server 端立刻失效，不靠 cookie 自己過期。
-- CSRF：會改東西的請求（`POST`、`PUT`、`PATCH`、`DELETE`）檢查 `Origin` 必須等於 `server.publicUrl` 的 origin，對不上回 403。`SameSite=Lax` 已經擋掉大部分跨站請求，`Origin` 檢查補上同站子網域與舊瀏覽器的缺口。
+- CSRF：會改東西的請求（`POST`、`PUT`、`PATCH`、`DELETE`）帶了 `Origin` 時，它必須是 loopback 或 `server.publicUrl` 的 origin，對不上回 403。沒帶 `Origin` 的是瀏覽器以外的 client，不是 CSRF 的對象。不登入時也檢查，因為惡意網頁一樣能讓瀏覽器對 `127.0.0.1` 發 `POST`。`SameSite=Lax` 已經擋掉大部分跨站請求，`Origin` 檢查補上同站子網域與舊瀏覽器的缺口。
 - 有效期由 `auth.session.ttl` 設定，吃時間長度（`"7d"`）或 `"never"`。預設 7 天。
 - 改了 ttl，之前發的 session 全部失效：session 記著發出時的 ttl，驗證時跟現在的設定不同就刪掉、回 401。不只在啟動時清，因為 W4 之後 ttl 會在執行中被改。
 - `never` 允許，但不建議：有登入的情況下 token 洩漏等於永久通行證。
@@ -83,7 +84,9 @@ builtin 與 http 用同一招：
 ### builtin 的密碼
 
 - store 只存密碼的 hash。演算法用 Node 內建的 scrypt，不另外裝套件。
-- 密碼由 `admin` 在看板上設定或重設，帳號本人登入後可以改自己的。
+- 密碼由 `admin` 在看板上設定或重設，帳號本人登入後可以改自己的（要先輸入目前的密碼）。設新密碼時要輸入兩次。
+- 規則只看長度，至少 8 個字元，不要求大小寫、數字、符號的組合。NIST SP 800-63B 第 4 版反對組合規則；它對「只有密碼一道關」要求至少 15 個字元，作者選擇維持 8（D89）。
+- 帳號不存在時也跑一次 scrypt，讓回應時間不透露哪些帳號存在。
 
 ### 防暴力破解
 
@@ -114,7 +117,7 @@ Claude Code 與 Codex 不會填登入表單，也不適合放一個幾天就過�
 - `/mcp` 只收 `Authorization: Bearer <token>`，不吃看板的 cookie。惡意網頁就算讓瀏覽器對 `/mcp` 發請求，也帶不到使用者的身分。
 - 沒設 `auth` 時不需要 token，跟看板一樣。
 
-已知風險：只綁 loopback 擋不住 DNS rebinding，惡意網頁可以讓瀏覽器把請求送到 `127.0.0.1:8787`。REST 與 `/mcp` 都受影響，S9 一起檢查 `Host` header：只接受 loopback 的名稱，以及 `server.publicUrl` 的 host。
+已知風險：只綁 loopback 擋不住 DNS rebinding，惡意網頁可以讓瀏覽器把請求送到 `127.0.0.1:8787`。REST 與 `/mcp` 都受影響，所以每個請求都檢查 `Host` header：只接受 loopback 的名稱（`localhost`、`127.0.0.1`、`[::1]`），以及 `server.publicUrl` 的 host（S9c），對不上回 403。不登入時也檢查。
 
 ## 附件與內容
 

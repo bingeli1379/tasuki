@@ -81,5 +81,5 @@ config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解�
 2. `doctor` 怎麼把檢查委派給 plugin（Jira 的 workflow 轉移檢查、CLI preflight 都是 plugin 才知道的事）。
 3. `apiVersion` 的相容規則：完全相等，還是 semver 範圍。程式目前要求完全相等。
 4. 第三方套件的命名慣例。
-5. （已定，D89）`auth` 的內建實作是 `@tasuki/auth-builtin` 與 `@tasuki/auth-http` 兩個套件；不登入是省略 `auth`，不是一個套件。builtin 讀寫 store 裡的帳號與密碼 hash，`ctx` 要多給它什麼介面，S9 實作時定。
+5. （已定，D89）`auth` 的內建實作是 `@tasuki/auth-builtin` 與 `@tasuki/auth-http` 兩個套件；不登入是省略 `auth`，不是一個套件。builtin 讀寫 store 裡的帳號與密碼 hash，所以 `auth` 工廠拿到的 `ctx` 多一個 `store`（`AuthContext`）。
 6. plugin 的錯誤怎麼回報成 `system` comment 或 log，哪些資訊不能外洩（secret）。
