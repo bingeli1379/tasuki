@@ -1,6 +1,6 @@
-import { isActiveAdmin, type Account } from '../../domain/account'
+import { isActiveAdmin, type Account, type Identity } from '../../domain/account'
 import { InvalidInput } from '../invalid-input'
-import type { AuthPort, Credentials, NewPasswordAccount } from '../ports/auth'
+import type { AuthPort, Credentials } from '../ports/auth'
 import type { StorePort } from '../ports/store'
 
 export interface SignInDeps {
@@ -8,47 +8,64 @@ export interface SignInDeps {
   store: StorePort
 }
 
-// The auth plugin says who it is; the store says what they may do. Someone an outside system
-// lets in for the first time becomes a member, for an admin to raise (D89). A disabled
-// account fails exactly like a wrong password.
+// Only someone an admin added gets in through an outside system: adding them is the admin
+// letting them in (D90). The first sign in binds the outside system's id to the account, so a
+// username the company later hands to someone else does not carry the access over.
+async function addedAccount(
+  store: StorePort,
+  identity: Identity,
+  username: string,
+): Promise<Account | undefined> {
+  const bound = await store.findAccountByExternalId(identity.userId)
+  if (bound !== undefined) return bound
+  const added = await store.findAccount(username)
+  if (added === undefined || added.externalId !== undefined) return undefined
+  return store.updateAccount(added.userId, { externalId: identity.userId })
+}
+
+// The auth plugin says who it is; the store says what they may do (D89). Someone not on the
+// list, or disabled, fails exactly like a wrong password.
 export async function signIn(
   { auth, store }: SignInDeps,
   credentials: Credentials,
 ): Promise<Account | undefined> {
   const identity = await auth.login(credentials)
   if (identity === undefined) return undefined
-  const known = await store.getAccount(identity.userId)
   const account =
-    known === undefined
-      ? await store.createAccount({
-          userId: identity.userId,
-          username: credentials.username,
-          displayName: identity.displayName,
-          access: 'member',
-        })
-      : known.displayName === identity.displayName
-        ? known
-        : await store.updateAccount(identity.userId, { displayName: identity.displayName })
-  return account.disabled ? undefined : account
+    auth.accounts === undefined
+      ? await addedAccount(store, identity, credentials.username)
+      : await store.getAccount(identity.userId)
+  if (account === undefined || account.disabled) return undefined
+  return account.displayName === identity.displayName
+    ? account
+    : store.updateAccount(account.userId, { displayName: identity.displayName })
 }
 
 export async function needsSetup(store: StorePort): Promise<boolean> {
   return !(await store.listAccounts()).some(isActiveAdmin)
 }
 
-async function assertSetupOpen(store: StorePort): Promise<void> {
-  if (!(await needsSetup(store))) throw new InvalidInput('there is an admin already')
-}
-
-// The first admin, while there is none. With the plugin keeping the accounts, it is a new
-// account; otherwise the person who signed in through the outside system is raised.
+// The first admin, while there is none, from the same username and password either way: a new
+// account when the plugin keeps them, or the person the outside system vouches for.
+// undefined when the outside system turns the credentials down.
 export async function setUpFirstAdmin(
   { auth, store }: SignInDeps,
-  first: Omit<NewPasswordAccount, 'access'> | Account,
-): Promise<Account> {
-  await assertSetupOpen(store)
-  if ('userId' in first) return store.updateAccount(first.userId, { access: 'admin' })
-  if (auth.accounts === undefined)
-    throw new InvalidInput('sign in first: the accounts live outside tasuki')
-  return auth.accounts.create({ ...first, access: 'admin' })
+  first: Credentials,
+): Promise<Account | undefined> {
+  if (!(await needsSetup(store))) throw new InvalidInput('there is an admin already')
+  const username = first.username.trim()
+  if (username === '') throw new InvalidInput('username is empty')
+  // An account tasuki keeps is shown by its username (D89).
+  if (auth.accounts !== undefined)
+    return auth.accounts.create({ ...first, username, displayName: username, access: 'admin' })
+  const identity = await auth.login({ ...first, username })
+  if (identity === undefined) return undefined
+  const known = await store.findAccountByExternalId(identity.userId)
+  if (known !== undefined) return store.updateAccount(known.userId, { access: 'admin' })
+  return store.createAccount({
+    username,
+    displayName: identity.displayName,
+    access: 'admin',
+    externalId: identity.userId,
+  })
 }

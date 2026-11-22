@@ -215,7 +215,8 @@ CREATE TABLE account (
   access        TEXT NOT NULL CHECK (access IN ('admin','maintainer','member')),
   password_hash TEXT,                           -- builtin only; scrypt
   disabled_at   TEXT,
-  created_at    TEXT NOT NULL
+  created_at    TEXT NOT NULL,
+  external_id   TEXT UNIQUE                     -- auth-http: the outside userId, bound at the first sign in (D90)
 );
 
 CREATE TABLE session (

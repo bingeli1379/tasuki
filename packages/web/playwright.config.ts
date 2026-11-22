@@ -193,33 +193,63 @@ const signIn = {
 }
 process.env['TASUKI_E2E_AUTH_DATA'] = join(dir, signIn.name)
 
+// Signing in through an outside system (S9c), which a small fake service plays.
+const SIGN_IN_SERVICE = 8792
+const signInHttp = {
+  name: 'auth-http',
+  api: 8791,
+  web: 5183,
+  config: {
+    workflow: { statuses: stations, roles: DEFAULT_WORKFLOW.roles },
+    auth: {
+      plugin: '@tasuki/auth-http',
+      options: { url: `http://127.0.0.1:${SIGN_IN_SERVICE}/check` },
+    },
+  },
+  testMatch: 'sign-in-http.spec.ts',
+}
+process.env['TASUKI_E2E_AUTH_HTTP_DATA'] = join(dir, signInHttp.name)
+
+const SIGN_IN_SPECS = ['sign-in.spec.ts', 'sign-in-http.spec.ts']
 const engines = [
-  ...trackers.map((t) => ({ ...t, testIgnore: 'sign-in.spec.ts' })),
-  ...(picked.length === 0 || picked.includes(signIn.name) ? [signIn] : []),
+  ...trackers.map((t) => ({ ...t, testIgnore: SIGN_IN_SPECS })),
+  ...[signIn, signInHttp].filter((e) => picked.length === 0 || picked.includes(e.name)),
 ]
+const services =
+  picked.length === 0 || picked.includes(signInHttp.name)
+    ? [
+        {
+          command: `node ${join(import.meta.dirname, 'e2e/fake-sign-in-service.ts')} ${SIGN_IN_SERVICE}`,
+          url: `http://127.0.0.1:${SIGN_IN_SERVICE}/`,
+        },
+      ]
+    : []
 
 const config: PlaywrightTestConfig = defineConfig({
   testDir: 'e2e',
   fullyParallel: false,
   forbidOnly: !!process.env['CI'],
   reporter: process.env['CI'] ? 'github' : 'list',
-  projects: [...trackers, signIn].map((t) => ({
+  projects: [...trackers, signIn, signInHttp].map((t) => ({
     name: t.name,
     use: { baseURL: `http://localhost:${t.web}`, browserName: 'chromium' },
-    ...('testMatch' in t ? { testMatch: t.testMatch } : { testIgnore: 'sign-in.spec.ts' }),
+    ...('testMatch' in t ? { testMatch: t.testMatch } : { testIgnore: SIGN_IN_SPECS }),
   })),
-  webServer: engines.flatMap((t) => [
-    {
-      command: `node ${join(repoRoot, 'packages/server/dist/index.mjs')} --config ${engine(t.name, t.api, t.config)}`,
-      url: `http://127.0.0.1:${t.api}/api/health`,
-      cwd: repoRoot,
-    },
-    {
-      command: `pnpm exec vp dev --port ${t.web} --strictPort`,
-      url: `http://localhost:${t.web}`,
-      env: { TASUKI_API_URL: `http://127.0.0.1:${t.api}` },
-    },
-  ]),
+  webServer: [
+    ...services,
+    ...engines.flatMap((t) => [
+      {
+        command: `node ${join(repoRoot, 'packages/server/dist/index.mjs')} --config ${engine(t.name, t.api, t.config)}`,
+        url: `http://127.0.0.1:${t.api}/api/health`,
+        cwd: repoRoot,
+      },
+      {
+        command: `pnpm exec vp dev --port ${t.web} --strictPort`,
+        url: `http://localhost:${t.web}`,
+        env: { TASUKI_API_URL: `http://127.0.0.1:${t.api}` },
+      },
+    ]),
+  ],
 })
 
 export default config

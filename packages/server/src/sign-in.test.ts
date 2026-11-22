@@ -1,7 +1,13 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { createBuiltinAuth } from '@tasuki/auth-builtin'
-import { createStatusMap, type Comment, type StorePort, type Workflow } from '@tasuki/core'
+import {
+  createStatusMap,
+  type AuthPort,
+  type Comment,
+  type StorePort,
+  type Workflow,
+} from '@tasuki/core'
 import {
   createSqliteStore,
   createSqliteTracker,
@@ -34,6 +40,7 @@ let slept: number[]
 function engine(
   ttl = { ttl: '7d', ttlSeconds: 7 * 86400 },
   shared?: { store: StorePort; dir: string },
+  opts: { port?: (store: StorePort) => AuthPort; publicUrl?: string; agentHost?: string } = {},
 ) {
   const trackerDb = openDatabase(':memory:')
   migrate(trackerDb, TRACKER_MIGRATIONS)
@@ -59,12 +66,14 @@ function engine(
     holdLabel: 'hold',
     tokens: createRunTokens(),
     auth: {
-      port: createBuiltinAuth(store),
+      port: (opts.port ?? createBuiltinAuth)(store),
       signIns: createSignIns(store, clock, ttl),
       throttle: createLoginThrottle(async (ms) => void slept.push(ms)),
       setup,
       ttlSeconds: ttl.ttlSeconds,
     },
+    ...(opts.publicUrl === undefined ? {} : { publicUrl: opts.publicUrl }),
+    ...(opts.agentHost === undefined ? {} : { agentHost: opts.agentHost }),
   })
   return { app, store, dir, setupToken: setup.token ?? '' }
 }
@@ -331,5 +340,140 @@ describe('requests from elsewhere', () => {
       },
     })
     expect(same.status).toBe(201)
+  })
+})
+
+describe('accounts from an outside system', () => {
+  // Stands in for auth-http: the outside system knows eli, and may rename him.
+  let names: Record<string, string>
+  const outside = (): AuthPort => ({
+    login: async ({ username, password }) =>
+      names[username] !== undefined && password === 'company pw'
+        ? { userId: `ext-${username}`, displayName: names[username] }
+        : undefined,
+  })
+  beforeEach(() => {
+    names = { eli: 'Eli Ye', amy: 'Amy' }
+  })
+  const login = (e: ReturnType<typeof engine>, username: string) =>
+    e.app.request('/api/auth/login', json('POST', { username, password: 'company pw' }))
+
+  const setUp = (e: ReturnType<typeof engine>, username: string) =>
+    e.app.request(
+      '/api/auth/setup',
+      json('POST', { token: e.setupToken, username, password: 'company pw' }),
+    )
+
+  it('make the first admin from the setup token and company credentials, and nobody else gets in unasked', async () => {
+    const e = engine(undefined, undefined, { port: outside })
+    const state = await (await e.app.request('/api/auth/state')).json()
+    expect(state).toMatchObject({ mode: 'external', needsSetup: true })
+    // On nobody's list yet, the company saying yes is not enough.
+    expect((await login(e, 'eli')).status).toBe(401)
+    expect(
+      (
+        await e.app.request(
+          '/api/auth/setup',
+          json('POST', { token: e.setupToken, username: 'eli', password: 'wrong' }),
+        )
+      ).status,
+    ).toBe(401)
+    const res = await setUp(e, 'eli')
+    expect(res.status).toBe(200)
+    expect((await res.json()).me).toMatchObject({
+      username: 'eli',
+      displayName: 'Eli Ye',
+      access: 'admin',
+      externalId: 'ext-eli',
+    })
+    const admin = cookieOf(res)
+    expect((await e.app.request('/api/board', { headers: { Cookie: admin } })).status).toBe(200)
+    expect((await login(e, 'amy')).status).toBe(401)
+    const added = await e.app.request(
+      '/api/accounts/batch',
+      json('POST', { usernames: ['amy', 'bob', 'eli'], access: 'member' }, admin),
+    )
+    expect(added.status).toBe(201)
+    const body = await added.json()
+    expect(body.added.map((a: { username: string }) => a.username)).toEqual(['amy', 'bob'])
+    expect(body.existing).toEqual(['eli'])
+    const amy = await login(e, 'amy')
+    expect(amy.status).toBe(200)
+    expect((await amy.json()).me).toMatchObject({ displayName: 'Amy', access: 'member' })
+    // One at a time with a password is for accounts tasuki keeps.
+    const made = await e.app.request(
+      '/api/accounts',
+      json('POST', { username: 'cat', password: 'long enough' }, admin),
+    )
+    expect(made.status).toBe(400)
+  })
+
+  it('take the company’s current name at every sign in; a deleted or disabled one stays out', async () => {
+    const e = engine(undefined, undefined, { port: outside })
+    const admin = cookieOf(await setUp(e, 'eli'))
+    const { added } = await (
+      await e.app.request('/api/accounts/batch', json('POST', { usernames: ['amy'] }, admin))
+    ).json()
+    const amyId = added[0].userId
+    const amy = cookieOf(await login(e, 'amy'))
+    names['amy'] = 'Amy Lin'
+    expect((await (await login(e, 'amy')).json()).me.displayName).toBe('Amy Lin')
+    await e.app.request(`/api/accounts/${amyId}`, json('PATCH', { disabled: true }, admin))
+    expect((await login(e, 'amy')).status).toBe(401)
+    const gone = await e.app.request(`/api/accounts/${amyId}`, {
+      method: 'DELETE',
+      headers: { Cookie: admin },
+    })
+    expect(gone.status).toBe(200)
+    expect((await login(e, 'amy')).status).toBe(401)
+    expect((await e.app.request('/api/board', { headers: { Cookie: amy } })).status).toBe(401)
+    const self = await e.app.request('/api/accounts', { headers: { Cookie: admin } })
+    const me = (await self.json())[0]
+    expect(
+      (
+        await e.app.request(`/api/accounts/${me.userId}`, {
+          method: 'DELETE',
+          headers: { Cookie: admin },
+        })
+      ).status,
+    ).toBe(400)
+  })
+})
+
+describe('behind a proxy at publicUrl', () => {
+  it('takes its Host and Origin, still refuses other sites, and sets the cookie Secure', async () => {
+    const e = engine(undefined, undefined, { publicUrl: 'https://tasuki.example' })
+    expect((await e.app.request('https://tasuki.example/api/health')).status).toBe(200)
+    expect((await e.app.request('https://evil.example/api/health')).status).toBe(403)
+    const res = await e.app.request('https://tasuki.example/api/auth/setup', {
+      ...json('POST', { token: e.setupToken, username: 'eli', password: 'admin pass' }),
+      headers: { 'Content-Type': 'application/json', Origin: 'https://tasuki.example' },
+    })
+    expect(res.status).toBe(200)
+    expect(res.headers.get('Set-Cookie')).toContain('Secure')
+    const cookie = cookieOf(res)
+    const write = (origin: string) =>
+      e.app.request('https://tasuki.example/api/items', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Cookie: cookie, Origin: origin },
+        body: JSON.stringify({ title: 'x' }),
+      })
+    expect((await write('https://tasuki.example')).status).toBe(201)
+    expect((await write('https://evil.example')).status).toBe(403)
+    // Same host, other scheme: not the origin people open.
+    expect((await write('http://tasuki.example')).status).toBe(403)
+  })
+
+  it('keeps the cookie plain on loopback, and lets agents in at the bound address only for /agent-mcp', async () => {
+    const e = engine(undefined, undefined, { agentHost: '10.0.0.5' })
+    const res = await e.app.request(
+      '/api/auth/setup',
+      json('POST', { token: e.setupToken, username: 'eli', password: 'admin pass' }),
+    )
+    expect(res.headers.get('Set-Cookie')).not.toContain('Secure')
+    expect((await e.app.request('http://10.0.0.5/api/health')).status).toBe(403)
+    expect((await e.app.request('http://10.0.0.5/agent-mcp', { method: 'POST' })).status).not.toBe(
+      403,
+    )
   })
 })

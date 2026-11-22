@@ -8,15 +8,16 @@ const emit = defineEmits<{ signedIn: [me: Account] }>()
 const username = ref('')
 const password = ref('')
 const again = ref('')
-const token = ref('')
+// The start-up log prints a link carrying the token; it leaves the address bar at once.
+const token = ref(new URLSearchParams(location.search).get('setup') ?? '')
+if (token.value !== '') history.replaceState(null, '', location.pathname)
 const error = ref('')
 const busy = ref(false)
-// Signed in through the outside system while there is no admin yet: the setup token raises them.
-const signedInAs = ref<Account>()
 
-// With the accounts in tasuki, the first admin is a new account made with the setup token;
-// with them elsewhere, the person signs in first and then uses it.
-const creatingFirst = computed(() => props.state.needsSetup && props.state.mode === 'builtin')
+// The first admin, with the setup token: a new account when tasuki keeps them, or the person
+// whose company password the outside system accepts (D90).
+const creatingFirst = computed(() => props.state.needsSetup)
+const newPassword = computed(() => creatingFirst.value && props.state.mode === 'builtin')
 
 async function submit(): Promise<void> {
   busy.value = true
@@ -37,23 +38,6 @@ async function submit(): Promise<void> {
     const { me } = await call<{ me: Account }>(
       '/api/auth/login',
       sendJson('POST', { username: username.value, password: password.value }),
-    )
-    if (props.state.needsSetup) signedInAs.value = me
-    else emit('signedIn', me)
-  } catch (e) {
-    error.value = messageOf(e)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function raise(): Promise<void> {
-  busy.value = true
-  error.value = ''
-  try {
-    const { me } = await call<{ me: Account }>(
-      '/api/auth/setup',
-      sendJson('POST', { token: token.value }),
     )
     emit('signedIn', me)
   } catch (e) {
@@ -79,21 +63,12 @@ async function raise(): Promise<void> {
           There is no admin yet. The setup token is in the engine's start-up log and in the
           <code>setup-token</code> file in its data folder.
         </p>
+        <p v-if="state.mode === 'external'" class="mt-2 text-sm text-muted">
+          Sign in with your company account.
+        </p>
       </template>
 
-      <form v-if="signedInAs" class="flex flex-col gap-4" @submit.prevent="raise">
-        <p class="text-sm">
-          Signed in as {{ signedInAs.displayName }}. Enter the setup token to become the first
-          admin.
-        </p>
-        <UFormField label="Setup token" required>
-          <UInput v-model="token" required autofocus class="w-full" />
-        </UFormField>
-        <UAlert v-if="error" color="error" variant="subtle" :title="error" />
-        <UButton type="submit" label="Become admin" :loading="busy" block />
-      </form>
-
-      <form v-else class="flex flex-col gap-4" @submit.prevent="submit">
+      <form class="flex flex-col gap-4" @submit.prevent="submit">
         <UFormField v-if="creatingFirst" label="Setup token" required>
           <UInput v-model="token" required autofocus class="w-full" />
         </UFormField>
@@ -106,17 +81,17 @@ async function raise(): Promise<void> {
             class="w-full"
           />
         </UFormField>
-        <UFormField label="Password" required :hint="creatingFirst ? 'At least 8 characters' : ''">
+        <UFormField label="Password" required :hint="newPassword ? 'At least 8 characters' : ''">
           <UInput
             v-model="password"
             type="password"
             required
-            :autocomplete="creatingFirst ? 'new-password' : 'current-password'"
+            :autocomplete="newPassword ? 'new-password' : 'current-password'"
             class="w-full"
           />
         </UFormField>
         <UFormField
-          v-if="creatingFirst"
+          v-if="newPassword"
           label="Confirm password"
           required
           :error="again !== '' && again !== password ? 'Passwords do not match' : false"
@@ -132,9 +107,15 @@ async function raise(): Promise<void> {
         <UAlert v-if="error" color="error" variant="subtle" :title="error" />
         <UButton
           type="submit"
-          :label="creatingFirst ? 'Create the first admin' : 'Sign in'"
+          :label="
+            !creatingFirst
+              ? 'Sign in'
+              : newPassword
+                ? 'Create the first admin'
+                : 'Become the first admin'
+          "
           :loading="busy"
-          :disabled="creatingFirst && again !== password"
+          :disabled="newPassword && again !== password"
           block
         />
       </form>

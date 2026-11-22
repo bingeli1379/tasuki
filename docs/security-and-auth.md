@@ -13,11 +13,13 @@
 ## Server 綁定
 
 - `server.host` 預設 `127.0.0.1`。
-- 啟動檢查：`host` 不是 loopback、沒設 `auth`、而且沒設 `server.allowInsecure: true`，就拒絕啟動並說明原因。
+- 啟動檢查：`host` 不是 loopback、沒設 `auth`、而且沒設 `server.allowInsecure: true`，就拒絕啟動並說明原因。loopback 指 `localhost`、`::1` 與 `127.x.x.x`。
 - 這只是一個啟動檢查，成本很低，理由是上面的威脅模型。作者問過是否太嚴。若要放寬，退一步是改成啟動時大聲警告，仍建議保留拒絕啟動。
 - Docker：容器內本來就要綁 `0.0.0.0`，所以 compose 範例要明寫 `allowInsecure` 或設 auth，並且 host 端的 port 只開在 `127.0.0.1`。
 - engine 自己不做 TLS。綁在非 loopback 的部署一律放在負責 HTTPS 的 reverse proxy 或 ingress 後面，engine 只聽 proxy 轉進來的 HTTP。理由：公司環境本來就有一層 proxy，憑證在那裡管理與更新；engine 自己做 TLS 只會多一份要輪替的憑證（D60）。
 - `server.publicUrl`：使用者從瀏覽器打開的網址，例如 `https://tasuki.example.com`。`host` 不是 loopback 時必填，而且必須是 `https`，否則拒絕啟動。`Host` header 與 `Origin` 的檢查都拿它來比對。
+- `allowInsecure: true` 同時豁免上面兩條：沒有 auth 也能綁非 loopback，`publicUrl` 也可以不填或不是 https。這是給上面 Docker 那種「container 綁 `0.0.0.0`、host 端只開在 `127.0.0.1`、從 `http://localhost` 打開」用的，那時候根本沒有 https 可填（D90）。
+- engine 派出的 agent 在同一台機器上連 `/agent-mcp`。綁 `0.0.0.0`、`::` 或 loopback 時走 `127.0.0.1`；綁某一個非 loopback 的位址時走那個位址，`Host` 檢查只對 `/agent-mcp` 多認它，看板與 REST 照樣不認（D90）。
 
 ## 身分與權限
 
@@ -39,7 +41,7 @@ auth 是 plugin 的一個角色，config 寫法跟其他角色一樣（`plugin` 
 |---|---|---|
 | 省略 | 沒有帳號 | 不登入，本機用。每個請求都當成 `admin`，看板不顯示管理帳號的頁面。 |
 | `@tasuki/auth-builtin` | tasuki 的 store | tasuki 自己管帳號：`admin` 在看板上建帳號、重設密碼。不提供預設帳號或預設密碼。帳號沒有另外的顯示名，大家看到的就是帳號名。 |
-| `@tasuki/auth-http` | 外部系統 | 登入頁收到的帳密轉給使用者提供的 API。契約草稿：`POST <url>` 帶 `{ username, password }`，成功回 `200 { userId, displayName }`，失敗回 4xx。 |
+| `@tasuki/auth-http` | 外部系統 | 登入頁收到的帳密轉給使用者提供的 API：`POST <url>` 帶 JSON `{ username, password }`，成功回 `200 { userId, displayName }`，帳密不對回 4xx。`displayName` 沒給就用 username。5xx、逾時、連不上算驗證服務壞了，登入回 500，不當成密碼錯。options 可以加 `headers`（例如公司 API 要的 key，用 `${VAR}` 放 `.env`）與 `timeoutSeconds`（預設 10），一般不用設（D90）。外部改了名字，下次登入就更新。 |
 
 `auth-http` 不是 SSO：使用者每次都在 tasuki 的登入頁打帳密，密碼會經過 tasuki，所以非 loopback 時一定要在 HTTPS proxy 後面，engine 也不把它寫進 log。公司只開 OIDC 或 SAML 時，另做一個 `auth-oidc` 之類的 plugin，權限那一半不用動。
 
@@ -47,23 +49,26 @@ auth 是 plugin 的一個角色，config 寫法跟其他角色一樣（`plugin` 
 
 | access | 能做的事 |
 |---|---|
-| `admin` | 下面全部，加上管帳號：建帳號、重設密碼（builtin）、改別人的 access、停用帳號。 |
+| `admin` | 下面全部，加上管帳號：建帳號或加人、重設密碼（builtin）、改別人的 access、停用與刪除帳號。 |
 | `maintainer` | 下面全部，加上改流程設定（stage、規則、prompt）。 |
 | `member` | 用看板與 `/mcp` 做所有操作：建 item、移動、留言、Stop、hold、刪 item。 |
 
 - 流程設定目前還在 config 檔裡，網頁上沒有設定頁，所以 W4 之前 `maintainer` 與 `member` 實際上一樣。設定頁只給 `admin` 與 `maintainer` 這條跟 W4 一起做。
-- 外部帳號第一次登入成功時，store 建一筆帳號，access 是 `member`。之後由 `admin` 升級。
-- 停用的帳號不能登入，它的 session 與個人 API token 立刻失效。外部帳號只能停用不能刪，刪了下次登入又會建回來。
-- 最後一個 `admin` 不能被降級或停用，不然就沒有人能管帳號了。
+- 外部帳號要 `admin` 先加進來才能登入，外部系統說帳密對也一樣（D90）。加人只填 username 與 access，可以一次貼一整串，一行一個；已經在的跳過並列出來。名單上沒有的人登入時跟密碼錯看起來一樣，不透露名單上有誰。
+- 外部帳號第一次登入時，把外部系統回的 `userId` 綁到這筆帳號（`external_id`），之後都用它對。公司把同一個 username 給了別人，新的人對不上，進不來。加了還沒登入過的帳號在帳號頁標「Not signed in yet」，顯示名在第一次登入時換成外部系統給的。
+- 停用的帳號不能登入，它的 session 與個人 API token 立刻失效。
+- 刪除帳號連同它的 session 與個人 API token 一起刪。外部帳號刪掉就是從名單拿掉，要再加一次才進得來。它寫過的 comment 與紀錄照樣顯示當時的名字，因為名字是寫入當下複製過去的。自己不能刪自己。
+- 最後一個啟用中的 `admin` 不能被降級、停用或刪除，不然就沒有人能管帳號了。還有別的 `admin` 時可以。
 - 身分用來記錄操作者：人寫的 comment 與按鈕留的 `system` 紀錄帶登入者的顯示名（`authorName`）。Jira 上 tasuki 寫的 comment 都顯示 engine 的帳號，所以名字放在 comment property `tasuki` 的 `name`，看板讀它；Jira 網頁照樣顯示 engine 的帳號。
-- 管帳號（建帳號、重設密碼、改 access、停用）與個人 API token 只在看板上做，不進使用者 MCP，是 D57 的例外：重設密碼走 MCP，密碼就會留在 AI 的對話紀錄裡。
+- 管帳號（建帳號、加人、重設密碼、改 access、停用、刪除）與個人 API token 只在看板上做，不進使用者 MCP，是 D57 的例外：重設密碼走 MCP，密碼就會留在 AI 的對話紀錄裡；加人與改 access 走 MCP，讀到夾帶指令的 item 的 AI 就能替攻擊者開帳號（D90）。大量加人用帳號頁的貼上。
 
 ### 第一個 admin
 
 builtin 與 http 用同一招：
 
 1. engine 啟動時發現 store 裡沒有任何啟用中的 `admin`，就產生一次性的 setup token，印在啟動 log，也寫進 `<dataDir>/setup-token`（權限 600）。跟 Jenkins 的 initialAdminPassword 一樣，container 的主人看 log 或讀檔都拿得到。
-2. builtin：在登入頁貼 setup token，建第一個帳號，它就是 `admin`。http：先用外部帳號登入，再貼 setup token 把自己升成 `admin`。
+2. 登入頁同時填 setup token、username、密碼。builtin 用它們建第一個帳號；http 把帳密交給外部系統驗，通過就建成 `admin`（D90）。名單一開始是空的，所以 http 沒辦法先登入再升級。
+   有設 `publicUrl` 時，log 另外印一條 `<publicUrl>/?setup=<token>`，點開後登入頁自動帶入 token，網址列隨即拿掉它（D90）。沒有 `publicUrl` 時不印，因為看板在 S12 之前跟 engine 分開跑，engine 不知道看板在哪。
 3. 有 `admin` 之後 token 立刻作廢，檔案也刪掉。engine 重啟時如果還是沒有 `admin`，就再產生一個新的；已經有 `admin` 時啟動會把殘留的檔案刪掉。
 
 不讓「第一個打開網頁的人自動變 admin」，因為綁在非 loopback 時誰先搶到就是誰的。不做 CLI 指令，因為 container 裡看 log 比 exec 進去容易。

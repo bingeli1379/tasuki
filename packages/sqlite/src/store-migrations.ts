@@ -131,4 +131,7 @@ export const STORE_MIGRATIONS: readonly string[] = [
     created_at TEXT NOT NULL
   );
   CREATE INDEX api_token_by_user ON api_token(user_id);`,
+  // S9c (D90): who the outside system says an account is, bound at its first sign in.
+  `ALTER TABLE account ADD COLUMN external_id TEXT;
+  CREATE UNIQUE INDEX account_by_external_id ON account(external_id);`,
 ]

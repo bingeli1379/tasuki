@@ -10,7 +10,7 @@ import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { parseArgs } from 'node:util'
 import { createApp, type AppAuth } from './app'
-import { loadConfig } from './config'
+import { isLoopback, loadConfig } from './config'
 import { createEngine } from './engine'
 import { loadAuth, loadRunner, loadStore, loadTracker } from './plugin-loader'
 import { createRunTokens } from './run-tokens'
@@ -56,7 +56,16 @@ try {
     }
   }
 
-  // Loopback only until auth lands (S9, security-and-auth.md).
+  // Agents run on this machine: an engine bound to every address is reached on loopback, one
+  // bound to a single address only there.
+  const wildcard = config.host === '0.0.0.0' || config.host === '::'
+  const agentHost =
+    wildcard || isLoopback(config.host)
+      ? '127.0.0.1'
+      : config.host.includes(':')
+        ? `[${config.host}]`
+        : config.host
+  const listening = `http://${config.host.includes(':') ? `[${config.host}]` : config.host}:${config.port}`
   serve({
     fetch: createApp({
       tracker,
@@ -67,9 +76,11 @@ try {
       holdLabel: config.holdLabel,
       tokens,
       ...(auth === undefined ? {} : { auth }),
+      ...(config.publicUrl === undefined ? {} : { publicUrl: config.publicUrl }),
+      ...(agentHost === '127.0.0.1' ? {} : { agentHost }),
     }).fetch,
     port: config.port,
-    hostname: '127.0.0.1',
+    hostname: config.host,
   })
   const engine = createEngine({
     tracker,
@@ -83,7 +94,7 @@ try {
     logDir: join(config.dataDir, 'logs'),
     runners,
     tokens,
-    mcpUrl: `http://127.0.0.1:${config.port}/agent-mcp`,
+    mcpUrl: `http://${agentHost}:${config.port}/agent-mcp`,
   })
   // The first round runs at start, so Runs a crash left behind are recovered right away.
   await engine.tick()
@@ -94,12 +105,17 @@ try {
   console.log(`tracker: ${config.tracker.plugin}`)
   console.log(`store: ${config.store.plugin}`)
   console.log(`auth: ${config.auth?.plugin ?? 'none, nobody signs in'}`)
-  if (setupToken !== undefined)
+  if (setupToken !== undefined) {
     console.log(
       `no admin yet: sign in with setup token ${setupToken} (also in ${join(config.dataDir, 'setup-token')})`,
     )
+    // The board is served apart from the engine until S12, so only publicUrl says where it is.
+    if (config.publicUrl !== undefined)
+      console.log(`or open ${config.publicUrl}/?setup=${encodeURIComponent(setupToken)}`)
+  }
   console.log(`rules: ${config.rules.map((r) => r.id).join(', ') || 'none'}`)
-  console.log(`tasuki listening on http://127.0.0.1:${config.port}`)
+  console.log(`tasuki listening on ${listening}`)
+  if (config.publicUrl !== undefined) console.log(`public url: ${config.publicUrl}`)
 } catch (e) {
   console.error(e instanceof Error ? e.message : e)
   process.exit(1)

@@ -113,7 +113,7 @@ async function act(work: () => Promise<void>, conflict: string): Promise<void> {
       emit('changed')
       return
     }
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     busy.value = false
   }
@@ -182,7 +182,7 @@ async function addComment(): Promise<void> {
     commentDraft.value = ''
     error.value = ''
   } catch (e) {
-    error.value = messageOf(e)
+    toast.add({ title: messageOf(e), color: 'error' })
   } finally {
     busy.value = false
   }

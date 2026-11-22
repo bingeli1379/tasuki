@@ -96,12 +96,16 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
     "host": "127.0.0.1",
     "port": 8787,
     "allowInsecure": false,
-    "publicUrl": "https://tasuki.example.com"   // required when host is not loopback
+    "publicUrl": "https://tasuki.example.com"   // required when host is not loopback, unless allowInsecure
   },
 
   "auth": {                                    // omit for no login
     "plugin": "@tasuki/auth-http",             // or "@tasuki/auth-builtin"
-    "options": { "url": "https://sso.example.com/verify" },
+    "options": {
+      "url": "https://sso.example.com/verify",
+      "headers": { "X-Api-Key": "${COMPANY_AUTH_KEY}" },  // optional
+      "timeoutSeconds": 10                                 // optional
+    },
     "session": { "ttl": "7d" }                 // duration or "never"
   }
 }
@@ -137,7 +141,7 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 實際讀的欄位（S8）：`dataDir`、`server.port`、`tracker`、`store`、`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`labels.hold`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`promptFile`、`session`。`session` 省略時是 `fresh`。`promptFile` 相對於 config 所在的資料夾。`@tasuki/claude-cli` 的 options 讀 `auth`（目前只收 `inherit-login`）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires` 等 S10 的 `doctor`。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`server.host`、`allowInsecure`、`publicUrl` 還不讀，一律綁 `127.0.0.1`，等 S9c（security-and-auth.md）。省略 `workflow` 時是 state-machine.md 的預設流程，key 是顯示名，只適合 sqlite；`splitting` 只在有規則 claim 它時才列進去。寫了 `workflow` 就照它，舊的頂層 `statuses` 不讀（D81 不顧兼容，D85）。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀檔就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+目前 server 實際讀的欄位（S8）：`dataDir`、`server.port`、`tracker`、`store`、`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`labels.hold`、`agents`、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`promptFile`、`session`。`session` 省略時是 `fresh`。`promptFile` 相對於 config 所在的資料夾。`@tasuki/claude-cli` 的 options 讀 `auth`（目前只收 `inherit-login`）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires` 等 S10 的 `doctor`。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`rules` 省略時是沒有規則，engine 不碰任何 item；下面的預設規則是 `init` 要寫進 config 的內容，不是省略時的值。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。省略 `workflow` 時是 state-machine.md 的預設流程，key 是顯示名，只適合 sqlite；`splitting` 只在有規則 claim 它時才列進去。寫了 `workflow` 就照它，舊的頂層 `statuses` 不讀（D81 不顧兼容，D85）。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀檔就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
 ## Rule 欄位
 
@@ -254,7 +258,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 4. `outcomes` 的每個目標都存在，結果名是小寫加底線、不是 `cancelled` 或 `abandoned`。mode 自己的結果都有寫，而且至少有一個不是 `needs_input`、`failed`、`max_attempts` 的結果。這三個省略時是 `failure` 角色那站。
 5. 規則引用的 agent 存在。
 6. `${VAR}` 都能展開。`labels.hold` 是一個不含空白的字（Jira 的 label 不能有空白）。
-7. `server.host` 非 loopback 又沒設 `auth` 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`（見 security-and-auth.md）。
+7. `server.host` 非 loopback 又沒設 `auth` 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`。`allowInsecure` 兩條都豁免（D90，見 security-and-auth.md）。
 8. Jira：mapping 的每個 status 都存在於 project 的 workflow，規則用到的每一個轉移（from 到 to）在 workflow 裡目前都允許。逐條列出不合法的轉移。
 9. agent preflight：CLI 在 PATH 上。`requires` 列出的 MCP server 與 skill 有裝。偵測方式依 CLI 而定，待驗證。
 10. agent 的 `auth` 不是 `inherit-login` 時，`env` 裡有對應的變數而且展開後不是空字串。`allowedTools` 是空的就警告，因為這個 agent 只能呼叫 tasuki 的 MCP tool，沒辦法改檔。
