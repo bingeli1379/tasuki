@@ -99,9 +99,10 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
     "publicUrl": "https://tasuki.example.com"   // required when host is not loopback
   },
 
-  "auth": {
-    "kind": "none",                            // "none" | "static" | "http"
-    "session": { "ttl": "24h" }                // duration or "never"
+  "auth": {                                    // omit for no login
+    "plugin": "@tasuki/auth-http",             // or "@tasuki/auth-builtin"
+    "options": { "url": "https://sso.example.com/verify" },
+    "session": { "ttl": "7d" }                 // duration or "never"
   }
 }
 ```
@@ -253,7 +254,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{run.id}}`、`{{workspace}}`�
 4. `outcomes` 的每個目標都存在，結果名是小寫加底線、不是 `cancelled` 或 `abandoned`。mode 自己的結果都有寫，而且至少有一個不是 `needs_input`、`failed`、`max_attempts` 的結果。這三個省略時是 `failure` 角色那站。
 5. 規則引用的 agent 存在。
 6. `${VAR}` 都能展開。`labels.hold` 是一個不含空白的字（Jira 的 label 不能有空白）。
-7. `server.host` 非 loopback 又沒有 auth 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`；`static` 的密碼不是 hash 就拒絕啟動（見 security-and-auth.md）。
+7. `server.host` 非 loopback 又沒設 `auth` 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`（見 security-and-auth.md）。
 8. Jira：mapping 的每個 status 都存在於 project 的 workflow，規則用到的每一個轉移（from 到 to）在 workflow 裡目前都允許。逐條列出不合法的轉移。
 9. agent preflight：CLI 在 PATH 上。`requires` 列出的 MCP server 與 skill 有裝。偵測方式依 CLI 而定，待驗證。
 10. agent 的 `auth` 不是 `inherit-login` 時，`env` 裡有對應的變數而且展開後不是空字串。`allowedTools` 是空的就警告，因為這個 agent 只能呼叫 tasuki 的 MCP tool，沒辦法改檔。

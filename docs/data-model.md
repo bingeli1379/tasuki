@@ -206,6 +206,34 @@ CREATE UNIQUE INDEX one_live_run ON run(target) WHERE state = 'running';
 CREATE INDEX run_by_target ON run(target, started_at DESC);
 
 CREATE TABLE engine_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);   -- e.g. 'paused'
+
+-- S9 (D89): who may do what. Identity comes from the auth plugin, access lives here.
+CREATE TABLE account (
+  user_id       TEXT PRIMARY KEY,               -- from the auth plugin
+  username      TEXT NOT NULL UNIQUE,
+  display_name  TEXT NOT NULL,
+  access        TEXT NOT NULL CHECK (access IN ('admin','maintainer','member')),
+  password_hash TEXT,                           -- builtin only; scrypt
+  disabled_at   TEXT,
+  created_at    TEXT NOT NULL
+);
+
+CREATE TABLE session (
+  token_hash TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES account(user_id),
+  ttl        TEXT NOT NULL,                     -- the ttl it was issued under; a changed ttl ends it
+  expires_at TEXT,                              -- unset when ttl is 'never'
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE api_token (
+  id         TEXT PRIMARY KEY,
+  user_id    TEXT NOT NULL REFERENCES account(user_id),
+  name       TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT,
+  created_at TEXT NOT NULL
+);
 ```
 
 ## attempt

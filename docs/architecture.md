@@ -35,7 +35,7 @@ flowchart LR
     ST["TrackerPort: sqlite or jira-cloud"]
     RT["StorePort: sqlite"]
     RUN["RunnerPort: claude-cli, codex-cli"]
-    AUTH["AuthPort: none, static, http"]
+    AUTH["AuthPort: auth-builtin, auth-http"]
     CLK["Clock"]
   end
 
@@ -227,14 +227,15 @@ packages/
   claude-cli/   runner plugin
   codex-cli/    runner plugin
   fake-runner/  runner plugin that stands in for an agent, for trying the engine without an LLM
-  auth/         none, static, http
+  auth-builtin/ auth plugin: accounts kept in the store
+  auth-http/    auth plugin: asks an external API
   server/       composition root, REST, MCP facade (/agent-mcp), user MCP (/mcp), engine
                 (Poller and Run supervision), plugin loader, config loading
   web/          Vue 3 + Vite SPA
   cli/          init, doctor, start
 ```
 
-一個技術一個套件，載入方式與契約見 plugins.md（D44）。store 預設是 `sqlite`，所以 Jira 模式下也要裝 `sqlite`，除非換成別的 store plugin（D88）。`auth` 內建實作怎麼分套件還沒定，見 plugins.md。
+一個技術一個套件，載入方式與契約見 plugins.md（D44）。store 預設是 `sqlite`，所以 Jira 模式下也要裝 `sqlite`，除非換成別的 store plugin（D88）。auth 的內建實作分成 `auth-builtin` 與 `auth-http`，不登入是省略 `auth`（D89）。
 
 測試用的東西照「誰在用它」分兩種，不合成一包：
 
