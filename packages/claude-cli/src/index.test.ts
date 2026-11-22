@@ -252,7 +252,19 @@ describe('claude-cli runner', () => {
         },
         options,
       )
-    expect(make({ auth: 'api-key' })).toThrow('options.auth "api-key" is not supported yet')
+    expect(make({ auth: 'password' })).toThrow('options.auth must be inherit-login, api-key or')
+    expect(make({ auth: 'api-key' })).toThrow('needs options.env.ANTHROPIC_API_KEY')
+    expect(make({ auth: 'oauth-token', env: { CLAUDE_CODE_OAUTH_TOKEN: '' } })).toThrow(
+      'needs options.env.CLAUDE_CODE_OAUTH_TOKEN',
+    )
+    expect(
+      make({
+        auth: 'oauth-token',
+        env: { CLAUDE_CODE_OAUTH_TOKEN: 't', ANTHROPIC_API_KEY: 'k' },
+      }),
+    ).toThrow('drop options.env.ANTHROPIC_API_KEY')
+    expect(make({ auth: 'api-key', env: { ANTHROPIC_API_KEY: 'k' } })).not.toThrow()
+    expect(make({ auth: 'oauth-token', env: { CLAUDE_CODE_OAUTH_TOKEN: 't' } })).not.toThrow()
     expect(make({ allowedTools: 'Read' })).toThrow('options.allowedTools must be a list')
     expect(make({ env: { A: 1 } })).toThrow('options.env must map names to strings')
     expect(make({ plugins: ['/nowhere/sdd'] })).toThrow('/nowhere/sdd does not exist')

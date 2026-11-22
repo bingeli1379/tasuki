@@ -47,11 +47,30 @@ const NO_SESSION = 'No conversation found with session ID'
 // How long doctor waits for the CLI's init line, which comes once MCP servers have connected.
 const INIT_TIMEOUT_MS = 60_000
 
+// The variable each way of signing in is read from (code.claude.com/docs/en/authentication).
+// Under -p an API key wins over the token, so a token config must carry no key.
+const AUTH_ENV: Record<string, string> = {
+  'api-key': 'ANTHROPIC_API_KEY',
+  'oauth-token': 'CLAUDE_CODE_OAUTH_TOKEN',
+}
+
+function checkAuth(auth: unknown, env: Record<string, string>): void {
+  if (auth === 'inherit-login') return
+  const variable = typeof auth === 'string' ? AUTH_ENV[auth] : undefined
+  if (variable === undefined)
+    throw new Error('options.auth must be inherit-login, api-key or oauth-token')
+  if ((env[variable] ?? '') === '')
+    throw new Error(`options.auth ${auth} needs options.env.${variable}`)
+  if (auth === 'oauth-token')
+    for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])
+      if (env[key] !== undefined)
+        throw new Error(
+          `options.auth oauth-token: drop options.env.${key}, which claude uses over the token`,
+        )
+}
+
 function parseOptions(raw: unknown, configDir: string): ClaudeOptions {
   const o = (raw ?? {}) as Record<string, unknown>
-  const auth = o['auth'] ?? 'inherit-login'
-  if (auth !== 'inherit-login')
-    throw new Error(`options.auth ${JSON.stringify(auth)} is not supported yet; use inherit-login`)
   const strings = (key: string): string[] => {
     const v = o[key] ?? []
     if (!Array.isArray(v) || v.some((s) => typeof s !== 'string'))
@@ -65,6 +84,7 @@ function parseOptions(raw: unknown, configDir: string): ClaudeOptions {
     Object.values(env).some((v) => typeof v !== 'string')
   )
     throw new Error('options.env must map names to strings')
+  checkAuth(o['auth'] ?? 'inherit-login', env as Record<string, string>)
   const plugins = strings('plugins').map((p) => {
     const dir = resolve(configDir, p)
     if (!existsSync(dir)) throw new Error(`options.plugins: ${dir} does not exist`)
