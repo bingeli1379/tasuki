@@ -1,0 +1,11 @@
+.git
+**/node_modules
+**/dist
+packages/cli/web
+data
+.env
+tasuki.config.jsonc
+docker
+**/test-results
+**/playwright-report
+.playwright-mcp

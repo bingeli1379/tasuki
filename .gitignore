@@ -11,3 +11,4 @@ packages/web/components.d.ts
 packages/web/auto-imports.d.ts
 .playwright-mcp/
 packages/cli/web/
+docker/.env

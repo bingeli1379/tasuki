@@ -1,48 +1,23 @@
-// Packs the CLI and every package it ships with, installs them from the tarballs into a folder
-// outside the workspace, then drives the installed `tasuki` against an instance folder that has
+// Installs the CLI from its tarballs (pack-cli.ts) into a folder outside the workspace, then
+// drives the installed `tasuki` against an instance folder that has
 // nothing but a config: doctor, start, the board at /, pause and resume.
 import { execFileSync, spawn } from 'node:child_process'
-import { mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-const PACKAGES = [
-  'core',
-  'server',
-  'sqlite',
-  'jira-cloud',
-  'claude-cli',
-  'fake-runner',
-  'auth-builtin',
-  'auth-http',
-  'cli',
-]
 const PORT = 8797
 
 const root = resolve(import.meta.dirname, '..')
 const work = mkdtempSync(join(tmpdir(), 'tasuki-cli-install-'))
-const tarballs = join(work, 'tarballs')
 const app = join(work, 'app')
 const instance = join(work, 'my-instance')
-for (const dir of [tarballs, app, instance]) mkdirSync(dir)
+mkdirSync(instance)
 
 const run = (cmd: string, args: string[], cwd: string): string =>
   execFileSync(cmd, args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] })
 
-for (const pkg of PACKAGES)
-  run('pnpm', ['pack', '--pack-destination', tarballs], join(root, 'packages', pkg))
-const tarball = (name: string): string => {
-  const file = readdirSync(tarballs).find((f) => f.startsWith(`tasuki-${name}-0`))
-  if (file === undefined) throw new Error(`no tarball for @tasuki/${name}`)
-  return `file:${join(tarballs, file)}`
-}
-// Each package asks for the others by version, which is not on the registry until S14.
-const overrides = Object.fromEntries(PACKAGES.map((p) => [`@tasuki/${p}`, tarball(p)]))
-writeFileSync(
-  join(app, 'package.json'),
-  JSON.stringify({ private: true, dependencies: { '@tasuki/cli': tarball('cli') }, overrides }),
-)
-run('npm', ['install', '--no-audit', '--no-fund'], app)
+run('node', [join(root, 'scripts', 'pack-cli.ts'), app], root)
 const tasuki = join(app, 'node_modules', '.bin', 'tasuki')
 
 writeFileSync(
