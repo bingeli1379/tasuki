@@ -20,7 +20,11 @@ const run = (cmd: string, args: string[], cwd: string): string =>
 run('node', [join(root, 'scripts', 'pack-cli.ts'), app], root)
 const tasuki = join(app, 'node_modules', '.bin', 'tasuki')
 
-writeFileSync(join(instance, 'tasuki.config.jsonc'), JSON.stringify({ server: { port: PORT } }))
+// Its own data folder: left out, it would be ~/.tasuki, the person's own instance (D105).
+writeFileSync(
+  join(instance, 'tasuki.config.jsonc'),
+  JSON.stringify({ dataDir: './data', server: { port: PORT } }),
+)
 console.log(run(tasuki, ['doctor'], instance))
 
 const engine = spawn(tasuki, ['start'], { cwd: instance, stdio: ['ignore', 'pipe', 'inherit'] })
