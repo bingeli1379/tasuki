@@ -8,7 +8,8 @@
 | task | item 底下的子單，只有一層。Jira 的 Sub-task。status 用 task 那一組。 |
 | work unit | item 與 task 的共同型別，欄位 `kind` 區分。 |
 | ref | tracker 內的 opaque key，例如 `PROJ-123`。domain 不解析它的格式。 |
-| status | 邏輯名（kebab-case）。流程設定的 `workflow` 把它對到 tracker 的 key（每站的 `key`，task 的 `taskStatuses`）；沒寫 key 就是邏輯名本身，sqlite 這樣存（D91）。 |
+| status | 邏輯名（kebab-case）。流程設定的 `workflow` 把它對到 tracker 的 key（每站的 `key`，task 的 `taskStatuses`）；沒寫 key 就是邏輯名本身，sqlite 這樣存（D91）。幾站可以共用一個 key，item 在哪站記在 store（D104）。 |
+| 共用 key 的一組 / 第一站 | 對到同一個 tracker status 的幾站，例如 `refining` 與 `split-done` 都是 Jira 的 To Do。`workflow.statuses` 裡排最前面的是第一站，沒有紀錄的 item 都在第一站（D104）。 |
 | workflow | 流程設定的 `workflow`：item 的 status 清單（順序就是看板的欄）、角色、task status 的對照（D81）。 |
 | 流程設定 / 啟動設定 | 流程設定是 status、角色、task status 對照、規則與 prompt、hold label，存在 store、在設定頁上改、下一輪 poll 生效；從沒存過時用預設流程。啟動設定是 config 檔裡其餘的部分（tracker、store、auth、server、agent、poll、limits），由部署的人改，改了要重啟（D91）。 |
 | role | 程式需要點名某一站時認的用途，由 `workflow.roles` 指定：`entry`（新 item 從這裡開始）、`failure`（規則失敗的預設去處）。看板打回時要先寫改什麼的那站不是角色，是 rework 規則盯的那站（D86）。 |

@@ -1043,3 +1043,28 @@
 - 沒驗的：真的 claude 與 codex 收到 image content 與 resource blob 會怎麼處理（plan.md 待驗證）。
 - 重新檢視：agent 讀大附件的 token 成本成為問題時（例如圖片先縮圖）；要讓 agent 寫附件時。
 
+
+## D104 幾站可以共用同一個 tracker status，item 在哪站記在 store
+
+- 背景：2026-11-23 作者提出。Jira 那邊只有 To Do、In Progress、Done 這種粗的 status，作者想在 tasuki 這邊自己分站，例如 `refining` 與 `split-done` 都對到 To Do、`in-progress` 與 `reviewing` 都對到 In Progress，Jira 不用跟著多開 status。原本每站的 `key` 不能重複，tracker 讀回來的 status 只能反推出一站。
+- 決定：
+  - item 的站可以共用 `key`。共用同一個 key 的幾站算一組，`workflow.statuses` 裡排最前面的那站是這組的第一站。task status 不變，還是一個對一個。
+  - 不另開模式或開關：沒有站共用 key 時行為跟原本一樣，有共用時才用到下面的紀錄。`tasuki init` 也不用多問，對照本來就在設定頁設（D99）。
+  - item 在一組裡的哪一站，記在 store（每張 item 一筆：ref 與站），不寫進 tracker。item 在第一站時不記，沒有紀錄就是第一站，所以人在 Jira 上建的、`dataDir` 清掉之後的 item 都落在第一站。作者接受 `dataDir` 掉了這些位置就沒了。
+  - core 包一層 TrackerPort 處理，tracker plugin 不用改，因為它們本來就是拿流程設定的對照把站翻成 tracker 的 status：
+    - 讀：tracker 回的是這組的第一站，store 有紀錄而且紀錄的站跟它同一組，就換成紀錄的站。`list` 照要的站去問 tracker，換完再濾掉不是要的站。
+    - 紀錄的站跟 tracker 現在的 status 不同組（人在 Jira 上把卡拖走了），或那站已經不在流程裡，就刪掉紀錄、用 tracker 的。讀的時候就刪，不然卡片之後被拖回原本的 status，舊的站會跑回來。不留 comment：卡是人自己拖的，而且這是讀的路徑，不該對 tracker 寫東西。
+    - 同一組裡移動（`refining` 到 `split-done`）只改 store，不打 tracker。compare-and-set 照舊：item 現在不在 `expectedFrom` 就丟 `StatusConflict`。store 的寫入本身也是 compare-and-set，兩個同時移的只有一個成功。
+    - 跨組移動先確認 item 真的在 `expectedFrom`，再叫 tracker 轉，成功後照目標站寫或刪紀錄。tracker 自己的 compare-and-set 只看得到組，分不出同一組的兩站。
+    - 建 item 時目標站不是第一站就寫紀錄，刪 item 時刪紀錄。
+    - `doctor` 第 8 條不問同一組裡的移動，那不是 tracker 的轉移。
+  - 同一組裡移動不改 `version`。version 是 tracker 的，用來擋同時編輯 title 與 body（`EditConflict`），status 的衝突本來就靠 `expectedFrom`。
+  - 存流程設定時多擋一種：一組的第一站換了（前面插了一站、重排、第一站被移出這組），原本第一站上有 item 時不准存，因為沒有紀錄的 item 會整批跑到新的第一站。跟「改了 key 或拿掉的站上不能有 item」同一條檢查。
+- 理由：
+  - 紀錄放 store 不放 Jira 的 issue property：讀看板不用跟 Jira 多要 property，同一組裡移動不打 Jira，store 有 transaction，compare-and-set 做得到；property 是後寫的蓋掉先寫的。一個 project 只接一個 engine（D66），不會有兩台機器的紀錄對不上。代價是紀錄跟著 `dataDir`，作者接受。
+  - 包在 core 不放進 tracker plugin：兩個內建的 tracker 與第三方的都直接能用，契約不變。
+- 代價：
+  - store 多一張表與三個方法，每個 store plugin 都要實作，testkit 的 store 契約多幾條。
+  - 跨組移動與同一組裡移動在 Jira 上各多一次 `get`，因為要先確認 item 在哪站。
+  - Jira 上看不到細的站，同一組的卡在 Jira 看板上是同一欄。這是作者要的。
+- 重新檢視：要讓不經過 tasuki 的人或工具看得到細的站時（改放 issue property）；要讓 task status 也共用 key 時；`dataDir` 掉了位置也不能掉時。

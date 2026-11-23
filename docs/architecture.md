@@ -68,6 +68,8 @@ TrackerPort 的每個方法各自生效，兩次呼叫之間沒有 transaction�
 
 `list` 可能比寫入晚幾秒才反映出來。Jira 的 `list` 走搜尋索引，實測建完 338ms 搜不到、1740ms 搜得到；`get` 與寫入本身是即時的。剛寫完的呼叫端要用寫入回傳的結果，不要馬上重新 `list`。Poller 下一輪自然會讀到，認領用的 compare-and-set 直接讀那張 issue，不受影響（D54）。
 
+幾站共用一個 tracker status 時（D104），core 在 tracker plugin 外面包一層：讀回來的第一站換成 store 記的站，同一組裡的移動只寫 store。engine、REST、使用者 MCP 拿到的都是包過的那個，tracker plugin 看不到這件事。
+
 ```ts
 interface TrackerPort {
   list(kind: Kind, statuses: readonly string[]): Promise<WorkUnit[]>  // one query for all of them
@@ -123,6 +125,9 @@ interface StorePort {
   latestFlow(): Promise<FlowVersion | undefined>          // undefined before the first save
   saveFlow(expected: number | undefined, flow: unknown, savedBy: string): Promise<FlowVersion>  // throws FlowConflict if not the latest
   flowHistory(): Promise<FlowVersion[]>                   // every save, newest first (W4b)
+  // Which station an item is in when several share its tracker status (D104); no entry is the first.
+  itemStatuses(refs: readonly Ref[]): Promise<Record<Ref, string>>
+  setItemStatus(ref: Ref, expected: string | undefined, status: string | undefined): Promise<boolean>  // compare-and-set; undefined clears
 }
 
 interface RunnerPort {

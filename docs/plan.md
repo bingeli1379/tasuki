@@ -65,6 +65,7 @@
 | S12c | container image（本機 build，在 OrbStack 跑），claude-cli 加 `api-key` 與 `oauth-token` 認證（已完成，D100） | `docker run` 起來後用 token 真的派一次 claude |
 | S12d | codex runner 與 testkit 的 runner 契約，做到契約測試會過（已完成，D101；作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2）：`dispatch` mode，跟 `execute` 並存（sqlite 已完成，D102；Jira 待驗證） | 規則換成 `dispatch`，沒有互相等待的 task 一起跑，task 詳情按 Stop 只停那一張 |
+| W5 | 幾站共用同一個 tracker status，item 在哪站記在 store（D104） | 設定頁把 `refining` 與 `split-done` 都設成 To Do，卡片在兩站之間移動時 Jira 不動、重新整理後還在原站；在 Jira 把卡拖走，看板跟著 Jira |
 | S14 | 對外發佈：license、套件名稱查撞名（D23）、版本號與依賴範圍（D62、D96）、`npm publish`（core、testkit、內建 plugin、CLI）、container image 推到 registry、給使用者看的 README（含訂閱帳號與 API key 的條款）（D97） | 在一台乾淨的機器上從 npm 與 registry 裝起來，照 README 跑得起來 |
 
 S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整。調整照 S7e 的方式插成切片，全部定了才進 S14（D97）。所有對外發佈的事只放在 S14，前面的切片做到本機裝得起來為止。
