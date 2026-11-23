@@ -239,13 +239,16 @@ CREATE TABLE api_token (
   created_at TEXT NOT NULL
 );
 
--- W4a (D91): every save of the flow settings. The store keeps the JSON as given; the engine
--- checks it. The newest version is the one in use; none yet means the built-in default.
-CREATE TABLE flow_version (
-  version  INTEGER PRIMARY KEY,                 -- 1, 2, ...; a save names the one it started from
-  flow     TEXT NOT NULL,                       -- JSON: workflow, rules, labels
+-- W4a (D91), W6a (D105): every save of a settings document, the flow or the instance's. The
+-- store keeps the JSON as given; the engine checks it. The newest version of each is the one
+-- in use; none yet means the built-in default.
+CREATE TABLE settings_version (
+  doc      TEXT NOT NULL,                       -- 'flow' | 'instance'
+  version  INTEGER NOT NULL,                    -- 1, 2, ... per doc; a save names the one it started from
+  value    TEXT NOT NULL,                       -- JSON: workflow, rules, labels | poll, limits
   saved_by TEXT NOT NULL,                       -- the saver's display name, copied; '' with no sign-in
-  saved_at TEXT NOT NULL
+  saved_at TEXT NOT NULL,
+  PRIMARY KEY (doc, version)
 );
 
 -- W5 (D104): which station an item is in when its tracker status is shared by several.

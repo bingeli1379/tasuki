@@ -1,17 +1,17 @@
 import {
-  FlowConflict,
   InvalidInput,
   NotFound,
   RunConflict,
+  SettingsConflict,
   type Access,
   type Account,
   type ApiToken,
   type CancelMode,
   type CancelReason,
   type Clock,
-  type FlowVersion,
   type Outcome,
   type Run,
+  type SettingsVersion,
   type StorePort,
   type Verdict,
 } from '@tasuki/core'
@@ -23,10 +23,10 @@ type Row = Record<string, unknown>
 const optional = <K extends string>(key: K, value: unknown): Partial<Record<K, string>> =>
   typeof value === 'string' ? ({ [key]: value } as Record<K, string>) : {}
 
-function toFlow(row: Row): FlowVersion {
+function toSettings(row: Row): SettingsVersion {
   return {
     version: Number(row['version']),
-    flow: JSON.parse(String(row['flow'])),
+    value: JSON.parse(String(row['value'])),
     savedBy: String(row['saved_by']),
     savedAt: String(row['saved_at']),
   }
@@ -209,31 +209,39 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
         .all(outcome)
         .map(toRun)
     },
-    async latestFlow() {
-      const row = db.prepare('SELECT * FROM flow_version ORDER BY version DESC LIMIT 1').get()
-      return row === undefined ? undefined : toFlow(row)
+    async latestSettings(doc) {
+      const row = db
+        .prepare('SELECT * FROM settings_version WHERE doc = ? ORDER BY version DESC LIMIT 1')
+        .get(doc)
+      return row === undefined ? undefined : toSettings(row)
     },
-    async saveFlow(expected, flow, savedBy) {
-      const row = db.prepare('SELECT MAX(version) AS v FROM flow_version').get()
+    async saveSettings(doc, expected, value, savedBy) {
+      const row = db
+        .prepare('SELECT MAX(version) AS v FROM settings_version WHERE doc = ?')
+        .get(doc)
       const latest = typeof row?.['v'] === 'number' ? row['v'] : undefined
       if (latest !== expected)
-        throw new FlowConflict('the flow was saved by someone else meanwhile')
-      const saved: FlowVersion = {
+        throw new SettingsConflict(`the ${doc} settings were saved by someone else meanwhile`)
+      const saved: SettingsVersion = {
         version: (expected ?? 0) + 1,
-        flow,
+        value,
         savedBy,
         savedAt: clock.now().toISOString(),
       }
-      db.prepare('INSERT INTO flow_version VALUES (?, ?, ?, ?)').run(
+      db.prepare('INSERT INTO settings_version VALUES (?, ?, ?, ?, ?)').run(
+        doc,
         saved.version,
-        JSON.stringify(flow),
+        JSON.stringify(value),
         savedBy,
         saved.savedAt,
       )
       return saved
     },
-    async flowHistory() {
-      return db.prepare('SELECT * FROM flow_version ORDER BY version DESC').all().map(toFlow)
+    async settingsHistory(doc) {
+      return db
+        .prepare('SELECT * FROM settings_version WHERE doc = ? ORDER BY version DESC')
+        .all(doc)
+        .map(toSettings)
     },
     async itemStatuses(refs) {
       if (refs.length === 0) return {}

@@ -12,6 +12,7 @@ import { hostname } from 'node:os'
 import { styleText } from 'node:util'
 import { loadConfig } from './config'
 import { loadFlow, type LiveFlow } from './flow'
+import { loadInstance, pollDefaultFor, type LiveInstance } from './instance'
 import { loadAuth, loadRunner, loadStore, loadTracker, NO_STATUSES } from './plugin-loader'
 
 export interface Finding extends DoctorFinding {
@@ -100,7 +101,7 @@ const messageOf = (e: unknown): string => (e instanceof Error ? e.message : Stri
 
 // `doctor`: every check the start runs, and what loading refuses, listed in full rather than
 // stopping at the first. Returns the exit code: 1 when anything is an error.
-export async function runDoctor(configPath: string, clock: Clock): Promise<number> {
+export async function runDoctor(configPath: string | undefined, clock: Clock): Promise<number> {
   const findings: Finding[] = []
   const fail = (where: string, e: unknown): void => {
     findings.push({ level: 'error', where, message: messageOf(e) })
@@ -122,6 +123,7 @@ export async function runDoctor(configPath: string, clock: Clock): Promise<numbe
   const base = { clock, configDir: config.configDir, dataDir: config.dataDir }
   // The store holds the flow, and the rules in it are what the rest is checked against.
   let flow: LiveFlow
+  let instance: LiveInstance
   let store: Awaited<ReturnType<typeof loadStore>>
   try {
     store = await loadStore(config.store.plugin, config.store.options, config.configDir, {
@@ -133,12 +135,13 @@ export async function runDoctor(configPath: string, clock: Clock): Promise<numbe
     return report()
   }
   try {
+    instance = await loadInstance(store, pollDefaultFor(config.tracker.plugin))
     flow = await loadFlow(store, {
       agents: Object.keys(config.agents),
-      defaultMaxAttempts: config.limits.defaultMaxAttempts,
+      defaultMaxAttempts: instance.current().limits.defaultMaxAttempts,
     })
   } catch (e) {
-    fail('flow', e)
+    fail('settings', e)
     return report()
   }
   const ctx = { ...base, statuses: flow.statuses }
@@ -149,7 +152,12 @@ export async function runDoctor(configPath: string, clock: Clock): Promise<numbe
       flow.statuses,
     )
     findings.push(
-      ...(await engineCheck(tracker, clock, engineIdOf(config.dataDir), config.pollSeconds)),
+      ...(await engineCheck(
+        tracker,
+        clock,
+        engineIdOf(config.dataDir),
+        instance.current().pollSeconds,
+      )),
       ...(await trackerChecks(tracker, config.tracker.plugin, flow)),
     )
   } catch (e) {

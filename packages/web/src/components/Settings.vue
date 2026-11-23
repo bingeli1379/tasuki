@@ -387,7 +387,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
 <template>
   <UModal
     v-model:open="open"
-    title="Settings"
+    title="Workflow"
     description="Statuses and rules. Saved, the engine follows them from its next round."
     :ui="{ content: 'sm:max-w-4xl', description: 'pe-8' }"
   >

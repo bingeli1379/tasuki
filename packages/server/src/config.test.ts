@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vite-plus/test'
+import { afterEach, describe, expect, it } from 'vite-plus/test'
 import { loadConfig } from './config'
 
 const write = (config: string, env?: string): string => {
@@ -11,13 +11,62 @@ const write = (config: string, env?: string): string => {
   return join(dir, 'tasuki.config.jsonc')
 }
 
+const ENV = ['TASUKI_DATA_DIR', 'TASUKI_HOST', 'TASUKI_PORT', 'TASUKI_PUBLIC_URL']
+
 describe('loadConfig', () => {
-  it('defaults to the sqlite tracker and store, and resolves dataDir against the config folder', () => {
-    const path = write('{ "version": 1, }')
-    const config = loadConfig(path)
+  afterEach(() => {
+    for (const name of ENV) delete process.env[name]
+  })
+
+  it('defaults to the sqlite tracker and store, and keeps the data in ~/.tasuki', () => {
+    const config = loadConfig(write('{ "version": 1, }'))
     expect(config.tracker).toEqual({ plugin: '@tasuki/sqlite', options: {} })
     expect(config.store).toEqual({ plugin: '@tasuki/sqlite', options: {} })
+    expect(config.dataDir).toBe(join(homedir(), '.tasuki'))
+  })
+
+  it('resolves dataDir against the config folder', () => {
+    const config = loadConfig(write('{ "dataDir": "./data" }'))
     expect(config.dataDir).toBe(join(config.configDir, 'data'))
+  })
+
+  it('needs no file: with none in the working folder it runs on the defaults (D105)', () => {
+    const empty = mkdtempSync(join(tmpdir(), 'tasuki-config-'))
+    const config = loadConfig(undefined, empty)
+    expect(config).toMatchObject({ configDir: empty, host: '127.0.0.1', port: 8787, agents: {} })
+    expect(config.auth).toBeUndefined()
+  })
+
+  it('takes tasuki.config.jsonc in the working folder when no --config is given', () => {
+    const path = write('{ "server": { "port": 9000 } }')
+    expect(loadConfig(undefined, join(path, '..')).port).toBe(9000)
+  })
+
+  it('refuses a --config that does not exist', () => {
+    expect(() => loadConfig('missing.jsonc', tmpdir())).toThrow('config file not found')
+  })
+
+  it('takes dataDir, host, port and publicUrl from the environment over the file', () => {
+    process.env['TASUKI_DATA_DIR'] = '/srv/tasuki'
+    process.env['TASUKI_PORT'] = '9100'
+    process.env['TASUKI_HOST'] = '0.0.0.0'
+    process.env['TASUKI_PUBLIC_URL'] = 'https://tasuki.example.com/'
+    const config = loadConfig(
+      write(
+        '{ "dataDir": "./data", "server": { "port": 9000 }, "auth": { "plugin": "@tasuki/auth-builtin" } }',
+      ),
+    )
+    expect(config).toMatchObject({
+      dataDir: '/srv/tasuki',
+      port: 9100,
+      host: '0.0.0.0',
+      publicUrl: 'https://tasuki.example.com',
+    })
+  })
+
+  it('refuses a port that is not one', () => {
+    process.env['TASUKI_PORT'] = 'eighty'
+    expect(() => loadConfig(write('{}'))).toThrow('TASUKI_PORT must be a port number')
   })
 
   it('has no auth unless one is set, and a session lasts 7 days by default', () => {
@@ -86,7 +135,7 @@ describe('loadConfig', () => {
     )
   })
 
-  it('reads agents, filling the limits and the poll interval from the defaults', () => {
+  it('reads agents', () => {
     const config = loadConfig(
       write(
         JSON.stringify({
@@ -97,18 +146,10 @@ describe('loadConfig', () => {
     expect(config.agents).toEqual({
       fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } },
     })
-    expect(config.limits).toEqual({
-      maxConcurrentRuns: 2,
-      leaseSeconds: 120,
-      defaultMaxAttempts: 3,
-      softGraceSeconds: 300,
-      hardGraceSeconds: 10,
-    })
-    expect(config.pollSeconds).toBe(5)
   })
 
-  it('refuses a field it does not hold, the flow ones included: those are in the store (D91)', () => {
-    for (const field of ['workflow', 'rules', 'labels', 'statuses'])
+  it('refuses a field it does not hold, the ones in the store included (D91, D105)', () => {
+    for (const field of ['workflow', 'rules', 'labels', 'statuses', 'poll', 'limits', 'workspace'])
       expect(() => loadConfig(write(JSON.stringify({ [field]: {} })))).toThrow(
         `config ${field}: not a field of the config file`,
       )

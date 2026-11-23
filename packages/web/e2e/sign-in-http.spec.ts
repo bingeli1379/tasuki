@@ -36,7 +36,7 @@ test('the setup link makes the first admin, who adds people by pasting usernames
   await expect(page.getByText('wrong username or password')).toBeVisible()
 
   await signIn(page, 'eli')
-  await page.getByRole('button', { name: 'Account' }).click()
+  await page.getByRole('button', { name: 'Settings' }).click()
   await page.getByRole('menuitem', { name: 'Accounts' }).click()
   const accounts = page.getByRole('dialog', { name: 'Accounts' })
   await accounts.getByRole('button', { name: 'Add people' }).click()

@@ -11,7 +11,7 @@
 | status | 邏輯名（kebab-case）。流程設定的 `workflow` 把它對到 tracker 的 key（每站的 `key`，task 的 `taskStatuses`）；沒寫 key 就是邏輯名本身，sqlite 這樣存（D91）。幾站可以共用一個 key，item 在哪站記在 store（D104）。 |
 | 共用 key 的一組 / 第一站 | 對到同一個 tracker status 的幾站，例如 `refining` 與 `split-done` 都是 Jira 的 To Do。`workflow.statuses` 裡排最前面的是第一站，沒有紀錄的 item 都在第一站（D104）。 |
 | workflow | 流程設定的 `workflow`：item 的 status 清單（順序就是看板的欄）、角色、task status 的對照（D81）。 |
-| 流程設定 / 啟動設定 | 流程設定是 status、角色、task status 對照、規則與 prompt、hold label，存在 store、在設定頁上改、下一輪 poll 生效；從沒存過時用預設流程。啟動設定是 config 檔裡其餘的部分（tracker、store、auth、server、agent、poll、limits），由部署的人改，改了要重啟（D91）。 |
+| 流程設定 / 實例設定 / 啟動設定 | 流程設定是 status、角色、task status 對照、規則與 prompt、hold label，存在 store、在 Workflow 頁上改、下一輪 poll 生效；從沒存過時用預設流程。實例設定是 poll 與 limits，存在 store、只有 `admin` 在 General 頁上改、存了馬上生效（D105）。啟動設定是 config 檔或環境變數裡的部分（dataDir、server、store、auth，還沒搬走的 tracker 與 agent），由部署的人改，改了要重啟（D91、D105）。 |
 | role | 程式需要點名某一站時認的用途，由 `workflow.roles` 指定：`entry`（新 item 從這裡開始）、`failure`（規則失敗的預設去處）。看板打回時要先寫改什麼的那站不是角色，是 rework 規則盯的那站（D86）。 |
 | handledBy | 一站誰處理：`engine`（有規則 watch，從規則算）或 `person`（流程設定寫的）。看板分別標雷達與眼睛。 |
 | outcomes（站上的） | 人在這站能把 item 送去哪些站，一站一顆按鈕，最後一個是主按鈕。按鈕字是「→ 目標站的顯示名」，不寫在設定裡（D87）。規則上給 agent 的 `outcomes` 是結果名到站的 map（D84）。 |

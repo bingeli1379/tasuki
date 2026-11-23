@@ -66,7 +66,8 @@
 | S12d | codex runner 與 testkit 的 runner 契約，做到契約測試會過（已完成，D101；作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2）：`dispatch` mode，跟 `execute` 並存（sqlite 已完成，D102；Jira 待驗證） | 規則換成 `dispatch`，沒有互相等待的 task 一起跑，task 詳情按 Stop 只停那一張 |
 | W5 | 幾站共用同一個 tracker status，item 在哪站記在 store（已完成，D104） | 設定頁把 `refining` 與 `split-done` 都設成 To Do，卡片在兩站之間移動時 Jira 不動、重新整理後還在原站；在 Jira 把卡拖走，看板跟著 Jira |
-| W6 | 啟動設定縮到開機必要的：`tracker`、`poll`、`limits`、`workspace` 進 store，config 檔選用、`dataDir` 預設 `~/.tasuki`、齒輪改成下拉選單、secret 加密與只寫不讀、`init` 只問登入與 port（D105、D106） | 空資料夾直接 `tasuki start` 起得來；在設定頁接上 Jira，token 存完只看得到「已設定」 |
+| W6a | 啟動設定縮到開機必要的第一半：`poll`、`limits` 進 store（實例設定，General 頁只給 admin）、config 檔選用、`dataDir` 預設 `~/.tasuki`、環境變數、齒輪改成下拉選單（已完成，D105） | 空資料夾直接 `tasuki start` 起得來；在 General 頁改 poll，不用重啟就生效 |
+| W6b | tracker 進 store、加密金鑰、secret 只寫不讀、`init` 只問登入與 port（D105、D106） | 在設定頁接上 Jira，token 存完只看得到「已設定」 |
 | W7 | Agents 頁：agent 進 store、權限三段、settings JSON、認證三選一、偵測 CLI 給安裝指令、預設 claude 與 codex（D107、D108、D110） | 不碰檔案，在 Agents 頁把 claude 切成 auto，派一次 Run |
 | W8 | 被擋與核准：`--permission-prompt-tool` 接 tasuki MCP、看板的 Approve 與「以後都允許」、不會問人的被擋數到 3 次就停、`permission_denials` 掛在 Run 上、契約多一條（D107） | 白名單外的指令讓卡片亮「等你核准」，按 Approve 後 agent 接著跑 |
 | W9 | 拿掉 mode：規則全部等於 `custom`、`dispatch` 變開關、預設 prompt 變範本（D109） | 新增規則時從範本選 split，存完的規則沒有 mode 欄位，照樣跑完 |

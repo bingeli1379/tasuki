@@ -121,10 +121,11 @@ interface StorePort {
   requestCancel(id: string, mode: CancelMode, by: CancelReason): Promise<void>  // first time stays; a hard one upgrades soft and its reason wins (D73)
   isPaused(): Promise<boolean>                // the global pause, kept in engine_state (D73)
   setPaused(paused: boolean): Promise<void>
-  // The flow settings as opaque JSON, every save a new version; the engine checks them (D91).
-  latestFlow(): Promise<FlowVersion | undefined>          // undefined before the first save
-  saveFlow(expected: number | undefined, flow: unknown, savedBy: string): Promise<FlowVersion>  // throws FlowConflict if not the latest
-  flowHistory(): Promise<FlowVersion[]>                   // every save, newest first (W4b)
+  // The settings documents ('flow' D91, 'instance' D105) as opaque JSON, each save a new
+  // version of that document; the engine checks them.
+  latestSettings(doc: SettingsDoc): Promise<SettingsVersion | undefined>   // undefined before the first save
+  saveSettings(doc: SettingsDoc, expected: number | undefined, value: unknown, savedBy: string): Promise<SettingsVersion>  // throws SettingsConflict if not the latest
+  settingsHistory(doc: SettingsDoc): Promise<SettingsVersion[]>             // every save, newest first (W4b)
   // Which station an item is in when several share its tracker status (D104); no entry is the first.
   itemStatuses(refs: readonly Ref[]): Promise<Record<Ref, string>>
   setItemStatus(ref: Ref, expected: string | undefined, status: string | undefined): Promise<boolean>  // compare-and-set; undefined clears

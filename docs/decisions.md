@@ -1094,6 +1094,15 @@
   - 切的標準只有一條：開機或登入之前要知道的才留在檔案。其他放檔案只是逼人重啟。
   - Accounts 放齒輪下：不登入時頭像不出現，但 Workflow 與 Agents 還是要找得到；照「是誰的東西」切，個人的留頭像、整個 instance 的放齒輪。
 - 代價：設定不在檔案裡，沒辦法進 git（GitOps）。要的時候參考 Grafana 的 provisioning，開機時從一個資料夾讀進來，現在不做。
+- 實作（W6a，2026-11-23）：W6 拆成 W6a 與 W6b，tracker 要在執行中換 plugin，還要 D106 的加密，綁在一起第一個能摸到的東西會拖很久。
+  - 實例設定在 store 另存一份，有自己的版本號與歷史，不跟流程設定放同一份 JSON：maintainer 存 Workflow 時會整包帶回 limits，兩頁共用版本號也會讓存 General 害 Workflow 莫名 409。StorePort 的 `latestFlow`、`saveFlow`、`flowHistory` 改成 `latestSettings(doc)`、`saveSettings(doc, …)`、`settingsHistory(doc)`，`doc` 是 `flow` 或 `instance`，`FlowVersion` 的 `flow` 改名 `value`，`FlowConflict` 改名 `SettingsConflict`。sqlite 的 `flow_version` 併進 `settings_version`（主鍵 `doc` 加 `version`），舊的 flow 版本照搬。W6b 的 tracker 與 W7 的 agents 也放進 `instance`。
+  - REST 多 `GET`、`PUT /api/instance`，只給 `admin`（core 的 `assertEditsInstance`），跟流程設定一樣不進使用者 MCP。`/api/flow/history` 回的欄位照舊叫 `flow`。
+  - engine 的 limits 改成每次用都讀現在的值，poll 從 `setInterval` 改成每輪結束後用現在的間隔排下一輪，所以存檔不用重啟；兩輪也不會再重疊。改了 `defaultMaxAttempts` 時，沒寫 `maxAttempts` 的規則重新讀一次流程設定跟著改。
+  - 環境變數 `TASUKI_DATA_DIR`、`TASUKI_HOST`、`TASUKI_PORT`、`TASUKI_PUBLIC_URL` 蓋過檔案。`.env` 讀 config 所在資料夾的那份，沒有 config 時是工作目錄的。`--config` 給了就一定要存在。
+  - `workspace.cleanup` 原本就沒有程式讀，這次不搬，檔案裡寫了照樣拒絕。
+  - 看板的齒輪改成下拉選單，原本的設定頁改名 Workflow；Accounts 從頭像選單搬過來。
+  - 範圍外留給後面的：`init` 照舊問 tracker 與 agent，因為它們還在檔案裡（W6b、W7 時改）；General 頁沒有歷史畫面，store 照樣留著每一版。
+- 實測：`pnpm test` 516 條、`pnpm check` 沒有錯誤。store 契約多一條（兩份文件各自計版本與歷史）；config 多六條（沒有檔案、工作目錄的檔案、`--config` 不存在、環境變數蓋過檔案、port 不合法、預設 `~/.tasuki`）；實例設定的解析、只有 admin 能存、REST 的預設值、存了馬上生效與 409、存錯不影響現在的值、`defaultMaxAttempts` 改了規則跟著改。拿掉 rebase 與 `--config` 不存在的檢查各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 23 條全過，多一條 General 頁的主路徑：改 poll、重新整理還在、改回去；poll 2 秒改成 setup 用 API 存。Jira 的 project 20 條過，跳過的一條是原本就有的 dispatch。開機時 Jira 的 poll 預設 30 秒，上一輪被砍掉的 engine 留下的心跳要 90 秒才過期，連續重跑 Jira E2E 要等一下。
 - 重新檢視：有人要設定進 git 時；要多個 instance 共用一份設定時。
 
 ## D106 介面上的密碼與 token 加密存放，只能寫不能讀

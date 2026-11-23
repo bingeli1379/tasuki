@@ -3,6 +3,8 @@ import type { Roles } from '@tasuki/core'
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
 import { ApiError, call, messageOf, sendJson, type Account, type AuthState, type Item } from './api'
 import AccountMenu from './components/AccountMenu.vue'
+import Accounts from './components/Accounts.vue'
+import General from './components/General.vue'
 import ItemDetail from './components/ItemDetail.vue'
 import Settings from './components/Settings.vue'
 import SignIn from './components/SignIn.vue'
@@ -41,11 +43,23 @@ const paused = ref(false)
 // mapped on the settings page (D91).
 const unmatched = ref<string[]>([])
 const settingsOpen = ref(false)
+const generalOpen = ref(false)
+const accountsOpen = ref(false)
 const editsFlow = computed(
   () =>
     auth.value?.mode === 'none' ||
     (auth.value?.me !== undefined && auth.value.me.access !== 'member'),
 )
+// The gear holds what is the instance's, each item for whoever may change it; what is your
+// own stays under your name (D105).
+const isAdmin = computed(() => auth.value?.mode === 'none' || auth.value?.me?.access === 'admin')
+const settingsItems = computed(() => [
+  ...(editsFlow.value ? [{ label: 'Workflow', onSelect: () => (settingsOpen.value = true) }] : []),
+  ...(isAdmin.value ? [{ label: 'General', onSelect: () => (generalOpen.value = true) }] : []),
+  ...(isAdmin.value && auth.value?.me !== undefined
+    ? [{ label: 'Accounts', onSelect: () => (accountsOpen.value = true) }]
+    : []),
+])
 const roles = ref<Roles>()
 const tasks = ref<Record<string, { done: number; total: number }>>({})
 // Items a Run sent off on failing or giving up, while they are still where it put them.
@@ -478,16 +492,22 @@ onMounted(start)
                 @click="toggleTheme"
               />
             </UTooltip>
-            <UTooltip v-if="editsFlow" text="Settings" :delay-duration="100">
+            <UDropdownMenu v-if="editsFlow" :items="settingsItems" :content="{ align: 'end' }">
               <UButton
                 icon="i-lucide-settings"
                 aria-label="Settings"
                 color="neutral"
                 variant="ghost"
-                @click="settingsOpen = true"
               />
-            </UTooltip>
+            </UDropdownMenu>
             <Settings v-if="editsFlow" v-model:open="settingsOpen" @saved="load" />
+            <General v-if="isAdmin" v-model:open="generalOpen" />
+            <Accounts
+              v-if="isAdmin && auth.me"
+              v-model:open="accountsOpen"
+              :me="auth.me"
+              :keeps-accounts="auth.mode === 'builtin'"
+            />
             <AccountMenu v-if="auth.mode !== 'none' && auth.me" :me="auth.me" :mode="auth.mode" />
           </span>
         </header>

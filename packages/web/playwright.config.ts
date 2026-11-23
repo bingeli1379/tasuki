@@ -73,10 +73,8 @@ if (
   await emptyJiraProject()
 }
 
-// Polling every 2 seconds keeps the Jira run short; the agent takes 10, longer than the board
-// needs to read itself again and show it Running.
+// The poll interval is an instance setting, saved by flow.setup.ts (D105).
 const engineFile = {
-  poll: { intervalSeconds: 2 },
   agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 10 } } },
 }
 

@@ -2,7 +2,7 @@ import type { Account } from '../../domain/account'
 import type { Kind } from '../../domain/work-unit'
 import { Forbidden } from '../forbidden'
 import { InvalidInput } from '../invalid-input'
-import type { FlowVersion, StorePort } from '../ports/store'
+import type { SettingsVersion, StorePort } from '../ports/store'
 import type { TrackerPort } from '../ports/tracker'
 import type { StatusMapping } from '../status-map'
 
@@ -81,7 +81,7 @@ export async function saveFlow(
   actor: Account,
   current: StatusMapping,
   change: FlowChange,
-): Promise<FlowVersion> {
+): Promise<SettingsVersion> {
   assertEditsFlow(actor)
   const unmatched = await unmatchedStatuses(deps.tracker, change.mapping)
   if (unmatched.length > 0)
@@ -91,5 +91,5 @@ export async function saveFlow(
     throw new InvalidInput(
       `move these off the statuses removed, rekeyed or no longer first of a shared key: ${left.join(', ')}`,
     )
-  return deps.store.saveFlow(change.expected, change.flow, actor.displayName)
+  return deps.store.saveSettings('flow', change.expected, change.flow, actor.displayName)
 }

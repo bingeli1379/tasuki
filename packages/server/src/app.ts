@@ -8,7 +8,7 @@ import {
   createAccount,
   deleteAccount,
   assertEditsFlow,
-  FlowConflict,
+  assertEditsInstance,
   Forbidden,
   listAccounts,
   needsSetup,
@@ -26,6 +26,7 @@ import {
   deleteItem,
   deleteTask,
   EditConflict,
+  SettingsConflict,
   getItem,
   getTask,
   holdItem,
@@ -55,6 +56,7 @@ import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { createAgentMcpServer } from './agent-mcp'
 import { DEFAULT_FLOW, type LiveFlow } from './flow'
+import type { LiveInstance } from './instance'
 import { describeChanges } from './flow-changes'
 import { createMcpServer } from './mcp'
 import { defaultPrompt } from './prompts'
@@ -83,6 +85,8 @@ export interface AppDeps {
   store: StorePort
   // Read once per request, so a save shows on the next one (D91).
   flow: LiveFlow
+  // Poll and limits, edited by an admin on the General page (D105).
+  instance: LiveInstance
   // The agent names the config file defines, the only ones a rule can use.
   agents: readonly string[]
   tokens: RunTokens
@@ -140,6 +144,7 @@ export function createApp({
   tracker: plainTracker,
   store,
   flow,
+  instance,
   agents,
   tokens,
   auth,
@@ -163,7 +168,7 @@ export function createApp({
     // The board puts the card where it really is.
     if (e instanceof StatusConflict || e instanceof EditConflict)
       return c.json({ error: e.message, item: e.current }, 409)
-    if (e instanceof FlowConflict) return c.json({ error: e.message }, 409)
+    if (e instanceof SettingsConflict) return c.json({ error: e.message }, 409)
     return c.json({ error: e.message }, 500)
   })
   app.use(async (c, next) => {
@@ -376,11 +381,12 @@ export function createApp({
   // against the default it replaced (W4b).
   app.get('/api/flow/history', async (c) => {
     assertEditsFlow(c.var.actor)
-    const history = await store.flowHistory()
+    const history = await store.settingsHistory('flow')
     return c.json({
-      versions: history.map((v, i) => ({
+      versions: history.map(({ value, ...v }, i) => ({
         ...v,
-        changes: describeChanges(history[i + 1]?.flow ?? DEFAULT_FLOW, v.flow),
+        flow: value,
+        changes: describeChanges(history[i + 1]?.value ?? DEFAULT_FLOW, value),
       })),
     })
   })
@@ -390,6 +396,27 @@ export function createApp({
     const version = typeof body.version === 'number' ? body.version : undefined
     const saved = await flow.save({ tracker, store }, c.var.actor, version, body.flow)
     return c.json({ version: saved.version })
+  })
+  // The General page (D105): what the instance runs on, for an admin only. Like the flow, not
+  // in the user MCP.
+  app.get('/api/instance', async (c) => {
+    assertEditsInstance(c.var.actor)
+    const { version } = instance.saved()
+    const { pollSeconds, limits } = instance.current()
+    return c.json({
+      ...(version === undefined ? {} : { version }),
+      instance: { poll: { intervalSeconds: pollSeconds }, limits },
+    })
+  })
+  app.put('/api/instance', async (c) => {
+    const body = await c.req.json<{ version?: unknown; instance?: unknown }>()
+    const version = typeof body.version === 'number' ? body.version : undefined
+    await instance.save(store, c.var.actor, version, body.instance)
+    const { defaultMaxAttempts } = instance.current().limits
+    // A rule that sets no attempts takes the instance's.
+    if (defaultMaxAttempts !== flow.context.defaultMaxAttempts)
+      flow.rebase({ ...flow.context, defaultMaxAttempts })
+    return c.json({ version: instance.saved().version })
   })
   app.get('/api/board', async (c) => {
     const { workflow, rules, holdLabel } = flow.current()

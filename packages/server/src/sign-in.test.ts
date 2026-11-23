@@ -20,6 +20,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
+import { createLiveInstance } from './instance'
 import { createApp } from './app'
 import { createLiveFlow } from './flow'
 import { createRunTokens } from './run-tokens'
@@ -66,6 +67,7 @@ function engine(
       { agents: [], defaultMaxAttempts: 3 },
       { flow: { workflow, statuses: mapping, rules: [], holdLabel: 'hold' }, raw: {} },
     ),
+    instance: createLiveInstance({ pollSeconds: 5 }),
     agents: [],
     tokens: createRunTokens(),
     auth: {

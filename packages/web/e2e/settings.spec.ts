@@ -8,7 +8,8 @@ test('a status added on the settings page shows on the board once saved', async 
   await expect(page.getByRole('region', { name: /^Refining/ })).toBeVisible()
 
   await page.getByRole('button', { name: 'Settings' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('menuitem', { name: 'Workflow' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Workflow' })
   await expect(dialog.getByRole('listitem', { name: 'Refining' })).toBeVisible()
   await dialog.getByRole('button', { name: 'Add a status' }).click()
   const added = dialog.getByRole('listitem', { name: 'New status' })
@@ -34,7 +35,8 @@ test('an ID already taken is flagged as typed, and a new ID carries what points 
   const first = `Spec First ${stamp}`
   await page.goto('/')
   await page.getByRole('button', { name: 'Settings' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('menuitem', { name: 'Workflow' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Workflow' })
   const save = dialog.getByRole('button', { name: 'Save' })
   await dialog.getByRole('button', { name: 'Add a status' }).click()
   await dialog.getByRole('listitem', { name: 'New status' }).getByLabel('Name').fill(first)
@@ -72,7 +74,8 @@ test('the history shows what a save changed, and restoring saves the older one a
   const prompt = `Spec prompt ${Date.now()}`
   await page.goto('/')
   await page.getByRole('button', { name: 'Settings' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Settings' })
+  await page.getByRole('menuitem', { name: 'Workflow' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Workflow' })
   const rule = dialog.getByRole('region', { name: 'Rules' }).getByRole('listitem').first()
   const id = await rule.getByLabel('Name').inputValue()
   await rule.getByLabel('Prompt').fill(prompt)
@@ -80,6 +83,7 @@ test('the history shows what a save changed, and restoring saves the older one a
   await expect(dialog).toBeHidden()
 
   await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Workflow' }).click()
   await dialog.getByRole('button', { name: 'History' }).click()
   const newest = dialog.getByRole('region', { name: 'History' }).getByRole('listitem').first()
   await expect(newest.getByText('In use')).toBeVisible()
@@ -98,8 +102,31 @@ test('the history shows what a save changed, and restoring saves the older one a
   await expect(dialog).toBeHidden()
 
   await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Workflow' }).click()
   await dialog.getByRole('button', { name: 'History' }).click()
   const restored = dialog.getByRole('listitem', { name: `Version ${version + 1}` })
   await expect(restored.getByText('In use')).toBeVisible()
   await expect(restored.getByText(`Rule ${id} prompt changed`)).toBeVisible()
+})
+
+// W6a (D105): what the instance runs on is edited on the General page, saved in the store and
+// followed at once. Put back as it was, since every other test polls on it.
+test('the General page saves the poll interval and shows it again', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'General' }).click()
+  const dialog = page.getByRole('dialog', { name: 'General' })
+  const poll = dialog.getByLabel('Poll every (seconds)')
+  const before = await poll.inputValue()
+  await poll.fill('3')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'General' }).click()
+  await expect(poll).toHaveValue('3')
+  await poll.fill(before)
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
 })

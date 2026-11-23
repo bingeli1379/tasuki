@@ -1,11 +1,13 @@
 {
-  // Copy this file to tasuki.config.jsonc and edit it.
+  // Copy this file to tasuki.config.jsonc and edit it. The file is optional: without one,
+  // tasuki start runs on the defaults, and TASUKI_DATA_DIR, TASUKI_HOST, TASUKI_PORT and
+  // TASUKI_PUBLIC_URL set what is below (D105).
   // Relative paths in this file resolve against the folder this file lives in.
   // ${VAR} expands from the environment; a .env next to this file is loaded first.
   "version": 1,
 
-  // Where this instance keeps its state: tracker.db, store.db (Runs, accounts and the flow
-  // settings), logs/, workspaces/.
+  // Where this instance keeps its state: tracker.db, store.db (Runs, accounts and the
+  // settings), logs/, workspaces/. Left out, ~/.tasuki.
   "dataDir": "./data",
 
   "server": { "host": "127.0.0.1", "port": 8787, "allowInsecure": false },
@@ -61,8 +63,6 @@
     },
   },
 
-  // Defaults. leaseSeconds: a Run nobody renews for this long is abandoned and its item
-  // goes back to the watch status. poll: 5 seconds on sqlite, 30 on Jira.
-  // "limits": { "maxConcurrentRuns": 2, "leaseSeconds": 120, "defaultMaxAttempts": 3 },
-  // "poll": { "intervalSeconds": 5 },
+  // The poll interval and the limits are on the General page (the gear on the board), for an
+  // admin: 5 seconds on sqlite, 30 on Jira, until someone saves another.
 }

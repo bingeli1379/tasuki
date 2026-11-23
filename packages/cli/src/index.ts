@@ -12,7 +12,9 @@ const COMMANDS = ['init', 'start', 'doctor', 'pause', 'resume']
 try {
   const { values, positionals } = parseArgs({
     options: {
-      config: { type: 'string', default: 'tasuki.config.jsonc' },
+      // Left out: tasuki.config.jsonc here when there is one, else defaults and the
+      // environment only (D105).
+      config: { type: 'string' },
       kill: { type: 'boolean', default: false },
     },
     allowPositionals: true,
@@ -20,7 +22,7 @@ try {
   const command = positionals[0] ?? 'start'
   if (!COMMANDS.includes(command))
     throw new Error(`unknown command ${command}: ${COMMANDS.join(', ')}`)
-  if (command === 'init') await init(resolve(values.config))
+  if (command === 'init') await init(resolve(values.config ?? 'tasuki.config.jsonc'))
   if (command === 'doctor') process.exit(await runDoctor(values.config, clock))
   if (command === 'pause') await pauseCommand(values.config, clock, values.kill)
   if (command === 'resume') await resumeCommand(values.config, clock)

@@ -2,8 +2,8 @@
 
 狀態：草稿。欄位與預設值還沒逐項確認。
 
-設定分兩份（D91，見 custom-workflow.md 第 5 節）。啟動設定在檔案裡：tracker、store、auth、server、agent、poll、limits，由部署的人改，改了要重啟。格式用 JSONC（JSON 加註解），再提供 `$schema` 讓編輯器自動補全。流程設定在 store 裡：`workflow`、`rules`、`labels`，在設定頁上用表單改，這份文件用 JSON 寫出來只是為了說明形狀，檔案裡寫了這些欄位會被拒。
-熱重載只對流程設定：存檔時驗證，不過就拒絕存檔；存進去之後 engine 下一輪 poll 讀新的，執行中的 Run 沿用它開跑時的那份。
+設定分三份（D91、D105）。啟動設定在檔案或環境變數裡：只放 store 還打不開、或還不能登入時就要知道的 `dataDir`、`server`、`store`、`auth`，加上還沒搬走的 `tracker` 與 `agents`（W6b、W7 搬進 store），由部署的人改，改了要重啟。格式用 JSONC（JSON 加註解），再提供 `$schema` 讓編輯器自動補全，檔案本身是選用的。另外兩份在 store 裡，各有自己的版本號與歷史：實例設定（`poll`、`limits`）在 General 頁改，只給 `admin`；流程設定（`workflow`、`rules`、`labels`）在 Workflow 頁改，給 `admin` 與 `maintainer`。這份文件用 JSON 寫出來只是為了說明形狀，檔案裡寫了 store 裡的欄位會被拒。
+熱重載：存檔時驗證，不過就拒絕存檔。實例設定存進去馬上生效，poll 的下一次等待就用新的間隔；流程設定在 engine 下一輪 poll 讀新的。執行中的 Run 沿用它開跑時的那份規則。
 `${VAR}` 會展開成環境變數，找不到就報錯。config 裡不放明文 token，所以 config 可以進 git。
 config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建的 `process.loadEnvFile`），已經存在的環境變數不被覆蓋。`.env` 不進 git（D49）。
 
@@ -15,7 +15,7 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 {
   "$schema": "./tasuki.config.schema.json",
   "version": 1,
-  "dataDir": "./data",                         // relative to the folder this file lives in
+  "dataDir": "./data",                         // relative to the folder this file lives in; default ~/.tasuki
 
   // sqlite: { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } }   // refs become TSK-1, TSK-2...
   "tracker": {
@@ -58,6 +58,8 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
   "labels": { "hold": "hold" },
 
+  // From here to workspace is the instance's, kept in the store and edited on the General
+  // page by an admin (D105).
   "poll": { "intervalSeconds": 5 },            // default: 5 for sqlite, 30 for jira-cloud
 
   "limits": {
@@ -70,7 +72,9 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
     "defaultMaxAttempts": 3
   },
 
-  "workspace": { "cleanup": "never" },         // "never" | "on-done"; root defaults to <dataDir>/workspaces
+  "workspace": { "cleanup": "never" },         // "never" | "on-done"; root defaults to <dataDir>/workspaces; not read yet
+
+  // Back to the file.
 
   // A runner plugin each; the fields inside options are that plugin's own.
   "agents": {
@@ -121,12 +125,13 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
 ## 路徑
 
-- config 檔一定要有。用 `--config <path>` 指定，沒給就找工作目錄的 `tasuki.config.jsonc`，找不到就報錯並提示跑 `tasuki init`，不悄悄退回別的地方。`tasuki init` 問 tracker、agent 與要不要登入，寫出 config，Jira 的 id 向 Jira 查好再附上名稱，email 與 token 寫進旁邊的 `.env`；config 已經存在就不動（D99）。
+- config 檔是選用的（D105）。用 `--config <path>` 指定時一定要存在，找不到就報錯；沒給就找工作目錄的 `tasuki.config.jsonc`，也沒有就全部用預設值與環境變數，`tasuki start` 照樣起得來。`tasuki init` 問 tracker、agent 與要不要登入，寫出 config，Jira 的 id 向 Jira 查好再附上名稱，email 與 token 寫進旁邊的 `.env`；config 已經存在就不動（D99）。
 - config 裡所有相對路徑都相對於 config 檔所在的資料夾，不是 process 的工作目錄。
-- `dataDir` 預設 `./data`。tracker 是 sqlite 時，檔案固定在 `<dataDir>/tracker.db`。store 是 sqlite 時在 `<dataDir>/store.db`，Run log 不管 store 是哪個都在 `<dataDir>/logs/`，`workspace.root` 沒設時是 `<dataDir>/workspaces`。
+- `dataDir` 預設 `~/.tasuki`（D105），寫在檔案裡的相對路徑相對於 config 所在的資料夾。tracker 是 sqlite 時，檔案固定在 `<dataDir>/tracker.db`。store 是 sqlite 時在 `<dataDir>/store.db`，Run log 不管 store 是哪個都在 `<dataDir>/logs/`，`workspace.root` 沒設時是 `<dataDir>/workspaces`。
 - 啟動時印出解析後的絕對路徑。
+- 環境變數蓋過檔案：`TASUKI_DATA_DIR`（相對於工作目錄）、`TASUKI_HOST`、`TASUKI_PORT`、`TASUKI_PUBLIC_URL`。`auth`、`store` 的 options 形狀比較複雜，只能寫在檔案裡。`.env` 讀 config 所在資料夾的那份，沒有 config 時是工作目錄的。
 
-一個 instance 就是一個資料夾，裡面有 config，第一次啟動時旁邊長出 `data/`，要備份或搬家整包帶走：
+什麼都不寫的時候，一個 instance 就是 `~/.tasuki` 這個資料夾。要放 config 時，習慣上一個 instance 一個資料夾，`dataDir` 寫 `./data`，第一次啟動時旁邊長出 `data/`，要備份或搬家整包帶走：
 
 ```
 my-instance/
@@ -143,9 +148,11 @@ my-instance/
 
 範例見根目錄的 `tasuki.config.example.jsonc`，複製成 `tasuki.config.jsonc` 來改。server 啟動時讀目前目錄的 `tasuki.config.jsonc`，或用 `--config <路徑>` 指定。範例寫了 `tracker` 與一條跑在假 runner 上的 split 規則。
 
-目前 server 從檔案讀的欄位（W4a）：`dataDir`、`server.port`、`tracker`、`store`、`poll.intervalSeconds`、`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`、`agents`、`auth`。檔案裡出現這些與 `$schema`、`version`、`workspace` 以外的欄位就拒絕啟動，`workflow`、`rules`、`labels` 也一樣（D91）。`@tasuki/claude-cli` 的 options 讀 `auth`（`inherit-login`、`api-key`、`oauth-token`，D100）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires`（`mcpServers`、`skills` 兩個名字清單）給 `doctor` 第 9 條用。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`@tasuki/codex-cli` 的 options 讀 `auth`、`model`、`sandbox`、`env`、`inheritSettings`（省略時加 `--ignore-user-config --ignore-rules`，不讀這台機器的 codex 設定，登入照樣讀 `CODEX_HOME`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+目前 server 從檔案讀的欄位（W6a）：`dataDir`、`server.port`、`tracker`、`store`、`agents`、`auth`。檔案裡出現這些與 `$schema`、`version` 以外的欄位就拒絕啟動，store 裡的 `poll`、`limits`、`workspace`、`workflow`、`rules`、`labels` 也一樣（D91、D105）。
 
-流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；幾站可以共用同一個 `key`，共用的算一組，排最前面的是第一站，item 在這組的哪一站記在 store，第一站不記（D104）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `agent` 要是檔案 `agents` 裡的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是檔案的 `limits.defaultMaxAttempts`；`prompt` 省略時是 mode 的預設，寫了就不能是空字串。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。有 `mode: dispatch` 的規則時，`to-do`、`in-progress`、`manual`、`done` 四個要對照，engine 只會把 task 移到這幾個；`dispatch` 規則不能設 `claim`（item 一直留在 watch status），`outcomes` 也只收 `succeeded`、`blocked_manual` 與每條規則都有的三個，因為出口是 engine 看 task 決定的，沒有 agent 能回報別的（D102）。
+實例設定從 store 讀（W6a，D105）：`poll.intervalSeconds`，`limits` 的 `maxConcurrentRuns`、`leaseSeconds`、`defaultMaxAttempts`、`softGraceSeconds`、`hardGraceSeconds`，都是至少 1 的整數，省略時是預設值。store 從沒存過時全部用預設值，poll 的預設依 tracker 而定。`workspace.cleanup` 還沒有程式讀，先不搬。`@tasuki/claude-cli` 的 options 讀 `auth`（`inherit-login`、`api-key`、`oauth-token`，D100）、`model`、`allowedTools`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires`（`mcpServers`、`skills` 兩個名字清單）給 `doctor` 第 9 條用。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`@tasuki/codex-cli` 的 options 讀 `auth`、`model`、`sandbox`、`env`、`inheritSettings`（省略時加 `--ignore-user-config --ignore-rules`，不讀這台機器的 codex 設定，登入照樣讀 `CODEX_HOME`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
+
+流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；幾站可以共用同一個 `key`，共用的算一組，排最前面的是第一站，item 在這組的哪一站記在 store，第一站不記（D104）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `agent` 要是檔案 `agents` 裡的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是實例設定的 `limits.defaultMaxAttempts`，改了它，這些規則跟著改；`prompt` 省略時是 mode 的預設，寫了就不能是空字串。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。有 `mode: dispatch` 的規則時，`to-do`、`in-progress`、`manual`、`done` 四個要對照，engine 只會把 task 移到這幾個；`dispatch` 規則不能設 `claim`（item 一直留在 watch status），`outcomes` 也只收 `succeeded`、`blocked_manual` 與每條規則都有的三個，因為出口是 engine 看 task 決定的，沒有 agent 能回報別的（D102）。
 
 存檔時除了上面的檢查，還有兩條要問 tracker：tracker 有固定的 status 清單時（Jira），每個 key 都要在清單裡；一個 status 改了 key 或被拿掉時，上面不能還有 item 或 task，被擋時列出是哪些；共用 key 的一組換了第一站時，原本的第一站也算，因為上面的 item 沒有紀錄，會整批跑到新的第一站（D104）。存 store 裡的設定已經跟檔案對不上時（例如檔案的 agent 改名了），拒絕啟動並說明，因為只有改檔案能修。
 
