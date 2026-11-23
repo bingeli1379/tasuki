@@ -60,6 +60,10 @@ export interface OptionsForm {
   // project's issue types once its address and token are in. Keyed by field key; throws, with
   // a message for the person filling the form, when what is filled cannot find them.
   choices?: (options: unknown) => Promise<Record<string, OptionChoice[]>>
+  // A runner's: how "allow always" on a call a person was asked about goes into its options,
+  // the list field and the entry, e.g. claude's allowedTools and Bash(git push). Without it a
+  // call can only be allowed once (D107).
+  allow?: (call: { tool: string; input: unknown }) => { key: string; entry: string }
 }
 
 export interface Plugin {

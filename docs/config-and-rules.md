@@ -124,7 +124,7 @@ config 檔旁邊有 `.env` 的話，啟動時先讀進環境變數（Node 內建
 
 `env` 是給被 spawn 的 agent CLI 用的，engine 自己不使用裡面的值。engine 不碰 git，所以不放 GitHub / GitLab 的設定。
 
-`permissions` 是三段之一，每個 runner 翻成自己的旗標（D107）：`allowlist` 只准 `allowedTools`，其他的拒絕，因為 headless 沒有人能即時按允許；`auto` 交給 CLI 自己的審查（claude 的 auto mode 加 `--permission-prompts none`，codex 的 `--approve-for-me`）；`bypass` 全開，只適合跑在 container 裡。省略是 `allowlist`。`allowedTools` 是 CLI 自己的工具名稱清單，claude 的 tasuki MCP tool 永遠在裡面。codex 沒有逐個 tool 的清單，給它 `allowedTools` 會拒絕載入，`allowlist` 是 `workspace-write` 沙盒加不核准任何東西（D101）。預設的 claude agent 帶 `Read`、`Edit`、`Write`、`Glob`、`Grep`、`Bash(git:*)`、`Bash(node:*)`。
+`permissions` 是三段之一，每個 runner 翻成自己的旗標（D107）：`allowlist` 只准 `allowedTools`，其他的 claude 掛到看板上等人核准（W8，見 agent-contract.md 的「等人核准」），codex 照舊拒絕；`auto` 交給 CLI 自己的審查（claude 的 auto mode 加 `--permission-prompts none`，codex 的 `--approve-for-me`）；`bypass` 全開，只適合跑在 container 裡。省略是 `allowlist`。`allowedTools` 是 CLI 自己的工具名稱清單，claude 的 tasuki MCP tool 永遠在裡面。codex 沒有逐個 tool 的清單，給它 `allowedTools` 會拒絕載入，`allowlist` 是 `workspace-write` 沙盒加不核准任何東西（D101）。預設的 claude agent 帶 `Read`、`Edit`、`Write`、`Glob`、`Grep`、`Bash(git:*)`、`Bash(node:*)`。
 
 `auth` 只宣告認證方式，憑證本身放 `env`，Agents 頁上是兩格 secret。`inherit-login` 沿用 CLI 自己的登入，不需要任何變數。`api-key` 與 `oauth-token` 要求 `env` 裡有對應的變數，變數名稱依 CLI 而定：claude 是 `ANTHROPIC_API_KEY` 與 `CLAUDE_CODE_OAUTH_TOKEN`，沒選的那個不交給 CLI，因為 claude 會優先用 API key（D100），頁面上存過的 secret 只能換不能清；codex 只收 `inherit-login` 與 `api-key`（`CODEX_API_KEY`），訂閱的登入是 `CODEX_HOME` 裡的 `auth.json`，算 `inherit-login`（D101）。省略時是 `inherit-login`。
 

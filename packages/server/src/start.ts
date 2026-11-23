@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { createApp, type AppAuth } from './app'
 import { isLoopback, loadConfig } from './config'
 import { createLiveAgents, readAgentSettings } from './agent-settings'
+import { createApprovals } from './approvals'
 import { engineCheck, engineIdOf, printFindings, trackerChecks } from './doctor'
 import { createEngine } from './engine'
 import { loadFlow } from './flow'
@@ -70,6 +71,10 @@ export async function startEngine(
     ...(await agents.check()),
   ])
   const tokens = createRunTokens()
+  // Allowing a call for good is a save of its agent on the Agents page (D107).
+  const approvals = createApprovals(clock, (actor, a) =>
+    agents.allow(actor, a.agent, { tool: a.tool, input: a.input }),
+  )
   let auth: AppAuth | undefined
   let setupToken: string | undefined
   if (config.auth !== undefined) {
@@ -108,6 +113,7 @@ export async function startEngine(
       flow,
       instance,
       agentSettings: agents,
+      approvals,
       tokens,
       ...(auth === undefined ? {} : { auth }),
       ...(config.publicUrl === undefined ? {} : { publicUrl: config.publicUrl }),
@@ -127,6 +133,7 @@ export async function startEngine(
     logDir: join(config.dataDir, 'logs'),
     runners: () => agents.runners(),
     tokens,
+    approvals,
     mcpUrl: `http://${agentHost}:${config.port}/agent-mcp`,
     engineId,
   })

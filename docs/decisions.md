@@ -1166,7 +1166,22 @@
   - `init` 不再問 agent，只剩登入與 port。E2E 的 setup 用 API 存 fake agent，因為頁面不列它（D110）。
   - 範圍外：給 agent 的其他環境變數（例如 `GITLAB_TOKEN`）沒有欄位，store 裡的值也不展開 `${VAR}`，等有人要再加一種可以放 secret 的 key-value 欄位；`inheritSettings` 沒有勾選框，表單還沒有布林型別。
 - 實測（W7）：`pnpm test` 537 條、`pnpm check` 沒有錯誤，多的是 agent 設定六條（預設 claude 與 codex、存了下一個 Run 用新的並讓規則選得到、secret 封起來且不回傳且留空沿用、還有規則指著的拒絕、必填與載不起來與名字不合法都拒絕而且不動到正在用的、只有 admin），runner 多了權限三段、`--settings`、只留選中的認證、codex 基礎層接在後面。拿掉「還有規則指著的不能刪」與「不回傳 secret」各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 全過，Jira 21 條過（跳過的一條是原本就有的 dispatch）；`pnpm verify:cli-install` 過，它的 config 從 W6a 起就還寫著已經搬走的 `poll`，這次跟 `agents` 一起拿掉。多一條 Agents 頁的主路徑：加一個 claude agent、切成 auto、填 OAuth token，重新整理後還是 auto，token 欄位是空的、只寫著已設定。真的跑一次（claude 2.1.323，haiku，sqlite，2026-11-24）：只放 port 的空資料夾 `tasuki start`，API 把 claude 切成 auto，掛一條 split 規則，item 拖進 `ready-to-split`，stream 的 `permissionMode` 是 `auto`，9 turns、$0.0036、`permission_denials` 是空的，拆出一張 task，item 到 `split-review`。
-- 重新檢視：`--permission-prompt-tool` 驗完時（格式、等太久會不會 timeout）；classifier 擋的會不會進 `permission_denials` 驗完時；3 次不對時。
+- 實驗（W8 動工前，claude 2.1.323，haiku，2026-11-24）：
+  - `--permission-mode default --permission-prompt-tool <mcp tool>`：CLI 送 `{tool_name, input, tool_use_id}`，回 `{"behavior":"allow","updatedInput":…}` 就照跑，回 `{"behavior":"deny","message":…}` 就把 message 當成那次呼叫的錯誤交給模型，也記進 `permission_denials`。`echo` 這類唯讀指令在 default mode 不會問。
+  - 等太久：stdio 的 MCP 等 150 秒照樣接得到答案；HTTP 的 MCP（tasuki 的 facade 就是）60 秒就回 `The operation timed out`，模型會重問一次，再逾時就照契約提問、回報 `needs_input`。設 `MCP_TOOL_TIMEOUT` 之後 HTTP 等 90 秒也接得到。
+  - 沒人可以問時（`dontAsk`）tool_result 是 `Permission to use <tool> has been denied…`，PreToolUse hook 用 exit 2 擋的是 `PreToolUse:<tool> hook error: …`，兩種都是 `is_error`，也都進 `permission_denials`。工具自己失敗（例如 exit code 1）也是 `is_error`，所以只看這兩種開頭。
+- 實作（W8，2026-11-24）：
+  - claude 的 `allowlist` 改成 `--permission-mode default --permission-prompt-tool mcp__tasuki__ask_permission`，`MCP_TOOL_TIMEOUT` 設 24 小時（`options.env` 可以蓋掉）。超過的話 agent 拿到逾時，照契約去提問。
+  - `ask_permission` 掛在 agent 的 facade 上，每個 mode 都有。請求放在 engine 的記憶體（跟 run token 一樣），不進 store：等它的 agent 在同一個 process 裡，engine 重啟就一起沒了。CLI 那頭不等了（HTTP 請求斷掉）就從看板拿掉；Run 結束時還掛著的一律回 deny。
+  - 看板 `/api/board` 多 `approvals`，卡片標「Waiting for you」，詳情列出要跑的指令與 Approve、Always allow、Deny，REST 是 `POST /api/approvals/:id`（`allow`、`allow-always`、`deny`）。使用者 MCP 有 `list_approvals`、`approve_permission`、`deny_permission`，兩邊呼叫同一個 `answer`（D57）。能移動 item 的人都能按 Approve 與 Deny；Always allow 改的是 agent，只給 `admin`。
+  - Always allow 寫回哪裡由 runner 的表單決定：`forms.runner.allow(call)` 回 `{ key, entry }`，claude 是 `allowedTools`，指令寫成 `Bash(<原樣的指令>)`，其他 tool 整個允許。沒有 `allow` 的 runner 只能允許一次。寫回走 Agents 頁同一條存檔路徑，下一個 Run 起生效；這次的已經放行了。
+  - Deny 給 agent 的訊息叫它不要繞路、提問並回報 `needs_input`。契約多一條同樣意思的，涵蓋模型自己拒絕的那種（沒有結構化訊號）。
+  - claude runner 邊讀 stream 邊數上面那兩種被擋，第 3 次就送 SIGTERM，`RunExit.stoppedFor` 寫原因；engine 看到 `stoppedFor` 就算 `needs_input`，不看 agent 回報什麼，`Why:` 就是那個原因。人按 Deny 的不算。auto 的 classifier 擋下時的文字還沒看過，認不出來就不算，靠契約那條讓 agent 自己收手。
+  - Run 結束時 runner 讀最後一行的 `permission_denials`，放進 `RunExit.denials`，engine 存進 Run（store 多 `recordDenials`，sqlite 的 run 多一欄 `denials`），system comment 列出被擋的指令，Run 詳情也列。
+  - codex 沒有 `--permission-prompt-tool` 的對應，白名單外照舊拒絕，也不數被擋。
+  - fake runner 多 `[fake:ask]`：先問一次 `git push`，准了照常，拒了就提問、回報 `needs_input`，並像 CLI 一樣回報那次被擋。
+- 實測（W8，claude 2.1.323，haiku，sqlite，2026-11-24）：agent 的白名單只有 `Read`，item 叫它先跑 `git --version`。第一次沒設 `MCP_TOOL_TIMEOUT`：看板上出現請求，60 秒後 CLI 回逾時，重問一次又逾時，agent 照契約提問、回報 `needs_input`，item 到 `needs-answers`。加上 24 小時之後重跑：請求在看板上掛了 122 秒才按 Always allow，agent 照樣接著跑完，task 內文寫進 `git version 2.56.0`，item 到 `split-review`，agent 的 `allowedTools` 變成 `Read`、`Bash(git --version)`，Agents 設定存成第 2 版。`pnpm test` 548 條、`pnpm check` 沒有錯誤；多的是看板等人到按下去 agent 接著跑、Deny 的訊息與 Run 結束時回 deny、CLI 不等了就從看板拿掉、runner 停掉的 agent 進 `needs_input` 並列出被擋的、只有 admin 能 Always allow、使用者 MCP 答一筆、Always allow 寫回清單只寫一次、claude 數到 3 次就停（工具自己失敗的不算）、讀 `permission_denials`、Always allow 的寫法、store 契約多 `recordDenials`。E2E 多一條：兩張 `[fake:ask]` 的卡都亮「Waiting for you」，一張按 Approve 後到 Split Review，一張按 Deny 後 Run 是 `needs_input`、詳情列出被擋的 `git push`。
+- 重新檢視：classifier 擋的會不會進 `permission_denials`、文字長怎樣驗完時；3 次不對時；24 小時不夠時。
 
 ## D108 agent 的認證三種都留，CLI 沒裝時給指令不代裝
 

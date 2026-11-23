@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import type { Limits } from './instance'
 import type { LiveFlow } from './flow'
 import { CONTRACT } from './prompts'
+import type { Approvals } from './approvals'
 import type { RunTokens } from './run-tokens'
 
 const TAIL_LINES = 20
@@ -42,6 +43,8 @@ export interface EngineDeps {
   // next Run (D107).
   runners: () => Readonly<Record<string, RunnerPort>>
   tokens: RunTokens
+  // What its agents wait on a person for; denied once their Run is over (D107).
+  approvals: Approvals
   // Where agents reach the MCP facade.
   mcpUrl: string
   // What its heartbeat on the tracker says it is (D66).
@@ -139,6 +142,9 @@ export function createEngine(deps: EngineDeps): Engine {
         agents.delete(run.id)
         clearInterval(renew)
         tokens.revoke(run.id)
+        deps.approvals.drop(run.id)
+        if (result.denials !== undefined)
+          await store.recordDenials(run.id, result.denials).catch((e: unknown) => log(String(e)))
         await finishRun({ tracker, store, named }, rule, run.id, result, await logTail(logPath))
       }),
     }

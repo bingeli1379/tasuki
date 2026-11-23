@@ -49,9 +49,9 @@ auth 是 plugin 的一個角色，config 寫法跟其他角色一樣（`plugin` 
 
 | access | 能做的事 |
 |---|---|
-| `admin` | 下面全部，加上管帳號：建帳號或加人、重設密碼（builtin）、改別人的 access、停用與刪除帳號；改實例設定（Tracker 頁的 tracker 與它的 token、Agents 頁的 agent 與它們的 key 或 token、General 頁的 poll 與 limits，D105、D107）。 |
+| `admin` | 下面全部，加上管帳號：建帳號或加人、重設密碼（builtin）、改別人的 access、停用與刪除帳號；改實例設定（Tracker 頁的 tracker 與它的 token、Agents 頁的 agent 與它們的 key 或 token、General 頁的 poll 與 limits，D105、D107）。在看板上對 agent 等著的呼叫按 Always allow（會寫進那個 agent 的白名單，D107）。 |
 | `maintainer` | 下面全部，加上改流程設定（stage、規則、prompt）。 |
-| `member` | 用看板與 `/mcp` 做所有操作：建 item、移動、留言、Stop、hold、刪 item。 |
+| `member` | 用看板與 `/mcp` 做所有操作：建 item、移動、留言、Stop、hold、刪 item，對 agent 等著的呼叫按 Approve 或 Deny（D107）。 |
 
 - 看板的齒輪是下拉選單，照 access 列出能改的：Workflow 給 `admin` 與 `maintainer`，Tracker、General 與 Accounts 只給 `admin`（D105）。`maintainer` 在網頁上改得到的只有流程設定，agent 的工具、plugin、環境變數在啟動設定的檔案裡，網頁上碰不到，所以拿到 `maintainer` 也不能放寬 AI 在 engine 機器上的權限（D91）。
 - 外部帳號要 `admin` 先加進來才能登入，外部系統說帳密對也一樣（D90）。加人只填 username 與 access，可以一次貼一整串，一行一個；已經在的跳過並列出來。名單上沒有的人登入時跟密碼錯看起來一樣，不透露名單上有誰。

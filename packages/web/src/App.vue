@@ -1,7 +1,16 @@
 <script setup lang="ts">
 import type { Roles } from '@tasuki/core'
 import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vue'
-import { ApiError, call, messageOf, sendJson, type Account, type AuthState, type Item } from './api'
+import {
+  ApiError,
+  call,
+  messageOf,
+  sendJson,
+  type Account,
+  type Approval,
+  type AuthState,
+  type Item,
+} from './api'
 import AccountMenu from './components/AccountMenu.vue'
 import Accounts from './components/Accounts.vue'
 import Agents from './components/Agents.vue'
@@ -38,6 +47,9 @@ const columns = ref<Column[]>([])
 // Refs an agent is working on right now, and of those the ones told to stop.
 const running = ref<string[]>([])
 const stopping = ref<string[]>([])
+// Calls agents wait on a person for (D107).
+const approvals = ref<Approval[]>([])
+const waitingOn = (ref: string): Approval[] => approvals.value.filter((a) => a.item === ref)
 const loaded = ref(false)
 const holdLabel = ref('hold')
 const paused = ref(false)
@@ -107,7 +119,7 @@ const detailSeen = computed(() => {
   const i = detailItem.value
   const r = detailRef.value
   return i
-    ? `${i.status}|${i.version}|${i.labels.join()}|${running.value.includes(r)}|${stopping.value.includes(r)}`
+    ? `${i.status}|${i.version}|${i.labels.join()}|${running.value.includes(r)}|${stopping.value.includes(r)}|${waitingOn(r).length}`
     : ''
 })
 
@@ -155,6 +167,7 @@ async function load(): Promise<void> {
       paused: boolean
       unmatched: string[]
       failed: Record<string, { outcome: 'failed' | 'max_attempts'; rule: string; attempts: number }>
+      approvals: Approval[]
     }>('/api/board')
     columns.value = board.columns
     for (const [ref, mine] of recent) {
@@ -170,6 +183,7 @@ async function load(): Promise<void> {
     loaded.value = true
     running.value = board.running
     stopping.value = board.stopping
+    approvals.value = board.approvals
     holdLabel.value = board.holdLabel
     paused.value = board.paused
     unmatched.value = board.unmatched
@@ -614,7 +628,15 @@ onMounted(start)
                       <p class="flex items-center gap-2 text-xs text-muted">
                         <span class="font-medium text-dimmed">{{ item.ref }}</span>
                         <UBadge
-                          v-if="running.includes(item.ref)"
+                          v-if="waitingOn(item.ref).length > 0"
+                          label="Waiting for you"
+                          icon="i-lucide-hand"
+                          color="warning"
+                          variant="subtle"
+                          size="sm"
+                        />
+                        <UBadge
+                          v-else-if="running.includes(item.ref)"
                           :label="stopping.includes(item.ref) ? 'Stopping' : 'Running'"
                           :color="stopping.includes(item.ref) ? 'error' : 'primary'"
                           variant="subtle"
@@ -692,6 +714,9 @@ onMounted(start)
         :seen="detailSeen"
         :columns="columns"
         :roles="roles"
+        :approvals="waitingOn(detailRef)"
+        :is-admin="isAdmin"
+        @answered="load"
         @updated="updated"
         @move="(to) => detailItem && move(detailItem, to)"
         @deleted="deleted"

@@ -35,7 +35,9 @@ const KEYED_RUNNER = `export default {
       fields: [
         { key: 'model', label: 'Model', type: 'text', required: true },
         { key: 'env.KEY', label: 'Key', type: 'secret' },
+        { key: 'tools', label: 'Tools', type: 'list' },
       ],
+      allow: ({ tool }) => ({ key: 'tools', entry: tool }),
     },
   },
 }
@@ -158,6 +160,17 @@ describe('the agents settings (D107, D110)', () => {
       live.save(admin, undefined, { Main: { plugin: RUNNER, options: { model: 'm' } } }),
     ).rejects.toThrow('agent name Main')
     expect(await builtWith(live)).toEqual({ main: { model: 'm1' } })
+  })
+
+  it("a call allowed for good joins the agent's list once, and the next Run has it (D107)", async () => {
+    const { store, live } = await setup()
+    await live.allow(admin, 'main', { tool: 'Bash', input: { command: 'git push' } })
+    await live.allow(admin, 'main', { tool: 'Bash', input: { command: 'git push' } })
+    expect(await builtWith(live)).toEqual({ main: { model: 'm1', tools: ['Bash'] } })
+    expect((await store.latestSettings('agents'))?.version).toBe(1)
+    await expect(
+      live.allow(actor('member'), 'main', { tool: 'Read', input: {} }),
+    ).rejects.toBeInstanceOf(Forbidden)
   })
 
   it('only an admin changes it', async () => {

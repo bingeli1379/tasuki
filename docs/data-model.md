@@ -200,6 +200,7 @@ CREATE TABLE run (
   cancel_requested_by TEXT CHECK (cancel_requested_by IN ('stop','hold','moved','pause')),
   produced_questions  INTEGER NOT NULL DEFAULT 0,
   produced_tasks      INTEGER NOT NULL DEFAULT 0,
+  denials             TEXT,                     -- W8 (D107): JSON [{ tool, input }] the CLI refused, written when the Run ends
   tokens              INTEGER,
   cost                REAL
 );

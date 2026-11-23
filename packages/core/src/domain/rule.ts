@@ -1,4 +1,4 @@
-import type { Outcome, Verdict } from './run'
+import type { Denial, Outcome, Verdict } from './run'
 import { isRunnable, type TaskNode } from './task'
 
 // custom: every tool, nothing checked, the prompt alone says what to do; it still has to say
@@ -77,6 +77,11 @@ export const runningStatus = (rule: Rule): string => rule.claim ?? rule.watch
 export interface RunExit {
   code: number | null
   signal: string | null
+  // What the CLI refused the agent, read from its own record when it exited (D107).
+  denials?: Denial[]
+  // Set when the runner ended the agent itself, saying why: it kept being refused with nobody
+  // to ask (D107). The item goes to needs_input with this as the question.
+  stoppedFor?: string
 }
 
 // What the engine looked up to check a verdict.
@@ -95,6 +100,7 @@ export function outcomeOf(
   exit: RunExit,
   evidence: Evidence,
 ): { outcome: Outcome; reason?: string } {
+  if (exit.stoppedFor !== undefined) return { outcome: 'needs_input', reason: exit.stoppedFor }
   if (exit.code !== 0)
     return {
       outcome: 'failed',

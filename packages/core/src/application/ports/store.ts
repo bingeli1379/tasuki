@@ -1,5 +1,5 @@
 import type { Access, Account } from '../../domain/account'
-import type { CancelMode, CancelReason, Outcome, Run, Verdict } from '../../domain/run'
+import type { CancelMode, CancelReason, Denial, Outcome, Run, Verdict } from '../../domain/run'
 import type { Ref } from '../../domain/work-unit'
 
 export interface NewRun {
@@ -74,6 +74,8 @@ export interface StorePort {
   // The agent did something: lastActivityAt becomes now.
   touch(id: string): Promise<void>
   recordSession(id: string, sessionId: string): Promise<void>
+  // What the agent's CLI refused it, as the runner read it when the agent exited (D107).
+  recordDenials(id: string, denials: Denial[]): Promise<void>
   // Keeps the first report; throws InvalidInput on a second one or once the Run is over.
   report(id: string, verdict: Verdict, summary: string): Promise<void>
   // Counts what the agent made, for checking its verdict later.

@@ -103,6 +103,15 @@ export function describeStoreContract(
       })
     })
 
+    it('recordDenials keeps what the CLI refused, also after the Run is over (D107)', async () => {
+      const run = await store.createRun(newRun('T-1'))
+      expect((await store.getRun(run.id)).denials).toBeUndefined()
+      await store.finishRun(run.id, 'succeeded')
+      const denials = [{ tool: 'Bash', input: { command: 'git push --force' } }]
+      await store.recordDenials(run.id, denials)
+      expect((await store.getRun(run.id)).denials).toEqual(denials)
+    })
+
     it('renewLease and touch leave a finished Run alone', async () => {
       const run = await store.createRun(newRun('T-1'))
       await store.finishRun(run.id, 'succeeded')

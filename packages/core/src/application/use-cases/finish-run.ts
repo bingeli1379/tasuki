@@ -78,6 +78,16 @@ export async function finishRun(
   ]
   if (reason !== undefined) lines.push(`Why: ${reason}.`)
   if (run.summary !== undefined && run.summary !== '') lines.push('', run.summary)
+  // What its CLI would not let it do, so a person sees what to allow (D107).
+  if (exit.denials !== undefined && exit.denials.length > 0)
+    lines.push(
+      '',
+      'Refused by its CLI:',
+      ...exit.denials.map((d) => {
+        const command = (d.input as { command?: unknown } | null)?.command
+        return `- ${d.tool}${typeof command === 'string' ? `: \`${command}\`` : ''}`
+      }),
+    )
   if ((exit.code !== 0 || run.verdict === undefined) && logTail.trim() !== '')
     lines.push('', 'The end of the log:', '', '```', logTail.trimEnd(), '```')
   await tracker.addComment({

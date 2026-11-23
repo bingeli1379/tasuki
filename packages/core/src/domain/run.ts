@@ -13,6 +13,12 @@ export type CancelMode = 'soft' | 'hard'
 // out of the status the Run works in. pause: the engine was paused with every Run stopped.
 export type CancelReason = 'stop' | 'hold' | 'moved' | 'pause'
 
+// A tool call the agent's CLI refused, as it listed them when the agent exited (D107).
+export interface Denial {
+  tool: string
+  input: unknown
+}
+
 export interface Run {
   id: string
   target: Ref
@@ -36,6 +42,8 @@ export interface Run {
   summary?: string
   // What the agent made through the facade during this Run; verdicts are checked against it.
   produced: { questions: number; tasks: number }
+  // What its CLI refused it, once the Run is over and the runner says (D107).
+  denials?: Denial[]
   // Set once a person asked it to stop (stop-and-recovery.md). soft only refuses the agent's
   // writes; hard also ends its process. A soft cancel can turn hard, never the other way.
   cancelRequestedAt?: string

@@ -22,11 +22,13 @@ import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
 import type { LiveAgents } from './agent-settings'
+import { createApprovals } from './approvals'
 import type { LiveTracker } from './tracker-settings'
 
 // The Tracker page is tested on its own; these pin the tracker they are handed.
 const PINNED = {} as LiveTracker
 const AGENTS = {} as LiveAgents
+const APPROVALS = createApprovals({ now: () => new Date() }, async () => {})
 import { createApp } from './app'
 import { createLiveFlow } from './flow'
 import { createRunTokens } from './run-tokens'
@@ -76,6 +78,7 @@ function engine(
     instance: createLiveInstance({ pollSeconds: 5 }),
     trackerSettings: PINNED,
     agentSettings: AGENTS,
+    approvals: APPROVALS,
     tokens: createRunTokens(),
     auth: {
       port: (opts.port ?? createBuiltinAuth)(store),

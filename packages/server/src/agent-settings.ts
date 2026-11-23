@@ -2,6 +2,7 @@ import {
   assertEditsInstance,
   InvalidInput,
   saveInstance,
+  NotFound,
   type Account,
   type OptionField,
   type OptionsForm,
@@ -18,6 +19,7 @@ import {
   keepSecrets,
   mapSecrets,
   secretKeys,
+  setPath,
   withoutSecrets,
   type Raw,
 } from './options-form'
@@ -68,6 +70,8 @@ export interface LiveAgents {
   // Each agent's own preflight: the CLI is there, signed in, has what it needs (D108).
   check(): Promise<Finding[]>
   save(actor: Account, expected: number | undefined, raw: unknown): Promise<number>
+  // Adds a call a person allowed for good to the agent's own list (D107).
+  allow(actor: Account, name: string, call: { tool: string; input: unknown }): Promise<void>
 }
 
 export interface AgentsDeps {
@@ -128,7 +132,7 @@ export async function createLiveAgents(
   let settings = initial.settings
   let version = initial.version
   let runners = await buildAll(settings, ctx)
-  return {
+  const live: LiveAgents = {
     runners: () => runners,
     current: () => settings,
     async view() {
@@ -194,5 +198,22 @@ export async function createLiveAgents(
       flow.rebase({ ...flow.context, agents: names })
       return saved.version
     },
+    async allow(actor, name, call) {
+      assertEditsInstance(actor)
+      const agent = settings[name]
+      if (agent === undefined) throw new NotFound(`no agent ${name}`)
+      const form = await formOf(agent.plugin, ctx.configDir)
+      if (form?.allow === undefined)
+        throw new InvalidInput(`agent ${name} has no list to add it to: allow it once instead`)
+      const { key, entry } = form.allow(call)
+      const list = getPath(agent.options, key)
+      const entries = Array.isArray(list) ? (list as unknown[]) : []
+      if (entries.includes(entry)) return
+      await live.save(actor, version, {
+        ...settings,
+        [name]: { plugin: agent.plugin, options: setPath(agent.options, key, [...entries, entry]) },
+      })
+    },
   }
+  return live
 }

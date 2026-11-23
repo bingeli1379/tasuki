@@ -16,6 +16,9 @@ import { setTimeout as sleep } from 'node:timers/promises'
 // the rule has it ([fake:needs_input] asks a question first), [fake:hang] never finishes, and
 // [fake:no_tasks] claims success without making any. Anything else splits the item into two
 // tasks, unless it already has some, and succeeds; [fake:manual] makes the second one manual.
+// [fake:ask] first asks a person whether it may run git push, the way a CLI does through
+// ask_permission (D107): allowed, it carries on; denied, it asks a question and reports
+// needs_input, and says the call was refused as a CLI would when it exits.
 // Executing, it walks every task it can run to done, then reports succeeded, or
 // blocked_manual when manual tasks are left. Dispatched, it reads the marker off its task's
 // title instead and only reports, since the engine moves the task. Reworking, it makes one task, Rework, carrying
@@ -30,6 +33,7 @@ const plugin: Plugin = definePlugin({
       throw new Error('options.seconds must be a number of seconds, 0 or more')
     return {
       start(spec) {
+        const denials: { tool: string; input: unknown }[] = []
         const run = async (): Promise<void> => {
           const client = new Client({ name: 'tasuki-fake-runner', version: '0.0.0' })
           await client.connect(
@@ -54,13 +58,23 @@ const plugin: Plugin = definePlugin({
             const marker = /\[fake:([a-z_]+)\]/.exec(title)?.[1]
             if (marker === 'hang') await new Promise(() => {})
             await sleep(seconds * 1000)
+            let refused = false
+            if (marker === 'ask') {
+              const asked = { tool_name: 'Bash', input: { command: 'git push' } }
+              const answer = await call<{ behavior: string }>('ask_permission', asked)
+              if (answer.behavior !== 'allow') {
+                refused = true
+                denials.push({ tool: asked.tool_name, input: asked.input })
+              }
+            }
             // What the rule lets it report, read off the tool as a real agent would.
             const { tools } = await client.listTools()
             const schema = tools.find((t) => t.name === 'report_result')?.inputSchema
             const verdicts =
               (schema?.properties?.['verdict'] as { enum?: string[] } | undefined)?.enum ?? []
-            let verdict =
-              marker !== undefined && verdicts.includes(marker)
+            let verdict = refused
+              ? 'needs_input'
+              : marker !== undefined && verdicts.includes(marker)
                 ? marker
                 : spec.mode === 'review' || spec.mode === 'custom'
                   ? (verdicts[0] ?? 'failed')
@@ -126,7 +140,7 @@ const plugin: Plugin = definePlugin({
         // A real CLI that hits an error exits non-zero; so does this one. RUN_CANCELLED is one.
         const exit = Promise.race([
           run().then(
-            (): RunExit => ({ code: 0, signal: null }),
+            (): RunExit => ({ code: 0, signal: null, ...(denials.length > 0 ? { denials } : {}) }),
             (e: unknown): RunExit => {
               console.error(`fake runner on ${spec.target}: ${String(e)}`)
               return { code: 1, signal: null }

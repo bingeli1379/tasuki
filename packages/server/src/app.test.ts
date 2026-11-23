@@ -15,11 +15,13 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
 import type { LiveAgents } from './agent-settings'
+import { createApprovals } from './approvals'
 import type { LiveTracker } from './tracker-settings'
 
 // The Tracker page is tested on its own; these pin the tracker they are handed.
 const PINNED = {} as LiveTracker
 const AGENTS = {} as LiveAgents
+const APPROVALS = createApprovals({ now: () => new Date() }, async () => {})
 import { createApp } from './app'
 import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
 import { defaultPrompt } from './prompts'
@@ -71,6 +73,7 @@ const appWith = (): ReturnType<typeof createApp> =>
     instance: createLiveInstance({ pollSeconds: 5 }),
     trackerSettings: PINNED,
     agentSettings: AGENTS,
+    approvals: APPROVALS,
     tokens: createRunTokens(),
   })
 
@@ -322,6 +325,7 @@ describe('tasks', () => {
       instance: createLiveInstance({ pollSeconds: 5 }),
       trackerSettings: PINNED,
       agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
     })
     const item = await tracker.createItem({ title: 'Item', body: '', status: 'split-review' })
@@ -439,7 +443,28 @@ describe("MCP for the user's AI client", () => {
       'add_attachment',
       'delete_attachment',
       'get_attachment',
+      'list_approvals',
+      'approve_permission',
+      'deny_permission',
     ])
+  })
+
+  it('answers a call an agent waits on, the same way the board does (D57, D107)', async () => {
+    const client = await connect()
+    const answered = APPROVALS.ask({
+      runId: 'r1',
+      item: 'T-1',
+      agent: 'claude',
+      tool: 'Bash',
+      input: { command: 'git push' },
+    })
+    const listed = JSON.parse(
+      text(await client.callTool({ name: 'list_approvals', arguments: {} })),
+    ) as { id: string; tool: string }[]
+    expect(listed).toMatchObject([{ item: 'T-1', tool: 'Bash', input: { command: 'git push' } }])
+    await client.callTool({ name: 'approve_permission', arguments: { id: listed[0]?.id } })
+    expect(await answered).toEqual({ behavior: 'allow', updatedInput: { command: 'git push' } })
+    expect(APPROVALS.pending()).toEqual([])
   })
 
   it('an item created through MCP is on the board', async () => {
@@ -559,6 +584,7 @@ describe('the flow settings (D91)', () => {
       instance: createLiveInstance({ pollSeconds: 5 }),
       trackerSettings: PINNED,
       agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
     })
     return { app, tracker }
@@ -686,6 +712,7 @@ describe('the built board', () => {
       instance: createLiveInstance({ pollSeconds: 5 }),
       trackerSettings: PINNED,
       agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
       webDir,
     })
@@ -709,6 +736,7 @@ describe('instance settings (D105)', () => {
       instance,
       trackerSettings: PINNED,
       agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
     })
     return { app, flow, instance }

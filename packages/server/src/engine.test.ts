@@ -28,6 +28,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
 import type { LiveAgents } from './agent-settings'
+import { createApprovals } from './approvals'
 import type { LiveTracker } from './tracker-settings'
 
 // The Tracker page is tested on its own; these pin the tracker they are handed.
@@ -200,6 +201,7 @@ function setup(
   const store = createSqliteStore(storeDb, clock)
   const logDir = mkdtempSync(join(tmpdir(), 'tasuki-logs-'))
   const tokens = createRunTokens()
+  const approvals = createApprovals(clock, async () => {})
   const app = createApp({
     tracker,
     store,
@@ -207,6 +209,7 @@ function setup(
     instance: createLiveInstance({ pollSeconds: 5 }),
     trackerSettings: PINNED,
     agentSettings: AGENTS,
+    approvals,
     tokens,
   })
   const scripts: Script[] = []
@@ -262,6 +265,7 @@ function setup(
       workspaceRoot: mkdtempSync(join(tmpdir(), 'tasuki-ws-')),
       logDir,
       runners: () => ({ fake: runner }),
+      approvals,
       tokens,
       mcpUrl: 'http://localhost/agent-mcp',
       engineId: 'test-engine',
@@ -299,6 +303,7 @@ function setup(
     tracker,
     store,
     app,
+    approvals,
     approvedItem,
     scripts,
     started,
@@ -682,6 +687,7 @@ describe('rule execute on a fake agent', () => {
       'list_comments',
       'add_comment',
       'set_task_status',
+      'ask_permission',
       'report_result',
     ])
   })
@@ -721,6 +727,7 @@ describe('rule execute on a fake agent', () => {
       'list_comments',
       'add_comment',
       'set_task_status',
+      'ask_permission',
       'report_result',
     ])
     // Its tasks are still open, which execute would refuse.
@@ -1027,6 +1034,7 @@ describe('rule dispatch: one Run per task (D102)', () => {
     expect(seen).toEqual({
       tools: [
         'add_comment',
+        'ask_permission',
         'get_item',
         'list_attachments',
         'list_comments',
@@ -1150,6 +1158,7 @@ describe('rule review on a fake agent', () => {
       'read_attachment',
       'list_comments',
       'add_comment',
+      'ask_permission',
       'report_result',
     ])
     expect(verdicts).toEqual(['approve', 'changes', 'needs_input', 'failed'])
@@ -1679,6 +1688,134 @@ describe('global pause (stop-and-recovery.md)', () => {
   })
 })
 
+describe('asking a person before a call (D107)', () => {
+  const asking =
+    (seen: unknown[]): Script =>
+    async (mcp, spec) => {
+      const res = await mcp.callTool({
+        name: 'ask_permission',
+        arguments: { tool_name: 'Bash', input: { command: 'git push' }, tool_use_id: 't1' },
+      })
+      seen.push(JSON.parse(text(res)))
+      return splitInto()(mcp, spec)
+    }
+  const waiting = async (t: ReturnType<typeof setup>) => {
+    for (let i = 0; i < 200; i++) {
+      const { approvals } = (await (await t.app.request('/api/board')).json()) as {
+        approvals: { id: string }[]
+      }
+      if (approvals.length > 0) return approvals
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    throw new Error('nothing waits on a person')
+  }
+
+  it('the call waits on the board until a person allows it, then the agent carries on', async () => {
+    const t = setup()
+    const seen: unknown[] = []
+    t.scripts.push(asking(seen))
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    const [approval] = await waiting(t)
+    expect(approval).toMatchObject({
+      item: item.ref,
+      agent: 'fake',
+      tool: 'Bash',
+      input: { command: 'git push' },
+    })
+    // Still running while it waits, its item in the claim status.
+    expect((await t.tracker.get(item.ref)).status).toBe('splitting')
+    const res = await t.app.request(`/api/approvals/${approval?.id}`, {
+      method: 'POST',
+      body: JSON.stringify({ decision: 'allow' }),
+    })
+    expect(res.status).toBe(200)
+    await engine.settled()
+    expect(seen).toEqual([{ behavior: 'allow', updatedInput: { command: 'git push' } }])
+    expect((await t.tracker.get(item.ref)).status).toBe('split-review')
+    expect(t.approvals.pending()).toEqual([])
+  })
+
+  it('denied, the agent is told not to go round it; a Run that ends drops what it waited on', async () => {
+    const t = setup()
+    const seen: unknown[] = []
+    t.scripts.push(asking(seen))
+    await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    const [approval] = await waiting(t)
+    await t.app.request(`/api/approvals/${approval?.id}`, {
+      method: 'POST',
+      body: JSON.stringify({ decision: 'deny' }),
+    })
+    await engine.settled()
+    expect(seen).toEqual([
+      { behavior: 'deny', message: expect.stringContaining('report needs_input') },
+    ])
+
+    t.approvals
+      .ask({ runId: 'gone', item: 'T-9', agent: 'fake', tool: 'Bash', input: {} })
+      .then((a) => seen.push(a))
+    t.approvals.drop('gone')
+    await new Promise((r) => setTimeout(r, 0))
+    expect(seen.at(-1)).toEqual({ behavior: 'deny', message: 'The run is over.' })
+  })
+
+  it('a runner that ended its agent for being refused sends the item to needs_input, listing the refusals', async () => {
+    const t = setup()
+    const denials = [{ tool: 'Bash', input: { command: 'git push --force' } }]
+    t.scripts.push(async () => ({
+      code: null,
+      signal: 'SIGTERM',
+      denials,
+      stoppedFor: 'its CLI refused it 3 times with nobody to ask (Bash, Bash, Bash)',
+    }))
+    const item = await t.readyItem()
+    const engine = t.engine()
+    await engine.tick()
+    await engine.settled()
+    expect((await t.tracker.get(item.ref)).status).toBe('needs-answers')
+    const [run] = await t.store.runsFor(item.ref)
+    expect(run).toMatchObject({ outcome: 'needs_input', denials })
+    const comment = (await t.tracker.comments(item.ref)).find((c) => c.author === 'engine')
+    expect(comment?.body).toContain('Why: its CLI refused it 3 times')
+    expect(comment?.body).toContain('- Bash: `git push --force`')
+  })
+
+  it('a call the CLI stopped waiting on leaves the board', async () => {
+    const approvals = createApprovals({ now: () => new Date() }, async () => {})
+    const gaveUp = new AbortController()
+    const answer = approvals.ask(
+      { runId: 'r', item: 'T-1', agent: 'fake', tool: 'Bash', input: {} },
+      gaveUp.signal,
+    )
+    expect(approvals.pending()).toHaveLength(1)
+    gaveUp.abort()
+    expect(await answer).toEqual({ behavior: 'deny', message: 'Nobody answered in time.' })
+    expect(approvals.pending()).toEqual([])
+  })
+
+  it('only an admin allows a call for good', async () => {
+    const approvals = createApprovals({ now: () => new Date() }, async () => {})
+    void approvals.ask({ runId: 'r', item: 'T-1', agent: 'fake', tool: 'Bash', input: {} })
+    const [held] = approvals.pending()
+    const member = {
+      userId: 'm',
+      username: 'm',
+      displayName: 'M',
+      access: 'member' as const,
+      disabled: false,
+      createdAt: '',
+    }
+    await expect(approvals.answer(member, held?.id ?? '', 'allow-always')).rejects.toThrow(
+      'only an admin',
+    )
+    await expect(approvals.answer(member, 'nope', 'allow')).rejects.toThrow('no request nope')
+    expect((await approvals.answer(member, held?.id ?? '', 'allow')).tool).toBe('Bash')
+  })
+})
+
 describe('the MCP facade for agents', () => {
   it('reads only its own item, takes one report, and shuts the door once the Run is over', async () => {
     const t = setup()
@@ -1777,6 +1914,7 @@ describe('the MCP facade for agents', () => {
       'read_attachment',
       'list_comments',
       'add_comment',
+      'ask_permission',
       'report_result',
     ])
   })

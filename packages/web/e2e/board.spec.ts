@@ -758,3 +758,52 @@ test('an item a failed Run moved is marked until a person moves it on', async ({
   await expect(again.getByText('Failed', { exact: true })).toHaveCount(0)
   await expect(again).not.toHaveClass(/agent-failed/)
 })
+
+// W8 (D107): a call outside what the agent may do waits on the board. Approved, the agent
+// carries on from where it was; denied, it asks on the item and the Run lists the refusal.
+test('a call the agent asks about lights the card, and Approve or Deny on the item answers it', async ({
+  page,
+  request,
+}) => {
+  test.setTimeout(150_000)
+  const approved = `e2e approve ${Date.now()} [fake:ask]`
+  const denied = `e2e deny ${Date.now()} [fake:ask]`
+  for (const title of [approved, denied]) {
+    const ref = await createThroughApi(request, title)
+    const moved = await request.post(`/api/items/${ref}/transition`, {
+      data: { from: 'refining', to: 'ready-to-split' },
+    })
+    expect(moved.ok()).toBe(true)
+  }
+  await page.goto('/')
+  const splitting = page.getByRole('region', { name: /^Splitting/ })
+  for (const title of [approved, denied])
+    await expect(
+      splitting.getByRole('article', { name: title }).getByText('Waiting for you'),
+    ).toBeVisible({ timeout: 60_000 })
+
+  await splitting.getByRole('button', { name: approved, exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  const asked = dialog.getByRole('region', { name: 'Waiting for you' })
+  await expect(asked).toContainText('git push')
+  await asked.getByRole('button', { name: 'Approve' }).click()
+  await expect(page.getByText('Allowed once: the agent carries on')).toBeVisible()
+  await dialog.getByRole('button', { name: 'Close' }).first().click()
+  await expect(
+    page.getByRole('region', { name: /^Split Review/ }).getByRole('article', { name: approved }),
+  ).toBeVisible({ timeout: 60_000 })
+
+  await splitting.getByRole('button', { name: denied, exact: true }).click()
+  await dialog
+    .getByRole('region', { name: 'Waiting for you' })
+    .getByRole('button', { name: 'Deny' })
+    .click()
+  await expect(page.getByText('Denied: the agent asks on the item instead')).toBeVisible()
+  await expect(dialog.getByRole('listitem', { name: 'Run split attempt 1' })).toContainText(
+    'needs_input',
+    { timeout: 60_000 },
+  )
+  await expect(dialog.getByRole('list', { name: 'Refused to run split' })).toContainText(
+    'Refused Bash: git push',
+  )
+})

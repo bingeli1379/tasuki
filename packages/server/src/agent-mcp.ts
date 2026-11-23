@@ -16,6 +16,7 @@ import {
   type TrackerPort,
 } from '@tasuki/core'
 import { z } from 'zod'
+import type { Answer } from './approvals'
 
 export interface AgentMcpDeps {
   tracker: TrackerPort
@@ -26,6 +27,8 @@ export interface AgentMcpDeps {
   // the tool table).
   // Its outcomes are what the agent can report.
   rule: Rule
+  // Asks a person whether the agent may make a call, on the board (D107).
+  ask: (call: { tool: string; input: unknown }, signal: AbortSignal) => Promise<Answer>
 }
 
 // What a model takes as an image; any other file goes out as a resource.
@@ -41,7 +44,7 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 // The MCP facade for an agent the engine started. Bound to one Run by its token, so every
 // tool works on that Run's item and nothing else; there is no tool that moves the item
 // (agent-contract.md).
-export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps): McpServer {
+export function createAgentMcpServer({ tracker, store, run, rule, ask }: AgentMcpDeps): McpServer {
   const { mode } = rule
   // A dispatch worker's run.target is its task, the default it comments on (D102).
   const targetHint =
@@ -207,6 +210,25 @@ export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps
         return json(await setTaskStatus(tracker, run, input))
       },
     )
+  // The CLI's --permission-prompt-tool, not the model's: the shape is Claude Code's (D107).
+  server.registerTool(
+    'ask_permission',
+    {
+      description:
+        'Used by your CLI to ask a person before it runs a tool you are not allowed on your own. ' +
+        'Do not call it yourself.',
+      inputSchema: {
+        tool_name: z.string(),
+        input: z.unknown(),
+        tool_use_id: z.string().optional(),
+      },
+    },
+    async ({ tool_name, input }, extra) => {
+      writable()
+      const answer = await ask({ tool: tool_name, input }, extra.signal)
+      return { content: [{ type: 'text', text: JSON.stringify(answer) }] }
+    },
+  )
   server.registerTool(
     'report_result',
     {

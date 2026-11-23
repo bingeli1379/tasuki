@@ -68,8 +68,8 @@
 | W5 | 幾站共用同一個 tracker status，item 在哪站記在 store（已完成，D104） | 設定頁把 `refining` 與 `split-done` 都設成 To Do，卡片在兩站之間移動時 Jira 不動、重新整理後還在原站；在 Jira 把卡拖走，看板跟著 Jira |
 | W6a | 啟動設定縮到開機必要的第一半：`poll`、`limits` 進 store（實例設定，General 頁只給 admin）、config 檔選用、`dataDir` 預設 `~/.tasuki`、環境變數、齒輪改成下拉選單（已完成，D105） | 空資料夾直接 `tasuki start` 起得來；在 General 頁改 poll，不用重啟就生效 |
 | W6b | tracker 進 store、Tracker 頁的表單由 plugin 描述、加密金鑰、secret 只寫不讀、`init` 不再問 tracker（已完成，D105、D106、D111；W7 把 agent 也搬走，`init` 只剩登入與 port） | 在設定頁接上 Jira，token 存完只看得到「已設定」 |
-| W7 | Agents 頁：agent 進 store、權限三段、settings JSON、認證三選一、偵測 CLI 給安裝指令、預設 claude 與 codex（已完成，D107、D108、D110；白名單外先直接拒絕，W8 改成問人） | 不碰檔案，在 Agents 頁把 claude 切成 auto，派一次 Run |
-| W8 | 被擋與核准：`--permission-prompt-tool` 接 tasuki MCP、看板的 Approve 與「以後都允許」、不會問人的被擋數到 3 次就停、`permission_denials` 掛在 Run 上、契約多一條（D107） | 白名單外的指令讓卡片亮「等你核准」，按 Approve 後 agent 接著跑 |
+| W7 | Agents 頁：agent 進 store、權限三段、settings JSON、認證三選一、偵測 CLI 給安裝指令、預設 claude 與 codex（已完成，D107、D108、D110） | 不碰檔案，在 Agents 頁把 claude 切成 auto，派一次 Run |
+| W8 | 被擋與核准：`--permission-prompt-tool` 接 tasuki MCP、看板的 Approve 與「以後都允許」、不會問人的被擋數到 3 次就停、`permission_denials` 掛在 Run 上、契約多一條（已完成，D107；只有 claude，codex 白名單外照舊拒絕） | 白名單外的指令讓卡片亮「等你核准」，按 Approve 後 agent 接著跑 |
 | W9 | 拿掉 mode：規則全部等於 `custom`、`dispatch` 變開關、預設 prompt 變範本（D109） | 新增規則時從範本選 split，存完的規則沒有 mode 欄位，照樣跑完 |
 | S14 | 對外發佈：license、套件名稱查撞名（D23）、版本號與依賴範圍（D62、D96）、`npm publish`（core、testkit、內建 plugin、CLI）、container image 推到 registry、給使用者看的 README（含訂閱帳號與 API key 的條款）（D97） | 在一台乾淨的機器上從 npm 與 registry 裝起來，照 README 跑得起來 |
 
