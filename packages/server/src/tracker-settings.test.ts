@@ -26,7 +26,7 @@ const SECRET_TRACKER = `export default {
   apiVersion: 1,
   tracker: (ctx, options) => {
     globalThis.builtWith = options
-    return { list: async () => [] }
+    return { list: async () => globalThis.onTracker ?? [] }
   },
   forms: {
     tracker: {
@@ -96,6 +96,26 @@ describe('the tracker settings (D105, D106)', () => {
       'move these off the tracker in use before changing it: LAB-1',
     )
     expect(live.current().options).toEqual({ refPrefix: 'LAB' })
+  })
+
+  it('the same options in another key order are the same tracker, items and all', async () => {
+    const { live } = await setup()
+    await live.save(admin, undefined, './secret-tracker.mjs', {
+      site: 'a',
+      auth: { token: 't1' },
+      x: 1,
+    })
+    ;(globalThis as { onTracker?: unknown }).onTracker = [{ ref: 'S-1', status: 'refining' }]
+    try {
+      await expect(
+        live.save(admin, 1, './secret-tracker.mjs', { x: 1, auth: { token: '' }, site: 'a' }),
+      ).resolves.toBe(2)
+      await expect(
+        live.save(admin, 2, './secret-tracker.mjs', { site: 'b', auth: { token: '' } }),
+      ).rejects.toThrow('move these off the tracker in use before changing it: S-1')
+    } finally {
+      delete (globalThis as { onTracker?: unknown }).onTracker
+    }
   })
 
   it('keeps a secret sealed in the store and never shows it; left blank, the one in use stays', async () => {

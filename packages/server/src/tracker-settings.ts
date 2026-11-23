@@ -22,6 +22,7 @@ import {
   isObject,
   keepSecrets,
   mapSecrets,
+  sameOptions,
   secretKeys,
   withoutSecrets,
   type Raw,
@@ -178,8 +179,7 @@ export async function createLiveTracker(
       // Only the secrets changed: the same tracker with a new token, nothing to move off it.
       const moves =
         next.plugin !== settings.plugin ||
-        JSON.stringify(withoutSecrets(next.options, secret)) !==
-          JSON.stringify(withoutSecrets(settings.options, secret))
+        !sameOptions(withoutSecrets(next.options, secret), withoutSecrets(settings.options, secret))
       if (moves) {
         if ((await store.liveRuns()).length > 0)
           throw new InvalidInput('agents are running: stop them before changing the tracker')

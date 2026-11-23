@@ -59,6 +59,21 @@ export function keepSecrets(options: Raw, keys: string[], before: Raw | undefine
   return out
 }
 
+// The same options whatever order their keys came in, as JSON from the page or the store.
+export function sameOptions(a: unknown, b: unknown): boolean {
+  const sorted = (v: unknown): unknown =>
+    Array.isArray(v)
+      ? v.map(sorted)
+      : isObject(v)
+        ? Object.fromEntries(
+            Object.keys(v)
+              .sort()
+              .map((k) => [k, sorted(v[k])]),
+          )
+        : v
+  return JSON.stringify(sorted(a)) === JSON.stringify(sorted(b))
+}
+
 export function checkRequired(options: Raw, form: OptionsForm | undefined): string | undefined {
   for (const field of form?.fields ?? []) {
     const v = getPath(options, field.key)
