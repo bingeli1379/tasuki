@@ -193,6 +193,7 @@
 - 後果：只靠預設值的 agent 沒辦法改檔，`init` 產生的 config 一定要帶預設清單，這是 M3 的待辦。
 - 待驗證：兩個 CLI 認證各吃哪個環境變數、`allowedTools` 的名稱格式（見 plan.md）。
 - 重新檢視：M3 驗完 CLI 行為時。
+- 後續：被 D107 改掉。`allowedTools` 白名單變成三段權限的其中一段，白名單外的不再直接拒絕，改成問人。
 
 ## D36 rule 不放 `kind` 欄位
 - 決定：移除 rule 的 `kind` 欄位。規則一律作用在 item，`watch`、`claim`、`on` 的目標都是 `statuses.item` 裡的 status。
@@ -868,6 +869,7 @@
   - 代價：網頁上換不了 model、改不了基礎層 prompt。
 - 實測：`pnpm test` 418 條、`pnpm check` 沒有錯誤，`pnpm e2e` sqlite、jira 各 15 條、auth、auth-http 共 32 條全過（多了兩個 project 開跑前存流程設定、設定頁加一站的主路徑，Jira 那條在 KAN 上挑 Manual，還有重複 ID 的即時提示與改 ID 帶著引用走，後者只在 sqlite，因為 KAN 只剩一個空的 status）。拿掉改 ID 時搬按鈕引用的那行，sqlite 的那條會紅。拿掉 sqlite store 的版本比對，store 契約會紅一條；拿掉「被拿掉的 status 上還有人」的檢查，core 與 server 各紅一條。Jira 的 `listStatuses` 對 KAN 實際跑過。E2E 途中抓到設定頁兩個問題並修掉：Reka UI 的選項不能用空字串當值，「不移動」「不用」改用 `_`；沒寫 `name` 的站被表單用 id 當顯示名存回去，改成跟 server 共用 core 的預設名。
 - 重新檢視：有人需要在網頁上換 model 時，先考慮讓規則多一個 model 覆寫，不把整包 agent 搬進 DB；runner plugin 自己描述 options 的需求另外出現時；部署方式要「設定進 git」（GitOps）時，再看要不要匯入匯出。
+- 後續：被 D105 推翻。檔案只留 `dataDir`、`server`、`store`、`auth`，`tracker`、`agents`、`poll`、`limits`、`workspace` 搬進設定頁；agent 提權的顧慮改成只有 `admin` 能改 Agents 頁（D107）。
 
 ## D92 `custom` mode：全部的 tool、不驗結果
 
@@ -884,6 +886,7 @@
   - 想自己控制的人有地方去，不用去改既有 mode 的語意。用 `review` 湊也行，但它沒有改 task 的 tool，名字也會讓人誤會。
 - 實測：`pnpm test` 423 條、`pnpm check` 沒有錯誤。verdict 表多三列 `custom`（`succeeded` 沒有 task、`needs_input` 沒留問題、自己宣告的結果都照搬）；engine 測試確認 `custom` 拿到全部七個 tool，task 沒做完也照宣告的結果把 item 移走；flow 測試確認 `prompt` 留空就是空的，五個 task status 沒對照完被拒。
 - 重新檢視：有人需要介於兩者之間的組合（例如只要 `create_task` 不要 `set_task_status`）時，再考慮讓規則逐項勾工具。
+- 後續：mode 整個被 D109 拿掉，規則全部等於這裡的 `custom`，`dispatch` 改成規則上的開關。
 
 ## D93 看板標出被失敗送走的卡
 
@@ -982,6 +985,7 @@
   - 找不到 config 時的錯誤訊息提示跑 `tasuki init`（config-and-rules.md 路徑一節）。
 - 實測：先用 readline 版，把答案 pipe 進去打 KAN（新的暫存資料夾，環境裡拿掉 `JIRA_*`）：查出 item `10009`（故事）、task `10007`（Subtask）、link `10000`（Blocks），`.env` 權限 `-rw-------`。接著同一個資料夾 `tasuki doctor` 0 errors，14 個 warning 都是 status 還沒在設定頁對照。換成 clack 後在 100 欄的 pty 裡用方向鍵與空白鍵走完 sqlite 加 claude 加 auth-builtin，寫出的 config 正確。單元測試 mock 掉 clack，4 條：sqlite 的 config 讓 `runDoctor` 回 0；Jira 錯的 token 與錯的 project 都會重問，寫出的 id、名稱註解、`.env` 內容與權限都對；取消時不寫檔；已經有 config 時不動它。
 - 重新檢視：第三方 tracker 也想在 init 問自己的問題時（要給 plugin 一個 init 的 hook）；有腳本要不互動地產生 config 時。
+- 後續：tracker 與 agent 搬進設定頁之後，`init` 只剩登入與 port 兩題，config 檔變成選用的（D105、D110）。
 
 ## D100 S12c：container image、claude 的 `api-key` 與 `oauth-token`
 
@@ -1074,3 +1078,88 @@
   - store 的 migration 建 `item_status`。
 - 實測：`pnpm test` 502 條、`pnpm check` 沒有錯誤或警告。core 多 9 條單元測試：同一組裡移動不打 tracker、`list` 只回要的站、跨組移動後寫或刪紀錄、從同一組的另一站移動是 `StatusConflict`、同時移動只有一個成功、在 tracker 被移走後跟著 tracker 而且移回來也不會回到舊站、建在第一站以外會記、刪 item 會清、task 不受影響、`doctor` 不問同一組裡的移動。store 契約多兩條。E2E 兩邊的流程都多一站 `split-done`，跟 `refining` 共用 status，多一條主路徑：從 Move to 移到 Split Done，重新整理後還在。Jira 那邊再確認 KAN 上還是 To Do，用 Jira API 轉到 Done 之後看板跟著到 Done。sqlite 19 條、Jira 18 條過，跳過的一條是原本就有的 dispatch。
 - 重新檢視：要讓不經過 tasuki 的人或工具看得到細的站時（改放 issue property）；要讓 task status 也共用 key 時；`dataDir` 掉了位置也不能掉時；sqlite 的設定頁要能設共用時。
+
+## D105 啟動設定只留開機必要的，其他搬進設定頁
+
+- 背景：2026-11-23 作者用 sqlite 加 claude 從頭試一次（當成第一次用的人）後的回饋。為了一份 config 與一個 `data/` 開一個資料夾很怪；啟動之後大家不太會再去改檔案，有介面比較方便。推翻 D91 的分界。
+- 參考：Grafana（`grafana.ini` 加 `GF_<段>_<key>` 環境變數，datasource 在介面或 provisioning YAML）、Kibana（`kibana.yml` 放加密金鑰，connector 與密碼在介面）、n8n（只用環境變數，credentials 在介面）、Metabase（`MB_DB_*` 指 app DB，資料庫連線在 admin 頁）。共通的做法：檔案或環境變數只放開機那一刻就要知道的東西（DB 在哪、網路、加密金鑰），連外的設定與密碼在介面設、存在自己的 DB、用金鑰加密。
+- 決定：
+  - 留在檔案或環境變數的只有 store 還打不開、或還不能登入時就要知道的：`dataDir`、`store`（設定存在 store 裡）、`server`（網頁還沒起來）、`auth`（在網頁上改壞會把自己鎖在外面）。
+  - `tracker`、`agents`、`poll`、`limits`、`workspace` 搬進 store，在設定頁改。
+  - config 檔變成選用的。沒有 config 時 `tasuki start` 照樣起得來，`dataDir` 預設 `~/.tasuki`，留在檔案的那幾項也能用環境變數給。
+  - 第一次啟動沒有 tracker 時用 sqlite，要接 Jira 再到設定頁填。
+  - 換 tracker 時 board 上不能有 item，不然拒絕存檔，跟拿掉一站的檢查同一套（D91）。
+  - 看板的齒輪改成下拉選單：Workflow（現在的設定頁）、Agents、Accounts（從頭像選單搬過來）。頭像只留自己的東西：改密碼、API token、登出。下拉照 access 過濾：Workflow 給 `admin` 與 `maintainer`，Agents 與 Accounts 只給 `admin`。不登入時沒有頭像，齒輪照樣在。
+- 理由：
+  - 切的標準只有一條：開機或登入之前要知道的才留在檔案。其他放檔案只是逼人重啟。
+  - Accounts 放齒輪下：不登入時頭像不出現，但 Workflow 與 Agents 還是要找得到；照「是誰的東西」切，個人的留頭像、整個 instance 的放齒輪。
+- 代價：設定不在檔案裡，沒辦法進 git（GitOps）。要的時候參考 Grafana 的 provisioning，開機時從一個資料夾讀進來，現在不做。
+- 重新檢視：有人要設定進 git 時；要多個 instance 共用一份設定時。
+
+## D106 介面上的密碼與 token 加密存放，只能寫不能讀
+
+- 背景：同 D105。tracker 與 agent 搬進設定頁之後，Jira token、Anthropic key 這類 secret 會存在 store 裡。
+- 決定（作者同意）：
+  - secret 欄位只能寫不能讀：存過的只顯示「已設定」，可以換掉或清掉，API 也不回傳原值。
+  - 存進 store 前用一把加密金鑰加密。金鑰第一次啟動時自動產生，存在 `dataDir`；可以用環境變數蓋掉，文件寫「正式環境用環境變數給」。
+  - 金鑰不見就解不開，看板提示哪些 secret 要重填，不讓 engine 帶著解不開的設定去派 Run。
+- 理由：照 n8n 的預設，第一次用的人不用先學金鑰；Kibana 與 Metabase 都是用一把檔案或環境變數的金鑰加密介面上的 secret。
+- 代價：金鑰與 DB 預設放在同一個資料夾，`dataDir` 整包外流等於兩個一起外流。這是方便換來的，文件要寫清楚。
+- 重新檢視：要換金鑰（rotation）時；多個 instance 要共用 store 時。
+
+## D107 agent 的權限三段、hook、被擋與核准
+
+- 背景：同 D105。作者平常用 Claude Code 的 auto mode，問 tasuki 能不能也用，不放心的人再自己設權限；被權限卡住時要怎麼知道，而且不要跑很久才發現被卡。
+- 實測（claude 2.1.323，haiku，`--setting-sources ""`，2026-11-23）：
+  - `--permission-mode auto --permission-prompts none` 在 `-p` 底下能用。prompt 直接叫它跑的 `sudo -n rm -rf`、`git push --force`、`curl | sh` 全被放行，`permission_denials` 是空的：規則 prompt 對 CLI 來說就是使用者的意思。
+  - 同樣的指令寫在檔案裡、叫它讀了照做，模型自己拒絕，連工具都沒叫，只寫在文字回覆裡，沒有結構化的訊號。
+  - `dontAsk` 擋下的工具寫進最後那行 `result` 的 `permission_denials`（`tool_name` 與 `tool_input`）。
+  - `--settings <檔案>` 給的 PreToolUse hook 在 `--setting-sources ""` 底下照樣生效，exit 2 擋下的也寫進 `permission_denials`。
+  - codex 0.169.0：`--yolo` 是藏起來的別名，等於 `--dangerously-bypass-approvals-and-sandbox`；跟 auto 同一類的是 `--approve-for-me`（自動審查，留著 `workspace-write` 沙盒）。
+- 決定：
+  - Agents 頁的權限三選一，每個 runner 翻成自己的旗標：
+    | 選項 | claude | codex |
+    |---|---|---|
+    | 白名單，其他問人 | `allowedTools` 加 `--permission-prompt-tool` | `--sandbox` 加 approval（待驗證） |
+    | 自動審查 | `auto` 加 `--permission-prompts none` | `--approve-for-me` |
+    | 全開 | `bypassPermissions` | `--yolo` |
+    預設是第一段。全開在設定頁註明只適合跑在 container 裡。
+  - 白名單外的工具不再直接拒絕：CLI 透過 `--permission-prompt-tool` 呼叫 tasuki MCP 的一支 tool，engine 把請求掛在 Run 上，卡片標「等你核准」，人在看板按 Approve 或 Deny，tool 回 allow 或 deny，agent 從原地繼續。Approve 旁邊有「以後都允許」，按了順便把它寫進這個 agent 的白名單。等人時 lease 照常續約，Stop 照樣打斷。
+  - 不會問人的被擋（auto 的 classifier、hook）：runner 邊讀 stream 邊數被拒的 tool_result，被擋到第 3 次就停掉 Run，結果記成 `needs_input`。3 先寫死。
+  - Run 結束時 runner 讀 `permission_denials`，掛在 Run 上，Run 詳情列出被擋的工具與指令，卡片多一個標記。
+  - 模型自己拒絕的那種沒有結構化訊號，契約多一條：需要的事做不了（工具被擋或自己判斷不該做），馬上回報 `needs_input`，把原因寫在問題裡。
+  - Agents 頁多一格 settings JSON，runner 塞給 `--settings`，放 hook 與 permissions 的 deny 清單。`plugins`（附 `hooks/hooks.json`）照舊。hook 不做成 skill：skill 是給模型看的說明，hook 是 CLI 在叫工具前跑的程式。
+  - Agents 頁只有 `admin` 能改。規則 prompt 在 auto 底下等於授權，但誰能改 prompt 照 Workflow 的 access 走，不另外加鎖（作者選的）。
+- 理由：
+  - 問人而不是直接拒絕：不用重跑，context 還在，也不會跑一個小時才發現被卡。
+  - engine 自己讀被擋的紀錄，不靠 agent 回報：agent 被擋時會說自己沒權限，然後照樣回報成功。
+- 重新檢視：`--permission-prompt-tool` 驗完時（格式、等太久會不會 timeout）；classifier 擋的會不會進 `permission_denials` 驗完時；3 次不對時。
+
+## D108 agent 的認證三種都留，CLI 沒裝時給指令不代裝
+
+- 背景：同 D105。作者原本想要「有設定 token 才能用 claude 或 codex」，討論後要同時支援本機（已經登入過）與 VM（沒登入過）；使用者要自己裝 claude 或 codex，問能不能參考 Hermes Agent 的安裝方式。
+- 決定：
+  - Agents 頁的認證三選一：`inherit-login`、`api-key`、`oauth-token`（D100）。VM 用 `oauth-token`，在自己的電腦跑 `claude setup-token` 產生再貼過去。token 欄位照 D106 只能寫不能讀。
+  - Agents 頁打開時偵測 CLI 在不在（跟 `doctor` 一樣跑 `--version`），不在就顯示官方的安裝指令與複製按鈕。
+  - 不做「按一下幫你裝」：網頁上的按鈕在 server 跑 `curl | bash`，等於一個遠端執行的洞，admin 帳號外流就完了。
+  - container image 照舊內建 claude 與 codex（D100），走 container 的人什麼都不用裝。
+- 參考：Hermes Agent 用一行 `install.sh` 裝好 Python、Node 等依賴，裝完跑 `hermes setup` 互動設定 provider 與 key。tasuki 發到 npm 之後（S14）再考慮一支 `install.sh` 順便裝 CLI。
+- 重新檢視：S14 做安裝方式時。
+
+## D109 拿掉 mode，規則全部等於 `custom`
+
+- 背景：同 D105。作者覺得 mode 的檢查是在綁使用者，好像一定要照作者的流程走，不要限制比較重要。推翻 D92 保留 mode 的部分。
+- 決定（作者選的）：
+  - 規則的 `mode` 欄位拿掉。每條規則都拿到全部的 tool，結果一個都不驗，照表搬，跟 D92 的 `custom` 一樣：`succeeded` 必填，其他結果自己加，`prompt` 沒有預設，留空就只有契約。
+  - MCP 的四種角色（splitter、orchestrator、worker、reviewer）跟著消失。
+  - `dispatch` 留下來，變成規則上的開關：它是 engine 照依賴圖一張 task 起一個 Run，是調度行為，不是限制。打開時出口照舊由 engine 看 task 決定，agent 回報什麼都不算，表單上要寫清楚。
+  - 原本各 mode 的預設 prompt 與 outcomes 變成「新增規則」旁邊的範本選單，按了填好，存進去就是普通的規則，不留 mode 欄位。
+  - agent 還是沒有改 item status 的 tool，不變量照舊。
+- 代價：D92 寫的那層保護沒了。item 內容夾帶「直接回報成功」、或 LLM 沒拆出 task 也說成功，item 會帶著空的結果滑進下一站。作者接受。
+- 重新檢視：真的出現空結果滑進下一站、而且人沒看出來時，考慮讓規則選擇性加回幾項驗證（例如 `succeeded` 至少要有一張 task）。
+
+## D110 預設 agent 是 claude 與 codex，fake 只給測試
+
+- 背景：同 D105。
+- 決定：Agents 頁一開始預先放好 claude 與 codex 兩個 agent，認證沒設好或 CLI 沒裝的標出來（D108）。fake runner 不出現在設定頁，只給測試與 E2E 用。`init` 不再問 agent。
+- 重新檢視：第三方 runner plugin 要出現在預設清單時。
