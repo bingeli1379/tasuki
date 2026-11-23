@@ -151,7 +151,14 @@ async function save(): Promise<void> {
     const body = Object.fromEntries(
       agents.value.map((a) => [
         a.name,
-        { plugin: pluginOf(a), options: toOptions(a.fields, a.values) },
+        {
+          plugin: pluginOf(a),
+          options: toOptions(
+            a.fields,
+            a.values,
+            a.saved !== undefined && pluginOf(a) === a.saved.plugin ? a.saved.options : {},
+          ),
+        },
       ]),
     )
     await call(

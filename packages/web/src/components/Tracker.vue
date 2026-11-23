@@ -97,7 +97,10 @@ async function lookUp(): Promise<void> {
   try {
     choices.value = await call(
       '/api/tracker/choices',
-      sendJson('POST', { plugin: plugin.value, options: toOptions(fields.value, values.value) }),
+      sendJson('POST', {
+        plugin: plugin.value,
+        options: toOptions(fields.value, values.value, switched.value ? {} : loaded.value?.options),
+      }),
     )
   } catch (e) {
     toast.add({ title: messageOf(e), color: 'error' })
@@ -115,7 +118,7 @@ async function save(): Promise<void> {
       sendJson('PUT', {
         ...(version === undefined ? {} : { version }),
         plugin: plugin.value,
-        options: toOptions(fields.value, values.value),
+        options: toOptions(fields.value, values.value, switched.value ? {} : loaded.value?.options),
       }),
     )
     toast.add({ title: 'Saved: the engine runs on it now', color: 'success' })

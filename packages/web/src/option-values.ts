@@ -36,12 +36,28 @@ export function toValues(
 }
 
 // Back to the nested shape the plugin reads: issueTypes.item -> { issueTypes: { item } }.
-// Throws, naming the field, on JSON that does not parse.
+// kept: the options as saved, whose keys the form does not show are sent back as they were,
+// so a save from the page never drops them. Throws, naming the field, on JSON that does not
+// parse.
 export function toOptions(
   fields: OptionField[],
   values: Record<string, string>,
+  kept: Record<string, unknown> = {},
 ): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
+  // A JSON copy: kept is often a Vue proxy, which structuredClone refuses.
+  const out = JSON.parse(JSON.stringify(kept)) as Record<string, unknown>
+  for (const f of fields) {
+    const parts = f.key.split('.')
+    const parent = parts
+      .slice(0, -1)
+      .reduce<unknown>(
+        (at, part) =>
+          at !== null && typeof at === 'object' ? (at as Record<string, unknown>)[part] : undefined,
+        out,
+      )
+    if (parent !== null && typeof parent === 'object')
+      delete (parent as Record<string, unknown>)[parts.at(-1) ?? f.key]
+  }
   for (const f of fields) {
     const text = values[f.key] ?? ''
     if (text.trim() === '') continue

@@ -159,7 +159,10 @@ test('the Tracker page shows the tracker in use and never its token', async ({ p
 // W7 (D107, D110): the Agents page lists the agents rules pick from, each with its runner's own
 // form. A claude agent added in auto keeps its permissions and never shows its token again;
 // the fake one the board tests run on stays as it was.
-test('the Agents page adds a claude agent in auto and never shows its token', async ({ page }) => {
+test('the Agents page adds a claude agent in auto and never shows its token', async ({
+  page,
+  request,
+}) => {
   await page.goto('/')
   await page.getByRole('button', { name: 'Settings' }).click()
   await page.getByRole('menuitem', { name: 'Agents' }).click()
@@ -189,4 +192,9 @@ test('the Agents page adds a claude agent in auto and never shows its token', as
   await dialog.getByRole('button', { name: 'Save' }).click()
   await expect(page.getByText('Saved: the next Run uses it').last()).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'claude-auto' })).toHaveCount(0)
+  // The fake agent has no form; saving the page kept the options it was given.
+  const { agents } = (await (await request.get('/api/agents')).json()) as {
+    agents: { name: string; options: Record<string, unknown> }[]
+  }
+  expect(agents.find((a) => a.name === 'fake')?.options).toEqual({ seconds: 10 })
 })
