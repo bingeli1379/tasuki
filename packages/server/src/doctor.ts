@@ -15,6 +15,7 @@ import { loadFlow, type LiveFlow } from './flow'
 import { loadInstance, pollDefaultFor, type LiveInstance } from './instance'
 import { loadSecrets } from './secrets'
 import { readTrackerSettings, type TrackerSettings } from './tracker-settings'
+import { readAgentSettings, type AgentsSettings } from './agent-settings'
 import { loadAuth, loadRunner, loadStore, loadTracker, NO_STATUSES } from './plugin-loader'
 
 export interface Finding extends DoctorFinding {
@@ -127,6 +128,7 @@ export async function runDoctor(configPath: string | undefined, clock: Clock): P
   let flow: LiveFlow
   let instance: LiveInstance
   let tracker: TrackerSettings
+  let agents: AgentsSettings
   let store: Awaited<ReturnType<typeof loadStore>>
   try {
     store = await loadStore(config.store.plugin, config.store.options, config.configDir, {
@@ -138,11 +140,12 @@ export async function runDoctor(configPath: string | undefined, clock: Clock): P
     return report()
   }
   try {
-    tracker = (await readTrackerSettings(store, loadSecrets(config.dataDir), config.configDir))
-      .settings
+    const secrets = loadSecrets(config.dataDir)
+    tracker = (await readTrackerSettings(store, secrets, config.configDir)).settings
+    agents = (await readAgentSettings(store, secrets, config.configDir)).settings
     instance = await loadInstance(store, pollDefaultFor(tracker.plugin))
     flow = await loadFlow(store, {
-      agents: Object.keys(config.agents),
+      agents: Object.keys(agents),
       defaultMaxAttempts: instance.current().limits.defaultMaxAttempts,
     })
   } catch (e) {
@@ -168,8 +171,11 @@ export async function runDoctor(configPath: string | undefined, clock: Clock): P
   } catch (e) {
     fail(`tracker ${tracker.plugin}`, e)
   }
+  // What a rule runs on has to work; an agent no rule picks is the Agents page's to flag.
+  const used = new Set(flow.current().rules.map((r) => r.agent))
   const runners: Record<string, RunnerPort> = {}
-  for (const [name, agent] of Object.entries(config.agents)) {
+  for (const [name, agent] of Object.entries(agents)) {
+    if (!used.has(name)) continue
     try {
       runners[name] = await loadRunner(agent.plugin, agent.options, config.configDir, ctx)
     } catch (e) {

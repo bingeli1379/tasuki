@@ -27,10 +27,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
+import type { LiveAgents } from './agent-settings'
 import type { LiveTracker } from './tracker-settings'
 
 // The Tracker page is tested on its own; these pin the tracker they are handed.
 const PINNED = {} as LiveTracker
+const AGENTS = {} as LiveAgents
 import { createApp } from './app'
 import { createEngine } from './engine'
 import { createLiveFlow, type Flow } from './flow'
@@ -204,7 +206,7 @@ function setup(
     flow: liveFlow([split, execute, rework, review, executeOrDesign]),
     instance: createLiveInstance({ pollSeconds: 5 }),
     trackerSettings: PINNED,
-    agents: ['fake'],
+    agentSettings: AGENTS,
     tokens,
   })
   const scripts: Script[] = []
@@ -259,7 +261,7 @@ function setup(
       }),
       workspaceRoot: mkdtempSync(join(tmpdir(), 'tasuki-ws-')),
       logDir,
-      runners: { fake: runner },
+      runners: () => ({ fake: runner }),
       tokens,
       mcpUrl: 'http://localhost/agent-mcp',
       engineId: 'test-engine',

@@ -27,26 +27,9 @@
   // saved to runs the default statuses with no rules, so the engine leaves every item alone
   // until a rule is added there (D91).
 
-  // Agents are runner plugins, a package name and its options. The fake runner stands in
-  // for an agent so the engine can be tried without an LLM. A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or
-  // [fake:no_tasks] picks what it does; anything else makes two tasks and succeeds after
-  // `seconds`, [fake:manual] making the second one manual. Executing, it walks every task it
-  // can to done and reports blocked_manual when only manual ones are left.
-  //
-  // Rules on the settings page pick one of these by name. Point one at "claude" to run the real CLI with this machine's login. It may
-  // use the tasuki tools and allowedTools only; nobody is there to approve anything else.
-  // It loads none of this machine's Claude settings: give it what it needs with "plugins",
-  // "mcpServers" and "appendSystemPromptFile" (its standing instructions). A stage that needs
-  // different ones gets an agent of its own.
-  "agents": {
-    "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } },
-    "claude": {
-      "plugin": "@tasuki/claude-cli",
-      "options": {
-        "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git:*)", "Bash(node:*)"],
-      },
-    },
-  },
+  // The agents are not in this file either: they are on the Agents page under the gear, for
+  // an admin. A store never saved to has claude and codex, each on this machine's login, and
+  // the page says when a CLI is missing and how to install it (D107, D108, D110).
 
   // The poll interval and the limits are on the General page (the gear on the board), for an
   // admin: 5 seconds on sqlite, 30 on Jira, until someone saves another.

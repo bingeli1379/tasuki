@@ -155,3 +155,38 @@ test('the Tracker page shows the tracker in use and never its token', async ({ p
   await expect(page.getByRole('region', { name: /^Refining/ })).toBeVisible()
   await expect(page.getByText(/not matched to the tracker yet/)).toHaveCount(0)
 })
+
+// W7 (D107, D110): the Agents page lists the agents rules pick from, each with its runner's own
+// form. A claude agent added in auto keeps its permissions and never shows its token again;
+// the fake one the board tests run on stays as it was.
+test('the Agents page adds a claude agent in auto and never shows its token', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Agents' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Agents' })
+  await expect(dialog.getByRole('button', { name: 'fake', exact: true })).toBeVisible()
+  await dialog.getByRole('button', { name: 'Add agent' }).click()
+  await dialog.getByLabel('Name', { exact: true }).fill('claude-auto')
+  await dialog.getByRole('button', { name: 'Add', exact: true }).click()
+  await dialog.getByLabel('Permissions').click()
+  await page.getByRole('option', { name: /^Auto/ }).click()
+  await dialog.getByLabel('Sign-in').click()
+  await page.getByRole('option', { name: 'A token from claude setup-token' }).click()
+  await dialog.getByLabel('OAuth token').fill('sk-ant-oat-e2e')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Saved: the next Run uses it')).toBeVisible()
+
+  await page.reload()
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Agents' }).click()
+  await dialog.getByRole('button', { name: 'claude-auto' }).click()
+  await expect(dialog.getByLabel('Permissions')).toContainText('Auto')
+  const token = dialog.getByLabel('OAuth token')
+  await expect(token).toHaveValue('')
+  await expect(token).toHaveAttribute('placeholder', 'Set; leave blank to keep it')
+  // Taken off again, so the board tests keep running on the fake one alone.
+  await dialog.getByRole('button', { name: 'Remove claude-auto' }).click()
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(page.getByText('Saved: the next Run uses it').last()).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'claude-auto' })).toHaveCount(0)
+})

@@ -1155,6 +1155,17 @@
 - 理由：
   - 問人而不是直接拒絕：不用重跑，context 還在，也不會跑一個小時才發現被卡。
   - engine 自己讀被擋的紀錄，不靠 agent 回報：agent 被擋時會說自己沒權限，然後照樣回報成功。
+- 實作（W7，2026-11-24）：
+  - agent 是 store 裡第四份設定文件 `agents`（名字對到 `plugin` 加 `options`），自己有版本號，只給 `admin`。檔案裡的 `agents` 拿掉，寫了就拒絕啟動。名字是小寫英數字與 `-`，建了不能改名（規則用名字指它）；還有規則指著的不能拿掉。存檔時照 plugin 的表單檢查必填、每個 agent 載一次 plugin，失敗就拒絕；成功就換掉，下一個 Run 用新的，跑著的照舊，流程設定認得的 agent 名單跟著換。
+  - 權限三段放在 runner 自己的 `options.permissions`，不放 core。動工前以為 W8 的 engine 要知道現在是不是白名單才知道要掛核准，看過 runner 之後發現 `--permission-prompt-tool` 是 runner 組指令時加的，engine 只要接得住請求，不用知道是哪一段。「以後都允許」要寫回哪個欄位留給 W8 決定。
+  - claude：`allowlist` 是 `dontAsk`，`auto` 是 `--permission-mode auto --permission-prompts none`，`bypass` 是 `bypassPermissions`；`settings` 用 `--settings` 傳 JSON 字串。codex：`allowlist` 是 `--sandbox workspace-write` 加 `approval_policy="never"`，`auto` 是 `--approve-for-me`，`bypass` 用 `--dangerously-bypass-approvals-and-sandbox`（`--yolo` 是藏起來的別名，用寫在 help 上的那個）。codex 原本的 `sandbox` 拿掉。
+  - 兩個 runner 都只把選中的認證方式的變數交給 CLI，沒選的那個丟掉：頁面上存過的 secret 只能換不能清，原本 claude 遇到兩個都有就拒絕載入，會讓人卡在頁面上出不去。
+  - codex 的基礎層 `appendSystemPrompt` 接在 engine 的 prompt 後面，因為 codex 沒有 `--append-system-prompt`（D77 的重新檢視條件）。
+  - CLI 沒裝或跑不起來不再擋啟動，只印出來：預設的 codex 在沒裝的機器上會讓整個 engine 起不來。用到它的 Run 照樣會失敗，Agents 頁標出來並附 D108 的安裝指令。`doctor` 只查有規則指著的 agent。
+  - REST：`GET`、`PUT /api/agents`，`GET /api/agents/form?plugin=`，`GET /api/agents/check` 跑每個 agent 的 doctor，頁面另外要，因為 `requires` 會起一次 CLI。跟流程設定一樣不進使用者 MCP。
+  - `init` 不再問 agent，只剩登入與 port。E2E 的 setup 用 API 存 fake agent，因為頁面不列它（D110）。
+  - 範圍外：給 agent 的其他環境變數（例如 `GITLAB_TOKEN`）沒有欄位，store 裡的值也不展開 `${VAR}`，等有人要再加一種可以放 secret 的 key-value 欄位；`inheritSettings` 沒有勾選框，表單還沒有布林型別。
+- 實測（W7）：`pnpm test` 537 條、`pnpm check` 沒有錯誤，多的是 agent 設定六條（預設 claude 與 codex、存了下一個 Run 用新的並讓規則選得到、secret 封起來且不回傳且留空沿用、還有規則指著的拒絕、必填與載不起來與名字不合法都拒絕而且不動到正在用的、只有 admin），runner 多了權限三段、`--settings`、只留選中的認證、codex 基礎層接在後面。拿掉「還有規則指著的不能刪」與「不回傳 secret」各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 全過，Jira 21 條過（跳過的一條是原本就有的 dispatch）；`pnpm verify:cli-install` 過，它的 config 從 W6a 起就還寫著已經搬走的 `poll`，這次跟 `agents` 一起拿掉。多一條 Agents 頁的主路徑：加一個 claude agent、切成 auto、填 OAuth token，重新整理後還是 auto，token 欄位是空的、只寫著已設定。真的跑一次（claude 2.1.323，haiku，sqlite，2026-11-24）：只放 port 的空資料夾 `tasuki start`，API 把 claude 切成 auto，掛一條 split 規則，item 拖進 `ready-to-split`，stream 的 `permissionMode` 是 `auto`，9 turns、$0.0036、`permission_denials` 是空的，拆出一張 task，item 到 `split-review`。
 - 重新檢視：`--permission-prompt-tool` 驗完時（格式、等太久會不會 timeout）；classifier 擋的會不會進 `permission_denials` 驗完時；3 次不對時。
 
 ## D108 agent 的認證三種都留，CLI 沒裝時給指令不代裝

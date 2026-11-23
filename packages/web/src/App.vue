@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, useTemplateRef, watch } from 'vu
 import { ApiError, call, messageOf, sendJson, type Account, type AuthState, type Item } from './api'
 import AccountMenu from './components/AccountMenu.vue'
 import Accounts from './components/Accounts.vue'
+import Agents from './components/Agents.vue'
 import General from './components/General.vue'
 import Tracker from './components/Tracker.vue'
 import ItemDetail from './components/ItemDetail.vue'
@@ -46,6 +47,7 @@ const unmatched = ref<string[]>([])
 const settingsOpen = ref(false)
 const generalOpen = ref(false)
 const trackerOpen = ref(false)
+const agentsOpen = ref(false)
 const accountsOpen = ref(false)
 const editsFlow = computed(
   () =>
@@ -60,6 +62,7 @@ const settingsItems = computed(() => [
   ...(isAdmin.value
     ? [
         { label: 'Tracker', onSelect: () => (trackerOpen.value = true) },
+        { label: 'Agents', onSelect: () => (agentsOpen.value = true) },
         { label: 'General', onSelect: () => (generalOpen.value = true) },
       ]
     : []),
@@ -509,6 +512,7 @@ onMounted(start)
             </UDropdownMenu>
             <Settings v-if="editsFlow" v-model:open="settingsOpen" @saved="load" />
             <Tracker v-if="isAdmin" v-model:open="trackerOpen" @saved="load" />
+            <Agents v-if="isAdmin" v-model:open="agentsOpen" />
             <General v-if="isAdmin" v-model:open="generalOpen" />
             <Accounts
               v-if="isAdmin && auth.me"

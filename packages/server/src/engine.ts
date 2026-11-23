@@ -38,8 +38,9 @@ export interface EngineDeps {
   workspaceRoot: string
   // Each Run's log is <logDir>/<run id>.log, on this machine whichever store holds the Run.
   logDir: string
-  // One per agent name in config.
-  runners: Readonly<Record<string, RunnerPort>>
+  // One per agent name, read at each Run's start: a save on the Agents page applies from the
+  // next Run (D107).
+  runners: () => Readonly<Record<string, RunnerPort>>
   tokens: RunTokens
   // Where agents reach the MCP facade.
   mcpUrl: string
@@ -80,7 +81,7 @@ export function createEngine(deps: EngineDeps): Engine {
     { run, rule }: Claimed,
     named: ReturnType<typeof itemStatusNames>,
   ): Promise<{ done: Promise<void> }> {
-    const runner = deps.runners[rule.agent]
+    const runner = deps.runners()[rule.agent]
     const token = tokens.issue(run.id, rule)
     const renew = setInterval(
       () => {

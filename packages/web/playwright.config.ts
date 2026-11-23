@@ -73,10 +73,9 @@ if (
   await emptyJiraProject()
 }
 
-// The poll interval is an instance setting, saved by flow.setup.ts (D105).
-const engineFile = {
-  agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 10 } } },
-}
+// The poll interval and the agents are instance settings, saved by flow.setup.ts (D105,
+// D107). The fake runner is on no page's list, so it is saved through the API.
+const agents = { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 10 } } }
 
 // Rules split, execute and rework on the fake runner (S4, S6, S7b), and an AI review station
 // whose rule sends the item one of two ways (W2). Flow settings live in the store (D91), so
@@ -125,10 +124,7 @@ const rules = [
 
 function engine(name: string, port: number, config: object): string {
   const file = join(dir, `${name}.config.jsonc`)
-  writeFileSync(
-    file,
-    JSON.stringify({ dataDir: `./${name}`, server: { port }, ...engineFile, ...config }),
-  )
+  writeFileSync(file, JSON.stringify({ dataDir: `./${name}`, server: { port }, ...config }))
   return file
 }
 
@@ -256,7 +252,7 @@ const config: PlaywrightTestConfig = defineConfig({
       name: `${t.name}-flow`,
       testMatch: 'flow.setup.ts',
       use: { baseURL: `http://localhost:${t.web}` },
-      metadata: { flow: t.flow, ...('tracker' in t ? { tracker: t.tracker } : {}) },
+      metadata: { flow: t.flow, agents, ...('tracker' in t ? { tracker: t.tracker } : {}) },
     })),
     ...[...trackers, signIn, signInHttp].map((t) => ({
       name: t.name,

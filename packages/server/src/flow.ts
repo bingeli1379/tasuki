@@ -33,8 +33,8 @@ export interface Flow {
   holdLabel: string
 }
 
-// What a flow is checked against from the file and the instance settings: rules name the
-// file's agents, and take the instance's attempts when they set none.
+// What a flow is checked against from the instance settings: rules name the agents, and take
+// the instance's attempts when they set none.
 export interface FlowContext {
   agents: readonly string[]
   defaultMaxAttempts: number
@@ -178,8 +178,7 @@ function parseRules(
     const claim = raw['claim'] === undefined ? undefined : status('claim', text('claim'))
     if (claim === watch) fail(`${path}.claim must differ from watch`)
     const agent = text('agent')
-    if (!ctx.agents.includes(agent))
-      fail(`${path}.agent: no agent "${agent}" in the config file's agents`)
+    if (!ctx.agents.includes(agent)) fail(`${path}.agent: no agent "${agent}" on the Agents page`)
     const mode = text('mode') as RuleMode
     if (!MODES.includes(mode)) fail(`${path}.mode must be one of ${MODES.join(', ')}`)
     const rawOutcomes = raw['outcomes'] ?? {}
@@ -354,8 +353,8 @@ export function createLiveFlow(
   return live
 }
 
-// The flow as last saved, or the default; a saved one the file no longer fits (an agent its
-// rules use was renamed) stops the start, since only the file can put that right.
+// The flow as last saved, or the default; a saved one the rest no longer fits stops the start.
+// The Agents page refuses to drop an agent a rule uses, so it takes a store edited by hand.
 export async function loadFlow(store: StorePort, ctx: FlowContext): Promise<LiveFlow> {
   const latest = await store.latestSettings('flow')
   const raw = latest?.value ?? DEFAULT_FLOW
@@ -364,7 +363,7 @@ export async function loadFlow(store: StorePort, ctx: FlowContext): Promise<Live
     flow = parseFlow(raw, ctx)
   } catch (e) {
     throw new Error(
-      `the flow saved in the store does not fit this config file: ${e instanceof Error ? e.message : String(e)}`,
+      `the flow saved in the store does not fit the other settings: ${e instanceof Error ? e.message : String(e)}`,
     )
   }
   return createLiveFlow(ctx, {

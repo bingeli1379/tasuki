@@ -45,30 +45,29 @@ const clock = { now: () => new Date() }
 vi.spyOn(console, 'log').mockImplementation(() => {})
 
 describe('tasuki init', () => {
-  it('writes a config that doctor passes, the tracker left to the board (D105)', async () => {
+  it('writes a config that doctor passes, the tracker and agents left to the board (D105)', async () => {
     const config = configIn()
-    scripted([['fake'], 'none', '8787'])
+    scripted(['none', '8787'])
     await init(config)
     expect(answers).toEqual([])
     const text = readFileSync(config, 'utf8')
-    expect(text).toContain('"@tasuki/fake-runner"')
     expect(text).not.toContain('"tracker"')
+    expect(text).not.toContain('"agents"')
     expect(await runDoctor(config, clock)).toBe(0)
   })
 
   it('writes the port and the sign-in picked', async () => {
     const config = configIn()
-    scripted([['claude', 'codex'], 'auth-builtin', '9000'])
+    scripted(['auth-builtin', '9000'])
     await init(config)
     const text = readFileSync(config, 'utf8')
     expect(text).toContain('"port": 9000')
     expect(text).toContain('"@tasuki/auth-builtin"')
-    expect(text).toContain('"@tasuki/codex-cli"')
   })
 
   it('writes nothing when cancelled', async () => {
     const config = configIn()
-    scripted([['fake'], CANCEL])
+    scripted([CANCEL])
     await init(config)
     expect(existsSync(config)).toBe(false)
   })

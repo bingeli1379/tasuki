@@ -207,10 +207,7 @@ describe('parseFlow', () => {
       'rules[0] (split).watch: status "ready" is not in workflow.statuses',
     ],
     [{ ...split, claim: 'ready-to-split' }, 'rules[0] (split).claim must differ from watch'],
-    [
-      { ...split, agent: 'claude' },
-      `rules[0] (split).agent: no agent "claude" in the config file's agents`,
-    ],
+    [{ ...split, agent: 'claude' }, `rules[0] (split).agent: no agent "claude" on the Agents page`],
     [
       { ...split, mode: 'judge' },
       'rules[0] (split).mode must be one of split, execute, dispatch, rework, review, custom',

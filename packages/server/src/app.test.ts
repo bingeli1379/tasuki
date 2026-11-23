@@ -14,10 +14,12 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
+import type { LiveAgents } from './agent-settings'
 import type { LiveTracker } from './tracker-settings'
 
 // The Tracker page is tested on its own; these pin the tracker they are handed.
 const PINNED = {} as LiveTracker
+const AGENTS = {} as LiveAgents
 import { createApp } from './app'
 import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
 import { defaultPrompt } from './prompts'
@@ -68,7 +70,7 @@ const appWith = (): ReturnType<typeof createApp> =>
     flow: liveFlow(mapping),
     instance: createLiveInstance({ pollSeconds: 5 }),
     trackerSettings: PINNED,
-    agents: [],
+    agentSettings: AGENTS,
     tokens: createRunTokens(),
   })
 
@@ -319,7 +321,7 @@ describe('tasks', () => {
       flow: liveFlow(taskMapping),
       instance: createLiveInstance({ pollSeconds: 5 }),
       trackerSettings: PINNED,
-      agents: [],
+      agentSettings: AGENTS,
       tokens: createRunTokens(),
     })
     const item = await tracker.createItem({ title: 'Item', body: '', status: 'split-review' })
@@ -556,7 +558,7 @@ describe('the flow settings (D91)', () => {
       flow,
       instance: createLiveInstance({ pollSeconds: 5 }),
       trackerSettings: PINNED,
-      agents: ['fake'],
+      agentSettings: AGENTS,
       tokens: createRunTokens(),
     })
     return { app, tracker }
@@ -639,7 +641,7 @@ describe('the flow settings (D91)', () => {
     })
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
-      error: `rules[0] (split).agent: no agent "claude" in the config file's agents`,
+      error: `rules[0] (split).agent: no agent "claude" on the Agents page`,
     })
   })
 
@@ -683,7 +685,7 @@ describe('the built board', () => {
       flow: liveFlow(mapping),
       instance: createLiveInstance({ pollSeconds: 5 }),
       trackerSettings: PINNED,
-      agents: [],
+      agentSettings: AGENTS,
       tokens: createRunTokens(),
       webDir,
     })
@@ -706,7 +708,7 @@ describe('instance settings (D105)', () => {
       flow,
       instance,
       trackerSettings: PINNED,
-      agents: ['fake'],
+      agentSettings: AGENTS,
       tokens: createRunTokens(),
     })
     return { app, flow, instance }

@@ -16,6 +16,16 @@ import {
 import type { LiveFlow } from './flow'
 import { pollDefaultFor, type LiveInstance } from './instance'
 import { loadTracker, loadTrackerForm } from './plugin-loader'
+import {
+  checkRequired,
+  getPath,
+  isObject,
+  keepSecrets,
+  mapSecrets,
+  secretKeys,
+  withoutSecrets,
+  type Raw,
+} from './options-form'
 import type { Secrets } from './secrets'
 
 // Which tracker the engine runs on, kept in the store and edited by an admin on the Tracker
@@ -27,48 +37,6 @@ export interface TrackerSettings {
 
 // Until an admin picks one (D1).
 export const DEFAULT_TRACKER: TrackerSettings = { plugin: '@tasuki/sqlite', options: {} }
-
-type Raw = Record<string, unknown>
-
-const isObject = (value: unknown): value is Raw =>
-  value !== null && typeof value === 'object' && !Array.isArray(value)
-
-function getPath(options: Raw, key: string): unknown {
-  return key
-    .split('.')
-    .reduce<unknown>((at, part) => (isObject(at) ? at[part] : undefined), options)
-}
-
-// A copy with the value at key set, or removed when value is undefined.
-function setPath(options: Raw, key: string, value: unknown): Raw {
-  const [head, ...rest] = key.split('.') as [string, ...string[]]
-  const copy = { ...options }
-  if (rest.length === 0) {
-    if (value === undefined) delete copy[head]
-    else copy[head] = value
-    return copy
-  }
-  copy[head] = setPath(isObject(copy[head]) ? copy[head] : {}, rest.join('.'), value)
-  return copy
-}
-
-const secretKeys = (form: OptionsForm | undefined): string[] =>
-  (form?.fields ?? []).filter((f) => f.type === 'secret').map((f) => f.key)
-
-function mapSecrets(options: Raw, keys: string[], map: (v: string) => string): Raw {
-  let out = options
-  for (const key of keys) {
-    const v = getPath(options, key)
-    if (typeof v === 'string' && v !== '') out = setPath(out, key, map(v))
-  }
-  return out
-}
-
-function withoutSecrets(options: Raw, keys: string[]): Raw {
-  let out = options
-  for (const key of keys) out = setPath(out, key, undefined)
-  return out
-}
 
 // What the Tracker page shows: never a secret, only whether it is set.
 export interface TrackerView {
@@ -158,15 +126,12 @@ export async function createLiveTracker(
     }
   }
   // A secret left blank keeps the one in use when the plugin stays the same.
-  const filled = (plugin: string, options: Raw, form: OptionsForm | undefined): Raw => {
-    let out = options
-    for (const key of secretKeys(form)) {
-      const v = getPath(options, key)
-      if ((v === undefined || v === '') && plugin === settings.plugin)
-        out = setPath(out, key, getPath(settings.options, key))
-    }
-    return out
-  }
+  const filled = (plugin: string, options: Raw, form: OptionsForm | undefined): Raw =>
+    keepSecrets(
+      options,
+      secretKeys(form),
+      plugin === settings.plugin ? settings.options : undefined,
+    )
   return {
     port,
     current: () => settings,
@@ -208,11 +173,8 @@ export async function createLiveTracker(
         plugin: rawPlugin,
         options: filled(rawPlugin, rawOptions ?? {}, form),
       }
-      for (const field of form?.fields ?? []) {
-        const v = getPath(next.options, field.key)
-        if (field.required === true && (v === undefined || v === ''))
-          throw new InvalidInput(`${field.label} is required`)
-      }
+      const missing = checkRequired(next.options, form)
+      if (missing !== undefined) throw new InvalidInput(missing)
       // Only the secrets changed: the same tracker with a new token, nothing to move off it.
       const moves =
         next.plugin !== settings.plugin ||

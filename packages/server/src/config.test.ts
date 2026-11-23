@@ -32,7 +32,7 @@ describe('loadConfig', () => {
   it('needs no file: with none in the working folder it runs on the defaults (D105)', () => {
     const empty = mkdtempSync(join(tmpdir(), 'tasuki-config-'))
     const config = loadConfig(undefined, empty)
-    expect(config).toMatchObject({ configDir: empty, host: '127.0.0.1', port: 8787, agents: {} })
+    expect(config).toMatchObject({ configDir: empty, host: '127.0.0.1', port: 8787 })
     expect(config.auth).toBeUndefined()
   })
 
@@ -134,19 +134,6 @@ describe('loadConfig', () => {
     )
   })
 
-  it('reads agents', () => {
-    const config = loadConfig(
-      write(
-        JSON.stringify({
-          agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } } },
-        }),
-      ),
-    )
-    expect(config.agents).toEqual({
-      fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } },
-    })
-  })
-
   it('refuses a field it does not hold, the ones in the store included (D91, D105)', () => {
     for (const field of [
       'workflow',
@@ -157,6 +144,7 @@ describe('loadConfig', () => {
       'limits',
       'workspace',
       'tracker',
+      'agents',
     ])
       expect(() => loadConfig(write(JSON.stringify({ [field]: {} })))).toThrow(
         `config ${field}: not a field of the config file`,

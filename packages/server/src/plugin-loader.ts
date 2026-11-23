@@ -90,6 +90,16 @@ export async function loadTrackerForm(
   return p.forms?.tracker
 }
 
+// The form the Agents page draws for a runner plugin's options; none when it gives none.
+export async function loadRunnerForm(
+  name: string,
+  configDir: string,
+): Promise<OptionsForm | undefined> {
+  const p = await loadPlugin(name, configDir)
+  if (p.runner === undefined) throw new Error(`plugin "${name}": does not provide a runner`)
+  return p.forms?.runner
+}
+
 export async function loadTracker(
   name: string,
   options: unknown,

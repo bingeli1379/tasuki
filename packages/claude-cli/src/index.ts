@@ -2,6 +2,7 @@ import {
   API_VERSION,
   definePlugin,
   type DoctorFinding,
+  type OptionsForm,
   type Plugin,
   type RunExit,
   type RunSpec,
@@ -11,13 +12,22 @@ import { randomUUID } from 'node:crypto'
 import { createWriteStream, existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+// What the agent may do without asking (D107): only allowedTools, the rest refused; whatever
+// Claude's own classifier lets through; or everything, which only belongs in a container.
+const PERMISSIONS = ['allowlist', 'auto', 'bypass'] as const
+type Permissions = (typeof PERMISSIONS)[number]
+
 interface ClaudeOptions {
   // The CLI to run; tests point it at a stand-in.
   command: string
   model?: string
+  permissions: Permissions
   // Tools allowed on top of the tasuki MCP tools, in Claude Code's own syntax, e.g.
-  // "Read", "Bash(git:*)". Anything else is refused, since nobody is there to approve (D35).
+  // "Read", "Bash(git:*)". Under allowlist anything else is refused, since nobody is there to
+  // approve (D35).
   allowedTools: string[]
+  // Claude Code settings passed with --settings, e.g. hooks and permissions.deny (D107).
+  settings?: Record<string, unknown>
   // Passed to the spawned CLI only.
   env: Record<string, string>
   // false: the agent loads none of the machine's Claude settings, CLAUDE.md, hooks, plugins
@@ -54,19 +64,18 @@ const AUTH_ENV: Record<string, string> = {
   'oauth-token': 'CLAUDE_CODE_OAUTH_TOKEN',
 }
 
-function checkAuth(auth: unknown, env: Record<string, string>): void {
-  if (auth === 'inherit-login') return
-  const variable = typeof auth === 'string' ? AUTH_ENV[auth] : undefined
-  if (variable === undefined)
+// The variables of the ways not picked are dropped: the Agents page keeps a secret until it is
+// replaced, and under -p an API key wins over the token.
+function authEnv(auth: unknown, env: Record<string, string>): Record<string, string> {
+  if (auth !== 'inherit-login' && (typeof auth !== 'string' || AUTH_ENV[auth] === undefined))
     throw new Error('options.auth must be inherit-login, api-key or oauth-token')
-  if ((env[variable] ?? '') === '')
-    throw new Error(`options.auth ${String(auth)} needs options.env.${variable}`)
-  if (auth === 'oauth-token')
-    for (const key of ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN'])
-      if (env[key] !== undefined)
-        throw new Error(
-          `options.auth oauth-token: drop options.env.${key}, which claude uses over the token`,
-        )
+  const variable = AUTH_ENV[auth]
+  if (variable !== undefined && (env[variable] ?? '') === '')
+    throw new Error(`options.auth ${auth} needs options.env.${variable}`)
+  const unpicked = [...Object.values(AUTH_ENV), 'ANTHROPIC_AUTH_TOKEN'].filter(
+    (k) => k !== variable,
+  )
+  return Object.fromEntries(Object.entries(env).filter(([k]) => !unpicked.includes(k)))
 }
 
 function parseOptions(raw: unknown, configDir: string): ClaudeOptions {
@@ -84,7 +93,15 @@ function parseOptions(raw: unknown, configDir: string): ClaudeOptions {
     Object.values(env).some((v) => typeof v !== 'string')
   )
     throw new Error('options.env must map names to strings')
-  checkAuth(o['auth'] ?? 'inherit-login', env as Record<string, string>)
+  const permissions = o['permissions'] ?? 'allowlist'
+  if (!PERMISSIONS.includes(permissions as Permissions))
+    throw new Error(`options.permissions must be ${PERMISSIONS.join(', ')}`)
+  const settings = o['settings']
+  if (
+    settings !== undefined &&
+    (typeof settings !== 'object' || settings === null || Array.isArray(settings))
+  )
+    throw new Error('options.settings must be an object of Claude Code settings')
   const plugins = strings('plugins').map((p) => {
     const dir = resolve(configDir, p)
     if (!existsSync(dir)) throw new Error(`options.plugins: ${dir} does not exist`)
@@ -122,8 +139,10 @@ function parseOptions(raw: unknown, configDir: string): ClaudeOptions {
   return {
     command: typeof o['command'] === 'string' ? o['command'] : 'claude',
     ...(typeof model === 'string' ? { model } : {}),
+    permissions: permissions as Permissions,
     allowedTools: strings('allowedTools'),
-    env: env as Record<string, string>,
+    ...(settings === undefined ? {} : { settings: settings as Record<string, unknown> }),
+    env: authEnv(o['auth'] ?? 'inherit-login', env as Record<string, string>),
     inheritSettings: o['inheritSettings'] === true,
     plugins,
     mcpServers: mcpServers as Record<string, unknown>,
@@ -153,11 +172,10 @@ function claudeArgs(
     '--output-format',
     'stream-json',
     '--verbose',
-    // Whatever allowedTools does not cover is refused instead of waiting for a person.
-    '--permission-mode',
-    'dontAsk',
+    ...PERMISSION_ARGS[options.permissions],
     '--allowedTools',
     ['mcp__tasuki', ...options.allowedTools].join(','),
+    ...(options.settings === undefined ? [] : ['--settings', JSON.stringify(options.settings)]),
     '--mcp-config',
     JSON.stringify(mcp),
     ...('resume' in session ? ['--resume', session.resume] : ['--session-id', session.id]),
@@ -167,6 +185,96 @@ function claudeArgs(
       ? []
       : ['--append-system-prompt', options.appendSystemPrompt]),
   ]
+}
+
+// Each way of permitting in claude's own flags (D107). Nobody is there to answer a prompt, so
+// auto denies whatever its classifier would have asked about.
+const PERMISSION_ARGS: Record<Permissions, string[]> = {
+  allowlist: ['--permission-mode', 'dontAsk'],
+  auto: ['--permission-mode', 'auto', '--permission-prompts', 'none'],
+  bypass: ['--permission-mode', 'bypassPermissions'],
+}
+
+// The official installer (code.claude.com/docs/en/setup), shown when the CLI is missing; tasuki
+// never runs it itself (D108).
+const INSTALL = 'curl -fsSL https://claude.ai/install.sh | bash'
+
+// What the Agents page asks for (D111).
+const FORM: OptionsForm = {
+  fields: [
+    {
+      key: 'permissions',
+      label: 'Permissions',
+      type: 'select',
+      required: true,
+      choices: [
+        { value: 'allowlist', label: 'Allowed tools only, anything else refused' },
+        { value: 'auto', label: "Auto: Claude's classifier decides" },
+        { value: 'bypass', label: 'Everything: only in a container' },
+      ],
+    },
+    {
+      key: 'allowedTools',
+      label: 'Allowed tools',
+      type: 'list',
+      description:
+        'One per line, in Claude Code syntax, e.g. Read or Bash(git:*). The tasuki tools are always allowed.',
+    },
+    {
+      key: 'auth',
+      label: 'Sign-in',
+      type: 'select',
+      choices: [
+        { value: 'inherit-login', label: "This machine's claude login" },
+        { value: 'api-key', label: 'An Anthropic API key' },
+        { value: 'oauth-token', label: 'A token from claude setup-token' },
+      ],
+    },
+    { key: 'env.ANTHROPIC_API_KEY', label: 'API key', type: 'secret' },
+    {
+      key: 'env.CLAUDE_CODE_OAUTH_TOKEN',
+      label: 'OAuth token',
+      type: 'secret',
+      description: 'Run claude setup-token on a machine you are signed in on, and paste it here.',
+    },
+    { key: 'model', label: 'Model', type: 'text', placeholder: 'the CLI default' },
+    {
+      key: 'appendSystemPrompt',
+      label: 'Base prompt',
+      type: 'textarea',
+      description: "This agent's standing instructions, under every rule's prompt.",
+    },
+    {
+      key: 'plugins',
+      label: 'Plugins',
+      type: 'list',
+      description: 'Claude Code plugin folders on this machine, one per line.',
+    },
+    {
+      key: 'mcpServers',
+      label: 'MCP servers',
+      type: 'json',
+      description: "In Claude Code's mcpServers shape. Their tools still go in Allowed tools.",
+    },
+    {
+      key: 'settings',
+      label: 'Settings',
+      type: 'json',
+      description: 'Claude Code settings for this agent, e.g. hooks and permissions.deny.',
+    },
+    {
+      key: 'requires.skills',
+      label: 'Required skills',
+      type: 'list',
+      description: 'Checked at start: each has to be loaded.',
+    },
+    {
+      key: 'requires.mcpServers',
+      label: 'Required MCP servers',
+      type: 'list',
+      description: 'Checked at start: each has to connect.',
+    },
+  ],
 }
 
 // What decides which skills and MCP servers the agent has, the same for a Run and for doctor.
@@ -246,6 +354,7 @@ function readInit(options: ClaudeOptions, cwd: string): Promise<Init | string> {
 const plugin: Plugin = definePlugin({
   name: '@tasuki/claude-cli',
   apiVersion: API_VERSION,
+  forms: { runner: FORM },
   runner: (ctx, raw) => {
     const options = parseOptions(raw, ctx.configDir)
     return {
@@ -260,9 +369,10 @@ const plugin: Plugin = definePlugin({
             {
               level: 'error',
               message: `${options.command} does not run: ${version.error?.message ?? `--version exited with ${String(version.status)}`}`,
+              fix: INSTALL,
             },
           ]
-        if (options.allowedTools.length === 0)
+        if (options.permissions === 'allowlist' && options.allowedTools.length === 0)
           findings.push({
             level: 'warning',
             message:

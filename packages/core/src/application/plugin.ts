@@ -39,11 +39,14 @@ export interface OptionField {
   // A dot path into the options, e.g. issueTypes.item.
   key: string
   label: string
-  // A secret is kept encrypted and never shown again once saved (D106).
-  type: 'text' | 'secret' | 'select'
+  // A secret is kept encrypted and never shown again once saved (D106). A list is strings,
+  // one per line on the page; json is any JSON value, an object for most.
+  type: 'text' | 'textarea' | 'secret' | 'select' | 'list' | 'json'
   required?: boolean
   description?: string
   placeholder?: string
+  // The choices of a select that are known without looking anything up.
+  choices?: OptionChoice[]
 }
 
 export interface OptionChoice {
@@ -67,7 +70,7 @@ export interface Plugin {
   runner?: RunnerFactory
   auth?: AuthFactory
   // How the settings page asks for each role's options; a role without one gets no form.
-  forms?: { tracker?: OptionsForm }
+  forms?: { tracker?: OptionsForm; runner?: OptionsForm }
 }
 
 export function definePlugin(plugin: Plugin): Plugin {

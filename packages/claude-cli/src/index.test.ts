@@ -70,7 +70,11 @@ function setup(fake = '', extra: Record<string, unknown> = {}) {
         task: TASK_STATUS_DISPLAY,
       }),
     },
-    { command, env: { FAKE: fake, FAKE_OUT: out }, ...extra },
+    {
+      command,
+      ...extra,
+      env: { FAKE: fake, FAKE_OUT: out, ...(extra['env'] as object | undefined) },
+    },
   ) as RunnerPort
   const sessions: string[] = []
   let activity = 0
@@ -162,6 +166,36 @@ describe('claude-cli runner', () => {
     ])
     // Still isolated: only what the config names is loaded.
     expect(args).toContain('--strict-mcp-config')
+  })
+
+  it.each([
+    ['auto', ['--permission-mode', 'auto', '--permission-prompts', 'none']],
+    ['bypass', ['--permission-mode', 'bypassPermissions']],
+  ])('permissions %s runs it with %j', async (permissions, flags) => {
+    const t = setup('', { permissions, allowedTools: ['Read'] })
+    await t.runner.start(t.spec()).exit
+    const args = t.calls()[0]?.args ?? []
+    const at = args.indexOf('--permission-mode')
+    expect(args.slice(at, at + flags.length)).toEqual(flags)
+    expect(t.arg(args, '--allowedTools')).toBe('mcp__tasuki,Read')
+  })
+
+  it('hands claude the settings it is given, hooks and all', async () => {
+    const settings = { hooks: { PreToolUse: [] }, permissions: { deny: ['Bash(rm:*)'] } }
+    const t = setup('', { settings })
+    await t.runner.start(t.spec()).exit
+    expect(JSON.parse(t.arg(t.calls()[0]?.args ?? [], '--settings') ?? '')).toEqual(settings)
+  })
+
+  it('keeps only the sign-in it is told to use from what the Agents page holds', async () => {
+    const t = setup('', {
+      auth: 'oauth-token',
+      env: { CLAUDE_CODE_OAUTH_TOKEN: 't', ANTHROPIC_API_KEY: 'k' },
+    })
+    await t.runner.start(t.spec()).exit
+    const env = t.calls()[0]?.env ?? {}
+    expect(env['CLAUDE_CODE_OAUTH_TOKEN']).toBe('t')
+    expect(env['ANTHROPIC_API_KEY']).toBeUndefined()
   })
 
   it('loads the machine settings when inheritSettings is on', async () => {
@@ -258,15 +292,11 @@ describe('claude-cli runner', () => {
     expect(make({ auth: 'oauth-token', env: { CLAUDE_CODE_OAUTH_TOKEN: '' } })).toThrow(
       'needs options.env.CLAUDE_CODE_OAUTH_TOKEN',
     )
-    expect(
-      make({
-        auth: 'oauth-token',
-        env: { CLAUDE_CODE_OAUTH_TOKEN: 't', ANTHROPIC_API_KEY: 'k' },
-      }),
-    ).toThrow('drop options.env.ANTHROPIC_API_KEY')
     expect(make({ auth: 'api-key', env: { ANTHROPIC_API_KEY: 'k' } })).not.toThrow()
     expect(make({ auth: 'oauth-token', env: { CLAUDE_CODE_OAUTH_TOKEN: 't' } })).not.toThrow()
     expect(make({ allowedTools: 'Read' })).toThrow('options.allowedTools must be a list')
+    expect(make({ permissions: 'all' })).toThrow('options.permissions must be')
+    expect(make({ settings: [] })).toThrow('options.settings must be an object')
     expect(make({ env: { A: 1 } })).toThrow('options.env must map names to strings')
     expect(make({ plugins: ['/nowhere/sdd'] })).toThrow('/nowhere/sdd does not exist')
     expect(make({ mcpServers: { tasuki: {} } })).toThrow('the name tasuki is taken')
@@ -282,6 +312,7 @@ describe('claude-cli doctor', () => {
     expect(findings).toHaveLength(1)
     expect(findings?.[0]?.level).toBe('error')
     expect(findings?.[0]?.message).toContain('/nonexistent/claude does not run')
+    expect(findings?.[0]?.fix).toContain('install.sh')
   })
 
   it('warns on empty allowedTools, and starts nothing more when nothing is required', async () => {

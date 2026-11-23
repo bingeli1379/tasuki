@@ -58,6 +58,7 @@ import { createAgentMcpServer } from './agent-mcp'
 import { DEFAULT_FLOW, type LiveFlow } from './flow'
 import type { LiveInstance } from './instance'
 import type { LiveTracker } from './tracker-settings'
+import type { LiveAgents } from './agent-settings'
 import { describeChanges } from './flow-changes'
 import { createMcpServer } from './mcp'
 import { defaultPrompt } from './prompts'
@@ -90,8 +91,8 @@ export interface AppDeps {
   instance: LiveInstance
   // Which tracker tracker forwards to, edited by an admin on the Tracker page (D105).
   trackerSettings: LiveTracker
-  // The agent names the config file defines, the only ones a rule can use.
-  agents: readonly string[]
+  // The agents rules pick from, edited by an admin on the Agents page (D107).
+  agentSettings: LiveAgents
   tokens: RunTokens
   // Unset: nobody signs in, and every request acts as an admin.
   auth?: AppAuth
@@ -149,7 +150,7 @@ export function createApp({
   flow,
   instance,
   trackerSettings,
-  agents,
+  agentSettings,
   tokens,
   auth,
   publicUrl,
@@ -371,7 +372,7 @@ export function createApp({
     const modes = Object.keys(MODE_OUTCOMES) as RuleMode[]
     return c.json({
       ...flow.saved(),
-      agents,
+      agents: flow.context.agents,
       defaultMaxAttempts: flow.context.defaultMaxAttempts,
       prompts: Object.fromEntries(modes.map((m) => [m, defaultPrompt(m)])),
       // null: any key works, and a station is keyed by its own id.
@@ -443,6 +444,26 @@ export function createApp({
     return c.json({
       version: await trackerSettings.save(c.var.actor, version, body.plugin, body.options),
     })
+  })
+  // The Agents page (D107): which agents rules pick from, for an admin only. A secret is never
+  // sent back, only whether it is set (D106).
+  app.get('/api/agents', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await agentSettings.view())
+  })
+  app.get('/api/agents/form', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await agentSettings.form(c.req.query('plugin') ?? ''))
+  })
+  // Each agent's CLI probed, which may take a while, so the page asks for it on its own.
+  app.get('/api/agents/check', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await agentSettings.check())
+  })
+  app.put('/api/agents', async (c) => {
+    const body = await c.req.json<{ version?: unknown; agents?: unknown }>()
+    const version = typeof body.version === 'number' ? body.version : undefined
+    return c.json({ version: await agentSettings.save(c.var.actor, version, body.agents) })
   })
   app.get('/api/board', async (c) => {
     const { workflow, rules, holdLabel } = flow.current()

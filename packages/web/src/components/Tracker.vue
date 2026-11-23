@@ -1,20 +1,13 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ApiError, call, messageOf, sendJson } from '../api'
+import { toOptions, toValues, type OptionField as Field } from '../option-values'
+import OptionFields from './OptionFields.vue'
 
 // Which tracker the engine runs on, for an admin (D105). The form is the plugin's own; a
 // secret is never sent back, only whether it is set (D106).
 const open = defineModel<boolean>('open', { required: true })
 const emit = defineEmits<{ saved: [] }>()
-
-interface Field {
-  key: string
-  label: string
-  type: 'text' | 'secret' | 'select'
-  required?: boolean
-  description?: string
-  placeholder?: string
-}
 
 interface TrackerView {
   version?: number
@@ -47,28 +40,14 @@ const plugin = computed(() => (kind.value === OTHER ? otherPlugin.value.trim() :
 const switched = computed(() => loaded.value !== undefined && plugin.value !== loaded.value.plugin)
 const isSet = (key: string) => !switched.value && (loaded.value?.secretsSet.includes(key) ?? false)
 
-const getPath = (options: Record<string, unknown>, key: string): unknown =>
-  key
-    .split('.')
-    .reduce<unknown>(
-      (at, part) =>
-        at !== null && typeof at === 'object' ? (at as Record<string, unknown>)[part] : undefined,
-      options,
-    )
-
 function fill(view: { fields: Field[]; lookup: boolean }, options: Record<string, unknown>): void {
   fields.value = view.fields
   lookup.value = view.lookup
-  values.value = Object.fromEntries(
-    view.fields.map((f) => {
-      const v = getPath(options, f.key)
-      return [f.key, typeof v === 'string' ? v : '']
-    }),
-  )
+  values.value = toValues(view.fields, options)
   // What is saved shows as a choice of its own until a lookup brings the real list.
   choices.value = Object.fromEntries(
     view.fields
-      .filter((f) => f.type === 'select' && values.value[f.key] !== '')
+      .filter((f) => f.type === 'select' && f.choices === undefined && values.value[f.key] !== '')
       .map((f) => [
         f.key,
         [{ value: values.value[f.key] ?? '', label: values.value[f.key] ?? '' }],
@@ -113,25 +92,12 @@ async function pickPlugin(): Promise<void> {
   }
 }
 
-// Back to the nested shape the plugin reads: issueTypes.item -> { issueTypes: { item } }.
-function toOptions(): Record<string, unknown> {
-  const out: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(values.value)) {
-    if (value === '') continue
-    const parts = key.split('.')
-    let at = out
-    for (const part of parts.slice(0, -1)) at = (at[part] ??= {}) as Record<string, unknown>
-    at[parts.at(-1) ?? key] = value
-  }
-  return out
-}
-
 async function lookUp(): Promise<void> {
   looking.value = true
   try {
     choices.value = await call(
       '/api/tracker/choices',
-      sendJson('POST', { plugin: plugin.value, options: toOptions() }),
+      sendJson('POST', { plugin: plugin.value, options: toOptions(fields.value, values.value) }),
     )
   } catch (e) {
     toast.add({ title: messageOf(e), color: 'error' })
@@ -149,7 +115,7 @@ async function save(): Promise<void> {
       sendJson('PUT', {
         ...(version === undefined ? {} : { version }),
         plugin: plugin.value,
-        options: toOptions(),
+        options: toOptions(fields.value, values.value),
       }),
     )
     toast.add({ title: 'Saved: the engine runs on it now', color: 'success' })
@@ -200,35 +166,13 @@ async function save(): Promise<void> {
             @change="pickPlugin"
           />
         </UFormField>
-        <UFormField
-          v-for="f in fields"
-          :key="f.key"
-          :label="f.label"
-          :description="f.description ?? ''"
-          :required="f.required === true"
-        >
-          <USelect
-            v-if="f.type === 'select'"
-            :model-value="values[f.key] ?? ''"
-            :items="choices[f.key] ?? []"
-            :placeholder="lookup ? 'Look up first' : ''"
-            class="w-full"
-            @update:model-value="(v) => (values[f.key] = String(v))"
-          />
-          <UInput
-            v-else
-            :model-value="values[f.key] ?? ''"
-            :type="f.type === 'secret' ? 'password' : 'text'"
-            :placeholder="
-              f.type === 'secret' && isSet(f.key)
-                ? 'Set; leave blank to keep it'
-                : (f.placeholder ?? '')
-            "
-            @update:model-value="(v) => (values[f.key] = String(v))"
-            autocomplete="off"
-            class="w-full"
-          />
-        </UFormField>
+        <OptionFields
+          v-model="values"
+          :fields="fields"
+          :choices="choices"
+          :is-set="isSet"
+          :lookup="lookup"
+        />
         <div v-if="lookup">
           <UButton
             label="Look up"

@@ -121,7 +121,7 @@ interface StorePort {
   requestCancel(id: string, mode: CancelMode, by: CancelReason): Promise<void>  // first time stays; a hard one upgrades soft and its reason wins (D73)
   isPaused(): Promise<boolean>                // the global pause, kept in engine_state (D73)
   setPaused(paused: boolean): Promise<void>
-  // The settings documents ('flow' D91, 'instance' D105) as opaque JSON, each save a new
+  // The settings documents ('flow' D91, 'instance' and 'tracker' D105, 'agents' D107) as opaque JSON, each save a new
   // version of that document; the engine checks them.
   latestSettings(doc: SettingsDoc): Promise<SettingsVersion | undefined>   // undefined before the first save
   saveSettings(doc: SettingsDoc, expected: number | undefined, value: unknown, savedBy: string): Promise<SettingsVersion>  // throws SettingsConflict if not the latest

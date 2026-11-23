@@ -25,7 +25,6 @@ export interface Config {
   publicUrl?: string
   // Where the engine keeps its Runs, the pause and the settings (D78, D91, D105).
   store: PluginRef
-  agents: Record<string, PluginRef>
   // Unset: nobody signs in (security-and-auth.md).
   auth?: AuthConfig
 }
@@ -33,8 +32,8 @@ export interface Config {
 type Raw = Record<string, unknown>
 
 // The file holds what has to be known before the store opens or anyone signs in; the rest is
-// in the store (D91, D105). agents move there next (W7).
-const FIELDS = ['$schema', 'version', 'dataDir', 'server', 'auth', 'store', 'agents']
+// in the store (D91, D105).
+const FIELDS = ['$schema', 'version', 'dataDir', 'server', 'auth', 'store']
 
 // Each wins over the file, so a deployment needs no file at all (D105).
 const ENV = {
@@ -150,12 +149,6 @@ export function loadConfig(path?: string, workingDir: string = process.cwd()): C
       `${envPort === undefined ? 'config server.port' : ENV.port} must be a port number`,
     )
   const store = pluginRef(raw['store'] ?? { plugin: '@tasuki/sqlite' }, 'store')
-  const agents = Object.fromEntries(
-    Object.entries(isObject(raw['agents']) ? raw['agents'] : {}).map(([name, agent]) => [
-      name,
-      pluginRef(agent, `agents.${name}`),
-    ]),
-  )
   const envDataDir = fromEnv(ENV.dataDir)
   const dataDir =
     envDataDir !== undefined
@@ -170,7 +163,6 @@ export function loadConfig(path?: string, workingDir: string = process.cwd()): C
     ...checkBinding(server, raw['auth'] !== undefined),
     port,
     store,
-    agents,
     ...(raw['auth'] === undefined ? {} : { auth: parseAuth(raw['auth']) as AuthConfig }),
   }
 }
