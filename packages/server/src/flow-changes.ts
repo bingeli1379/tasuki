@@ -3,7 +3,7 @@ import { defaultStationName, TASK_STATUS_DISPLAY, TASK_STATUSES } from '@tasuki/
 // One thing a save changed, as the history on the settings page lists it (W4b, D94).
 export interface SettingChange {
   text: string
-  // Set for long text, shown side by side on request: a rule's prompt, '' for its default.
+  // Set for long text, shown side by side on request: a rule's prompt, '' for none.
   before?: string
   after?: string
 }
@@ -99,7 +99,9 @@ export function describeChanges(before: unknown, after: unknown): SettingChange[
     field(`${what} watches`, old['watch'], r['watch'])
     field(`${what} while working`, old['claim'], r['claim'], 'leave it where it is')
     field(`${what} agent`, old['agent'], r['agent'])
-    field(`${what} mode`, old['mode'], r['mode'])
+    const onOff = (v: unknown): string => (v === true ? 'on' : 'off')
+    field(`${what} dispatch`, onOff(old['dispatch']), onOff(r['dispatch']))
+    field(`${what} needs feedback`, onOff(old['needsFeedback']), onOff(r['needsFeedback']))
     field(`${what} attempts`, old['maxAttempts'], r['maxAttempts'], 'default')
     field(`${what} session`, old['session'], r['session'], 'fresh')
     const oldOut = obj(old['outcomes'])

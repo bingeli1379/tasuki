@@ -19,11 +19,14 @@ import { setTimeout as sleep } from 'node:timers/promises'
 // [fake:ask] first asks a person whether it may run git push, the way a CLI does through
 // ask_permission (D107): allowed, it carries on; denied, it asks a question and reports
 // needs_input, and says the call was refused as a CLI would when it exits.
-// Executing, it walks every task it can run to done, then reports succeeded, or
-// blocked_manual when manual tasks are left. Dispatched, it reads the marker off its task's
-// title instead and only reports, since the engine moves the task. Reworking, it makes one task, Rework, carrying
-// the latest comment a person left. Reviewing, it leaves a note and reports the rule's first
-// outcome.
+// What its job is it reads off the rule's prompt, the "Your job:" line the templates start
+// with, as a real agent would (D109): splitting is the above. Executing ("carry out the
+// item's tasks"), it walks every task it can run to done, then reports succeeded, or
+// blocked_manual when manual tasks are left. Dispatched (its target is a task), it reads the
+// marker off its task's title instead and only reports, since the engine moves the task.
+// Reworking ("sent the item back"), it makes one task, Rework, carrying the latest comment a
+// person left. Reviewing ("review the item"), or with no job it knows, it leaves a note and
+// reports the rule's first outcome.
 const plugin: Plugin = definePlugin({
   name: '@tasuki/fake-runner',
   apiVersion: API_VERSION,
@@ -48,13 +51,25 @@ const plugin: Plugin = definePlugin({
             return JSON.parse(text) as T
           }
           try {
+            const item = await call<{ ref: string; title: string }>('get_item')
+            const job = /Your job: (.*)/.exec(spec.prompt)?.[1] ?? ''
+            const mode =
+              item.ref !== spec.target
+                ? 'dispatch'
+                : job.startsWith('split')
+                  ? 'split'
+                  : job.startsWith("carry out the item's tasks")
+                    ? 'execute'
+                    : /sent the item back/.test(job)
+                      ? 'rework'
+                      : 'review'
             // Dispatched, it works on one task, whose own title carries the marker (D102).
             const { title } =
-              spec.mode === 'dispatch'
+              mode === 'dispatch'
                 ? ((await call<{ ref: string; title: string }[]>('list_tasks')).find(
                     (t) => t.ref === spec.target,
                   ) ?? { title: '' })
-                : await call<{ title: string }>('get_item')
+                : item
             const marker = /\[fake:([a-z_]+)\]/.exec(title)?.[1]
             if (marker === 'hang') await new Promise(() => {})
             await sleep(seconds * 1000)
@@ -76,10 +91,10 @@ const plugin: Plugin = definePlugin({
               ? 'needs_input'
               : marker !== undefined && verdicts.includes(marker)
                 ? marker
-                : spec.mode === 'review' || spec.mode === 'custom'
+                : mode === 'review'
                   ? (verdicts[0] ?? 'failed')
                   : 'succeeded'
-            if (spec.mode === 'review' || spec.mode === 'custom')
+            if (mode === 'review')
               await call('add_comment', {
                 kind: 'note',
                 body: `The fake runner reviewed this and says ${verdict}.`,
@@ -89,7 +104,7 @@ const plugin: Plugin = definePlugin({
                 kind: 'question',
                 body: 'The fake runner asks: what should this do?',
               })
-            if (verdict === 'succeeded' && spec.mode === 'execute') {
+            if (verdict === 'succeeded' && mode === 'execute') {
               let tasks = await call<TaskNode[]>('list_tasks')
               for (let next = tasks.find((t) => isRunnable(t, tasks)); next !== undefined;) {
                 for (const [status, reason] of [
@@ -102,7 +117,7 @@ const plugin: Plugin = definePlugin({
                 next = tasks.find((t) => isRunnable(t, tasks))
               }
               if (tasks.some((t) => t.status === 'manual')) verdict = 'blocked_manual'
-            } else if (verdict === 'succeeded' && spec.mode === 'rework') {
+            } else if (verdict === 'succeeded' && mode === 'rework') {
               const comments =
                 await call<{ author: string; kind: string; body: string }[]>('list_comments')
               const feedback =
@@ -111,7 +126,7 @@ const plugin: Plugin = definePlugin({
                 title: 'Rework',
                 body: feedback === '' ? 'Made by the fake runner.' : feedback,
               })
-            } else if (spec.mode === 'dispatch') {
+            } else if (mode === 'dispatch') {
               // Nothing to build: the engine moves the task by the verdict.
             } else if (verdict === 'succeeded' && marker !== 'no_tasks') {
               // Splitting again after being sent back keeps what is there (D30).

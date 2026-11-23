@@ -161,7 +161,7 @@ agent 從 store 讀（W7，D107、D110）：名字對到 `plugin` 與 `options`�
 
 tracker 從 store 讀（W6b，D105、D106）：`plugin` 與 `options`。存檔時先照 plugin 的表單檢查必填，再用新的 options 把 plugin 載起來試一次，失敗就拒絕存檔，成功就直接換掉正在用的 tracker，不用重啟。換了 plugin 或 secret 以外的 options 算換 tracker：還有 Run 在跑、或舊的 tracker 上還有 item，拒絕存檔並列出是哪些；新的 tracker 上有別的 engine 也拒絕（D66）。只換 secret（例如新的 token）不算。secret 欄位存進 store 前用 AES-256-GCM 加密，金鑰是 `TASUKI_SECRET_KEY`，沒給時第一次存 secret 才在 `dataDir` 產生 `secret.key`；API 不回傳 secret，只回傳有沒有設，留空存檔就沿用原本的。`@tasuki/claude-cli` 的 options 讀 `permissions`、`auth`（`inherit-login`、`api-key`、`oauth-token`，D100）、`model`、`allowedTools`、`settings`、`env`、`inheritSettings`、`plugins`、`mcpServers`、`appendSystemPrompt`、`appendSystemPromptFile`，路徑相對於 config 所在的資料夾，`requires`（`mcpServers`、`skills` 兩個名字清單）給 `doctor` 第 9 條用。`limits.runTimeoutMinutes`、`idleTimeoutMinutes` 與規則的 `timeoutMinutes` 還不讀，真的 agent 卡住時只能按 Stop。`auth` 讀 `plugin`、`options`、`session.ttl`（`30m`、`24h`、`7d` 這種長度或 `"never"`，省略是 `7d`）。`@tasuki/codex-cli` 的 options 讀 `permissions`、`auth`、`model`、`appendSystemPrompt`（接在 engine 的 prompt 後面，D77）、`env`、`inheritSettings`（省略時加 `--ignore-user-config --ignore-rules`，不讀這台機器的 codex 設定，登入照樣讀 `CODEX_HOME`）。`server.host`（省略是 `127.0.0.1`）、`server.publicUrl`、`server.allowInsecure` 照 security-and-auth.md 的啟動檢查讀（D90）。`@tasuki/auth-http` 的 options 讀 `url`（必填）、`headers`（省略是沒有）、`timeoutSeconds`（省略是 10）。`jira-cloud` 的 `issueTypes.task`（sub-task 的 type id）與 `dependencyLinkType`（Blocks 的 link type id）是必填（D65）。
 
-流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`mode`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；幾站可以共用同一個 `key`，共用的算一組，排最前面的是第一站，item 在這組的哪一站記在 store，第一站不記（D104）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 rework 規則 `watch` 的那站，rework 規則有好幾條時要盯同一站（D86）。規則的 `agent` 要是 Agents 頁上的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是實例設定的 `limits.defaultMaxAttempts`，改了它，這些規則跟著改；`prompt` 省略時是 mode 的預設，寫了就不能是空字串。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有 `mode: split` 或 `mode: rework` 的規則時，`workflow.taskStatuses` 一定要對照 `to-do` 與 `manual`，因為 agent 建的 task 從這兩個開始（D71）。有 `mode: execute` 的規則時，五個 task status 都要對照，因為 agent 會走完整張 task 圖。有 `mode: dispatch` 的規則時，`to-do`、`in-progress`、`manual`、`done` 四個要對照，engine 只會把 task 移到這幾個；`dispatch` 規則不能設 `claim`（item 一直留在 watch status），`outcomes` 也只收 `succeeded`、`blocked_manual` 與每條規則都有的三個，因為出口是 engine 看 task 決定的，沒有 agent 能回報別的（D102）。
+流程設定從 store 讀（W4a，D91）：`workflow`（`statuses` 的 `id`、`name`、`key`、`handledBy`、`outcomes`，`roles`，`taskStatuses`）、`rules` 的 `id`、`watch`、`claim`、`agent`、`dispatch`、`needsFeedback`、`maxAttempts`、`outcomes`、`prompt`、`session`，`labels.hold`；規則上其他欄位一律拒絕。store 從沒存過時用預設流程：state-machine.md 的預設各站，不含只有 claim 才用得到的 `splitting`，沒有規則，engine 不碰任何 item；這份預設不寫進 store，第一次存檔才有第一版。`workflow` 必填。`key` 省略時是邏輯名，sqlite 就存邏輯名，改顯示名不動資料（D91）；幾站可以共用同一個 `key`，共用的算一組，排最前面的是第一站，item 在這組的哪一站記在 store，第一站不記（D104）；`name` 省略時是邏輯名的 Title Case；`taskStatuses` 省略時每個 task status 對到自己的邏輯名。`workflow.statuses` 的順序就是看板的順序，看板只顯示列出來的 status。`roles` 只有 `entry` 與 `failure`，兩個都必填。看板「打回」要先寫回饋的那站不寫在 `roles`，是 `needsFeedback` 規則 `watch` 的那站，這種規則有好幾條時要盯同一站（D86、D109）。規則的 `agent` 要是 Agents 頁上的名字；`session` 省略時是 `fresh`；`maxAttempts` 省略時是實例設定的 `limits.defaultMaxAttempts`，改了它，這些規則跟著改；`prompt` 省略或留空就只有 engine 的契約（D109）。規則的 `outcomes` 沒寫 `needs_input`、`failed`、`max_attempts` 時，讀進來就填成 `failure` 那站。`handledBy` 只收 `person`，engine 那半從規則算（D68）。站上的 `outcomes` 是人在詳情看到的按鈕，列出目標站，按鈕字由看板組成「→ 目標站的顯示名」，最後一個是實心的主按鈕，同一站不能列兩次（D87）；目標是 `rework` 那站時先問改什麼（D75）。有任何不是 `dispatch` 的規則時，五個 task status 都要對照，因為它的 agent 能建 task、能走完整張 task 圖（D109）。有 `dispatch` 規則時，`to-do`、`in-progress`、`manual`、`done` 四個要對照，engine 只會把 task 移到這幾個；`dispatch` 規則不能設 `claim`（item 一直留在 watch status），不能同時 `needsFeedback`，`outcomes` 要有 `succeeded` 與 `blocked_manual`，也只收這兩個與每條規則都有的三個，因為出口是 engine 看 task 決定的，沒有 agent 能回報別的（D102）。
 
 存檔時除了上面的檢查，還有兩條要問 tracker：tracker 有固定的 status 清單時（Jira），每個 key 都要在清單裡；一個 status 改了 key 或被拿掉時，上面不能還有 item 或 task，被擋時列出是哪些；共用 key 的一組換了第一站時，原本的第一站也算，因為上面的 item 沒有紀錄，會整批跑到新的第一站（D104）。存在 store 裡的流程跟其他設定對不上時（規則指著的 agent 不在了，只會發生在有人直接改 store），拒絕啟動並說明。
 
@@ -173,25 +173,26 @@ tracker 從 store 讀（W6b，D105、D106）：`plugin` 與 `options`。存檔�
 | `watch` | 監看的 item status 邏輯名。規則只作用在 item，所以沒有 `kind` 欄位 |
 | `claim` | 認領後 item 暫停的 status，可省略。省略時只靠 lease 防重複，item 留在 watch status，卡片掛 Running。預設規則都不設（D74）。沒寫 `workflow` 時，`splitting` 只在有規則 claim 它時才列進預設流程，不然看板會多一欄永遠是空的 |
 | `agent` | 用哪個 agent（Agents 頁上的名字） |
-| `mode` | `split` / `execute` / `dispatch` / `rework` / `review` / `custom`，以 `TASUKI_MODE` 傳給 agent。`dispatch` 由 engine 一張 task 起一個 Run（state-machine.md，D102） |
-| `prompt` | 這一階段要 agent 做什麼（行動層），省略時用引擎內建、對應 `mode` 的預設。不管設不設，engine 的契約都會排在它前面。流程設定在 store 裡，所以沒有指到檔案的 `promptFile`（D91） |
+| `dispatch` | `true` 時 engine 照依賴圖一張 task 起一個 Run，item 的出口由 engine 看 task 決定（state-machine.md，D102、D109）。省略是 `false` |
+| `needsFeedback` | `true` 時 item 上要有人在上次 Run 之後留的 `note` 才開跑，沒有就照 D75 問人；看板打回時要回饋的就是這站（D86、D109）。省略是 `false` |
+| `prompt` | 這一階段要 agent 做什麼（行動層），沒有預設，留空就只有 engine 的契約（D109）。新增規則時可以從範本選一份填進來。流程設定在 store 裡，所以沒有指到檔案的 `promptFile`（D91） |
 | `session` | `fresh` 或 `per-item`（續用這個 item 在同一個 agent 上最近的 session）。`dispatch` 的 `per-item` 讀成續用同一張 task 最近的 session，平行的 task 不共用 |
 | `maxAttempts` 在 `dispatch` | 以（task, rule）計算，`failed` 與 `abandoned` 都累計，到了 task 轉 `manual` |
 | `timeoutMinutes` | 覆寫 `limits.runTimeoutMinutes` |
 | `maxAttempts` | 覆寫 `limits.defaultMaxAttempts` |
 | `outcomes` | 這條規則的結果名對到 item 要去的 status 邏輯名。agent 只能從這裡挑一個回報 |
 
-MCP 的權限角色不是規則欄位，由 `mode` 決定：`split` 與 `rework` 是 splitter，`execute` 是 orchestrator，`dispatch` 是 worker，`review` 是 reviewer，worker 與 reviewer 只能讀與留言；`custom` 拿到全部的 tool，`succeeded` 必填，結果一個都不驗，`prompt` 沒有預設，不寫就只有 engine 的契約（D92，見 agent-contract.md）。有 `custom` 規則時五個 task status 都要對照，跟 execute 一樣，因為它能走完整張 task 圖。
+規則沒有 mode（D109）：每條規則的 agent 都拿到全部的 tool，回報什麼都不驗，照表搬。`dispatch` 規則的 agent 例外，它是 worker，只做被派的那張 task，只能讀與留言（見 agent-contract.md）。
 
 `outcomes` 的 key 是結果名，小寫加底線（例如 `needs_design`），值是 status 的邏輯名（D84）。結果分三種：
 
 | 結果 | 哪些 | 要不要寫 | engine 驗不驗 |
 |---|---|---|---|
-| mode 自己的 | `split`、`rework` 是 `succeeded`；`execute` 與 `dispatch` 是 `succeeded` 與 `blocked_manual`；`review` 沒有 | 必填 | 驗（agent-contract.md 的 verdict 表）。`dispatch` 的兩個由 engine 看 task 判斷，不是 agent 回報 |
-| 每條規則都有的 | `needs_input`、`failed`、`max_attempts` | 可省略，省略時是 `failure` 角色那站 | `needs_input` 驗，另外兩個不用 |
-| 自己宣告的 | 其他任何名字，例如 review 的 `approve`、`changes`，execute 多一個 `needs_design` | 選填，但每條規則至少要有一個不是上一列的結果 | 不驗，照表搬 |
+| 必填的 | `succeeded`；`dispatch` 規則還有 `blocked_manual` | 必填 | 不驗。`dispatch` 的兩個由 engine 看 task 判斷，不是 agent 回報 |
+| 每條規則都有的 | `needs_input`、`failed`、`max_attempts` | 可省略，省略時是 `failure` 角色那站 | 不驗 |
+| 自己宣告的 | 其他任何名字，例如 review 的 `changes`，execute 多一個 `needs_design` | 選填 | 不驗，照表搬 |
 
-`cancelled` 不會移動 status，`abandoned` 由復原機制處理，兩者都不能寫。舊的 `on` 不讀，規則因此少了 mode 必填的結果，讀檔時被拒絕（上線前不顧兼容，D85）。
+`cancelled` 不會移動 status，`abandoned` 由復原機制處理，兩者都不能寫。
 
 agent 拿到的指令分三層，由下往上疊（D77）：
 
@@ -201,11 +202,13 @@ agent 拿到的指令分三層，由下往上疊（D77）：
 | 基礎層 | agent 的 options（claude 是 `appendSystemPrompt` / `appendSystemPromptFile`，走 `--append-system-prompt`；codex 是 `appendSystemPrompt`，接在整份 prompt 後面，W7） | 這個 agent 每次都要守的事，例如做完 commit 加 push |
 | 行動層 | 規則的 `prompt`（設定頁上改） | 這一階段要做什麼，例如先跑 `/sdd:propose` 再依結果拆 task |
 
-契約是程式規則的說明書：程式擋得住 agent 改 status，但逼不了它呼叫 `report_result`，沒寫就不會叫，Run 會變成 `failed`。所以行動層換掉的只有 mode 的預設那段。每個階段要不同的 plugin、MCP 或基礎層時，開不同的 agent，讓規則指過去。
+契約是程式規則的說明書：程式擋得住 agent 改 status，但逼不了它呼叫 `report_result`，沒寫就不會叫，Run 會變成 `failed`。所以契約一定在，行動層才是規則自己的。每個階段要不同的 plugin、MCP 或基礎層時，開不同的 agent，讓規則指過去。
 
-prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatch` 有值，是被派的那張 task，D102）、`{{run.id}}`、`{{workspace}}`、`{{mode}}`。ticket 的內容（包含標題）不塞進 prompt，因為那是使用者寫的，可能夾帶指令。agent 用 MCP 的讀取 tool 自己拿，這樣 sqlite 和 Jira 模式也用同一份 prompt。
+prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatch` 有值，是被派的那張 task，D102）、`{{run.id}}`、`{{workspace}}`。ticket 的內容（包含標題）不塞進 prompt，因為那是使用者寫的，可能夾帶指令。agent 用 MCP 的讀取 tool 自己拿，這樣 sqlite 和 Jira 模式也用同一份 prompt。
 
-## Default rules
+## 範本
+
+規則沒有預設，store 從沒存過時一條規則都沒有。設定頁「Add a rule」可以從範本開始：Split、Execute、Dispatch、Rework、Review（`packages/server/src/prompts.ts` 的 `TEMPLATES`，D109）。範本填好 prompt、要指去哪的結果、`session`，Dispatch 打開 `dispatch`，Rework 打開 `needsFeedback`、`session` 是 `per-item`；存進去就是普通的規則，不記得它從哪個範本來。下面是照範本填完、指到預設各站的樣子，`prompt` 省略不寫：
 
 ```jsonc
 [
@@ -213,7 +216,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatc
     "id": "split",
     "watch": "ready-to-split",
     "agent": "claude-main",
-    "mode": "split",
     "session": "per-item",
     "outcomes": {
       "succeeded": "split-review",
@@ -226,7 +228,6 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatc
     "id": "execute",
     "watch": "in-progress",
     "agent": "claude-main",
-    "mode": "execute",
     "timeoutMinutes": 480,
     "session": "per-item",
     "outcomes": {
@@ -241,7 +242,7 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatc
     "id": "rework",
     "watch": "ready-to-rework",
     "agent": "claude-main",
-    "mode": "rework",
+    "needsFeedback": true,
     "session": "per-item",
     "outcomes": {
       "succeeded": "split-review",
@@ -255,14 +256,14 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatc
 
 `rework` 的 `needs_input` 去 `blocked` 而不是 `needs-answers`，原因見 D31。
 
-要 engine 自己照依賴圖派 task、平行跑、能停單張的，把 `execute` 換成 `dispatch`（D102）。`timeoutMinutes` 這時是每張 task 的上限：
+要 engine 自己照依賴圖派 task、平行跑、能停單張的，把 `execute` 換成打開 `dispatch` 的規則（D102）。`timeoutMinutes` 這時是每張 task 的上限：
 
 ```jsonc
 {
   "id": "dispatch",
   "watch": "in-progress",
   "agent": "claude-main",
-  "mode": "dispatch",
+  "dispatch": true,
   "timeoutMinutes": 120,
   "outcomes": {
     "succeeded": "in-review",
@@ -272,16 +273,15 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatc
 ```
 
 不要 split-review 這個關卡的人，把 `split` 與 `rework` 的 `succeeded` 改成 `in-progress`。
-想讓 AI 先審一輪再給人，不用改程式：加一站 `ai-review`，讓 `split-review` 或 execute 的出口指過去，再加一條 `review` 規則。
+想讓 AI 先審一輪再給人，不用改程式：加一站 `ai-review`，讓 `split-review` 或 execute 的出口指過去，再從 Review 範本加一條規則。
 
 ```jsonc
 {
   "id": "ai-review",
   "watch": "ai-review",
   "agent": "claude-reviewer",
-  "mode": "review",
-  "prompt": "Review the branch named on the item. Report approve when it is ready for a person, changes when it needs another round.",
-  "outcomes": { "approve": "in-review", "changes": "ready-to-rework" }
+  "prompt": "Review the branch named on the item. Report succeeded when it is ready for a person, changes when it needs another round.",
+  "outcomes": { "succeeded": "in-review", "changes": "ready-to-rework" }
 }
 ```
 
@@ -293,10 +293,10 @@ prompt 範本可用的變數：`{{item.ref}}`、`{{task.ref}}`（只有 `dispatc
 
 1 到 6 檢查的是存在 store 裡的流程，存檔時也跑同一套（D91）。
 
-1. `workflow.statuses` 的 id 是 kebab-case、不重複；key 可以重複（D104）。規則、角色、站的 `outcomes` 用到的每個 status 都在 `workflow.statuses` 裡，`outcomes` 不指回自己。`roles` 只有 `entry` 與 `failure`，兩個都有填。rework 規則都盯同一站。`taskStatuses` 裡沒有不認識的 task status。有 split 或 rework 規則時，`taskStatuses` 對照了 `to-do` 與 `manual`；有 execute 規則時，五個都對照了。
+1. `workflow.statuses` 的 id 是 kebab-case、不重複；key 可以重複（D104）。規則、角色、站的 `outcomes` 用到的每個 status 都在 `workflow.statuses` 裡，`outcomes` 不指回自己。`roles` 只有 `entry` 與 `failure`，兩個都有填。`needsFeedback` 的規則都盯同一站。`taskStatuses` 裡沒有不認識的 task status。有不是 `dispatch` 的規則時，五個都對照了；有 `dispatch` 規則時，它會動的四個都對照了。
 2. 不同規則的 `watch` 不重複。兩條規則監看同一個 status 會產生歧義。
 3. `claim` 不等於 `watch`（可省略）。
-4. `outcomes` 的每個目標都存在，結果名是小寫加底線、不是 `cancelled` 或 `abandoned`。mode 自己的結果都有寫，而且至少有一個不是 `needs_input`、`failed`、`max_attempts` 的結果。這三個省略時是 `failure` 角色那站。
+4. `outcomes` 的每個目標都存在，結果名是小寫加底線、不是 `cancelled` 或 `abandoned`。`succeeded` 有寫（`dispatch` 規則還有 `blocked_manual`）。`needs_input`、`failed`、`max_attempts` 省略時是 `failure` 角色那站。
 5. 規則引用的 agent 存在。
 6. `${VAR}` 都能展開。`labels.hold` 是一個不含空白的字（Jira 的 label 不能有空白）。
 7. `server.host` 非 loopback 又沒設 `auth` 又沒設 `allowInsecure` 就拒絕啟動；非 loopback 時 `server.publicUrl` 必填且是 `https`。`allowInsecure` 兩條都豁免（D90，見 security-and-auth.md）。

@@ -109,7 +109,6 @@ export function createEngine(deps: EngineDeps): Engine {
       const handle = runner.start({
         runId: run.id,
         target: run.target,
-        mode: rule.mode,
         workspace: run.workspace,
         mcp: { url: deps.mcpUrl, token },
         prompt: expandPrompt(`${CONTRACT}\n\n${rule.prompt}`, {
@@ -117,7 +116,6 @@ export function createEngine(deps: EngineDeps): Engine {
           ...(run.target === run.item ? {} : { task: run.target }),
           runId: run.id,
           workspace: run.workspace,
-          mode: rule.mode,
         }),
         ...(resume === undefined ? {} : { resume }),
         logPath,

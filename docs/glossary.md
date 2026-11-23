@@ -12,7 +12,7 @@
 | 共用 key 的一組 / 第一站 | 對到同一個 tracker status 的幾站，例如 `refining` 與 `split-done` 都是 Jira 的 To Do。`workflow.statuses` 裡排最前面的是第一站，沒有紀錄的 item 都在第一站（D104）。 |
 | workflow | 流程設定的 `workflow`：item 的 status 清單（順序就是看板的欄）、角色、task status 的對照（D81）。 |
 | 流程設定 / 實例設定 / 啟動設定 | 流程設定是 status、角色、task status 對照、規則與 prompt、hold label，存在 store、在 Workflow 頁上改、下一輪 poll 生效；從沒存過時用預設流程。實例設定是 tracker（Tracker 頁）、poll 與 limits（General 頁），存在 store、只有 `admin` 改、存了馬上生效（D105）。啟動設定是 config 檔或環境變數裡的部分（dataDir、server、store、auth，還沒搬走的 agent），由部署的人改，改了要重啟（D91、D105）。 |
-| role | 程式需要點名某一站時認的用途，由 `workflow.roles` 指定：`entry`（新 item 從這裡開始）、`failure`（規則失敗的預設去處）。看板打回時要先寫改什麼的那站不是角色，是 rework 規則盯的那站（D86）。 |
+| role | 程式需要點名某一站時認的用途，由 `workflow.roles` 指定：`entry`（新 item 從這裡開始）、`failure`（規則失敗的預設去處）。看板打回時要先寫改什麼的那站不是角色，是 `needsFeedback` 規則盯的那站（D86、D109）。 |
 | handledBy | 一站誰處理：`engine`（有規則 watch，從規則算）或 `person`（流程設定寫的）。看板分別標雷達與眼睛。 |
 | outcomes（站上的） | 人在這站能把 item 送去哪些站，一站一顆按鈕，最後一個是主按鈕。按鈕字是「→ 目標站的顯示名」，不寫在設定裡（D87）。規則上給 agent 的 `outcomes` 是結果名到站的 map（D84）。 |
 | logical name / display name | 邏輯名是設定與程式用的 key（`ready-to-split`），顯示名是 UI 用的 Title Case（`Ready to Split`）。 |
@@ -37,8 +37,8 @@
 | rule | 流程設定裡的一條規則：監看某個 status，命中就跑某個 agent，依 outcome 轉 status。 |
 | claim status | rule 認領 item 之後 item 暫停的 status，純粹顯示用。可以沒有。 |
 | Run | 一次 agent 執行，記錄在 store。 |
-| outcome | Run 的結果：規則 `outcomes` 裡的一個結果名（`succeeded`、`needs_input`、`blocked_manual`、`failed`，或規則自己宣告的，例如 `approve`），或只有 engine 會給的 `max_attempts`、`cancelled`、`abandoned`。 |
-| verdict | agent 用 `report_result` 回報的結論，只能是這條規則 `outcomes` 裡的結果名（`max_attempts` 除外）。mode 自己的結果與 `needs_input` engine 驗證過才換算成 outcome，規則自己宣告的照表搬（D84）。 |
+| outcome | Run 的結果：規則 `outcomes` 裡的一個結果名（`succeeded`、`needs_input`、`blocked_manual`、`failed`，或規則自己宣告的，例如 `changes`），或只有 engine 會給的 `max_attempts`、`cancelled`、`abandoned`。 |
+| verdict | agent 用 `report_result` 回報的結論，只能是這條規則 `outcomes` 裡的結果名（`max_attempts` 除外）。engine 照表搬，不驗（D109）。 |
 | lease | Run 的存活租約，定期續約。同一個 target（item 或 task）同時最多一個存活的 Run，防重複派發和當機復原都靠它。 |
 | attempt | 同一張 item 在同一條 rule 上的第幾次 Run。只有前一次 Run 是 `abandoned` 才往上加，其他結果之後都從 1 重新算（見 D38）。 |
 | workspace | engine 給每張 item 的工作目錄，Run 的 cwd。 |
@@ -49,11 +49,10 @@
 
 | 名詞 | 意思 |
 |---|---|
-| splitter | 規則 A 與 C 跑的 agent。檢查 refine 結果、拆 task、把 rework 意見轉成新 task。唯一能建立 task 的角色。 |
-| orchestrator | 規則 B 跑的 agent。執行 task：派 subagent、更新 task 狀態、處理 merge。 |
-| worker | `dispatch` mode 的規則跑的 agent。engine 一張 task 起一個，它只做那一張，只能讀與留言，task 的 status 由 engine 照它的 verdict 移（D102）。 |
-| custom | 不受 mode 限制的規則：agent 拿到全部的 tool，engine 不驗它回報的結果，要做什麼全看 prompt，選它的人自己負責（D92）。 |
-| reviewer | `review` mode 的規則跑的 agent。只能讀 item、task、comment 與留言，結論全部由規則的 `outcomes` 宣告，例如 AI code review（D84）。 |
+| splitter | 規則 A 與 C 跑的 agent，照 Split 與 Rework 範本的 prompt 拆 task、把 rework 意見轉成新 task。只是叫法，tool 跟其他規則的 agent 一樣（D109）。 |
+| orchestrator | 規則 B 跑的 agent，照 Execute 範本的 prompt 執行 task：派 subagent、更新 task 狀態、處理 merge。只是叫法（D109）。 |
+| worker | 打開 `dispatch` 的規則跑的 agent。engine 一張 task 起一個，它只做那一張，只能讀與留言，task 的 status 由 engine 照它的 verdict 移（D102）。 |
+| reviewer | 照 Review 範本跑的 agent，讀 item、task、comment 後留言並挑一個結果，例如 AI code review（D84）。不動 task 是 prompt 說的，不是程式擋的（D109）。 |
 | subagent | orchestrator 自己派的子 agent，engine 看不到。 |
 | runner | RunnerPort 的實作，spawn 某個 agent CLI。 |
 | fake runner | `@tasuki/fake-runner`，不叫 LLM 的假 agent，照 item 標題裡的 `[fake:<verdict>]` 回報結果（規則有這個結果時），沒有標記時先建兩張 task 再回報 `succeeded`，review 時留一則 note 再回報規則的第一個結果，拿來試 engine 與跑 E2E（D63、D65）。 |
@@ -63,7 +62,7 @@
 | setup token | store 裡沒有 `admin` 時 engine 印在啟動 log 的一次性 token，用來建立或升級第一個 `admin`（D89）。 |
 | 個人 API token | 使用者在看板上產生、給 `/mcp` 用的 Bearer token，存 hash、可撤銷，權限跟著產生它的人（D60）。 |
 | run token | 每個 Run 發一個的 token，綁定該 item 與底下的 task，Run 結束就失效。 |
-| M1 / M2 | M1 是 task 只是紀錄、由 orchestrator 自己排程，就是 `execute` mode。M2 是 engine 依賴圖排程 task，每個 task 一次 Run，就是 `dispatch` mode。兩種並存，規則選一種（D102）。 |
+| M1 / M2 | M1 是 task 只是紀錄、由 orchestrator 自己排程，就是一般的規則。M2 是 engine 依賴圖排程 task，每個 task 一次 Run，就是打開 `dispatch` 的規則。兩種並存，規則選一種（D102）。 |
 
 ## 架構
 

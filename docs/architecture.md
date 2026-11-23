@@ -137,7 +137,6 @@ interface RunnerPort {
 interface RunSpec {
   runId: string
   target: Ref
-  mode: 'split' | 'execute' | 'dispatch' | 'rework' | 'review' | 'custom'
   workspace: string                  // created by the engine, the agent's cwd
   mcp: { url: string; token: string }   // the MCP facade, bound to this Run
   prompt: string                     // the engine's contract and the rule's template, variables filled in

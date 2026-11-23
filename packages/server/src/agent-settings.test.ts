@@ -49,7 +49,6 @@ const RULES = [
     id: 'split',
     watch: 'ready-to-split',
     agent: 'main',
-    mode: 'split',
     outcomes: { succeeded: 'split-review' },
   },
 ]

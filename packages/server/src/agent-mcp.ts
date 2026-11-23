@@ -22,10 +22,8 @@ export interface AgentMcpDeps {
   tracker: TrackerPort
   store: StorePort
   run: Run
-  // The rule that started the Run. Its mode picks the tools: splitters build the task graph,
-  // executors walk it, reviewers only read and comment, custom gets all of it (agent-contract.md,
-  // the tool table).
-  // Its outcomes are what the agent can report.
+  // The rule that started the Run. Every agent gets every tool but a dispatched one, which
+  // works one task the engine moves (D102, D109). Its outcomes are what the agent can report.
   rule: Rule
   // Asks a person whether the agent may make a call, on the board (D107).
   ask: (call: { tool: string; input: unknown }, signal: AbortSignal) => Promise<Answer>
@@ -45,12 +43,11 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 // tool works on that Run's item and nothing else; there is no tool that moves the item
 // (agent-contract.md).
 export function createAgentMcpServer({ tracker, store, run, rule, ask }: AgentMcpDeps): McpServer {
-  const { mode } = rule
+  const { dispatch } = rule
   // A dispatch worker's run.target is its task, the default it comments on (D102).
-  const targetHint =
-    mode === 'dispatch'
-      ? "Your task's ref (default), the item's, or another of its tasks"
-      : "The item's ref (default) or one of its tasks"
+  const targetHint = dispatch
+    ? "Your task's ref (default), the item's, or another of its tasks"
+    : "The item's ref (default) or one of its tasks"
   const server = new McpServer({ name: 'tasuki-agent', version: '0.0.0' })
   // A person asked this Run to stop: its writes are refused so the agent winds down
   // (agent-contract.md). run is read afresh for every request.
@@ -78,7 +75,7 @@ export function createAgentMcpServer({ tracker, store, run, rule, ask }: AgentMc
     },
     async () => json(await listTasks(tracker, run.item)),
   )
-  if (mode === 'split' || mode === 'rework' || mode === 'custom')
+  if (!dispatch)
     server.registerTool(
       'create_task',
       {
@@ -186,7 +183,7 @@ export function createAgentMcpServer({ tracker, store, run, rule, ask }: AgentMc
       )
     },
   )
-  if (mode === 'execute' || mode === 'custom')
+  if (!dispatch)
     server.registerTool(
       'set_task_status',
       {

@@ -29,15 +29,13 @@ const RULES = [
     id: 'split',
     watch: 'ready-to-split',
     agent: 'main',
-    mode: 'split',
     outcomes: { succeeded: 'split-review' },
   },
   {
     id: 'review',
     watch: 'in-progress',
     agent: 'broken',
-    mode: 'review',
-    outcomes: { approve: 'in-review' },
+    outcomes: { succeeded: 'in-review' },
   },
 ]
 const STORE = `{ name: 'store', apiVersion: 1, store: () => ({

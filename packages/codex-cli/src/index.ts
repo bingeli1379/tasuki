@@ -200,7 +200,6 @@ const plugin: Plugin = definePlugin({
         const env = Object.assign(agentEnv(options), {
           TASUKI_RUN_ID: spec.runId,
           TASUKI_TARGET: spec.target,
-          TASUKI_MODE: spec.mode,
           TASUKI_WORKSPACE: spec.workspace,
           [TOKEN_ENV]: spec.mcp.token,
         })

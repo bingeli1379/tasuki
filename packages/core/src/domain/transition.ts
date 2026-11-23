@@ -28,15 +28,16 @@ export function ruleTransitions(rules: readonly Rule[]): Transition[] {
     const gaveUp = exitFor(rule, 'max_attempts')
     if (gaveUp !== undefined) add('item', rule.watch, gaveUp)
     const asked = exitFor(rule, 'needs_input')
-    if (rule.mode === 'rework' && asked !== undefined) add('item', rule.watch, asked)
+    if (rule.needsFeedback && asked !== undefined) add('item', rule.watch, asked)
     const parked = exitFor(rule, 'blocked_manual')
     if (parked !== undefined) add('item', parked, rule.watch)
-    if (rule.mode === 'execute' || rule.mode === 'custom')
+    // Any agent but a dispatched one may walk the task graph (D109).
+    if (!rule.dispatch)
       for (const [from, targets] of Object.entries(AGENT_MOVES))
         for (const to of targets) add('task', from, to)
     // The engine claims a task, moves it by the worker's verdict, and gives up on one that
     // kept failing, from to-do or a stale in-progress (D102).
-    if (rule.mode === 'dispatch') {
+    if (rule.dispatch) {
       add('task', 'to-do', 'in-progress')
       for (const to of Object.values(DISPATCH_MOVES)) add('task', 'in-progress', to)
       add('task', 'to-do', 'manual')

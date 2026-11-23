@@ -1204,6 +1204,16 @@
   - 原本各 mode 的預設 prompt 與 outcomes 變成「新增規則」旁邊的範本選單，按了填好，存進去就是普通的規則，不留 mode 欄位。
   - agent 還是沒有改 item status 的 tool，不變量照舊。
 - 代價：D92 寫的那層保護沒了。item 內容夾帶「直接回報成功」、或 LLM 沒拆出 task 也說成功，item 會帶著空的結果滑進下一站。作者接受。
+- 實作（W9，2026-11-24）：
+  - D109 沒寫到的：engine 靠 mode 認出 rework 的地方不只驗證，還有看板打回時要回饋的那站（D86）、只能有一條、沒有回饋就不開跑改問人（D75）。這三個改成規則上的第二個開關 `needsFeedback`，跟 `dispatch` 一樣是行為不是限制。兩個不能同時開，`dispatch` 只跑現有的 task。
+  - 規則上不認得的欄位一律拒絕。舊的 `mode` 因此撞到一般驗證，不是被默默忽略（照 CLAUDE.md 的不兼容）。
+  - 驗 verdict 的那張表整張拿掉，`outcomeOf` 只看 exit code、有沒有 verdict、runner 有沒有自己停掉。`succeeded` 每條規則都必填（`dispatch` 還要 `blocked_manual`），Review 範本因此用 `succeeded` 代表「沒問題」，原本的 `approve` 不再預設。「至少要有一個不是 needs_input、failed、max_attempts 的結果」那條檢查碰不到了，拿掉。
+  - 每條不是 `dispatch` 的規則都要五個 task status 都對照，因為它的 agent 能建 task、能走 task 圖。`dispatch` 的 worker 照舊只有讀與留言。原本 split 規則只要 `to-do` 與 `manual` 的那條併進來。
+  - 預設 prompt 變成 `TEMPLATES`（Split、Execute、Dispatch、Rework、Review），`/api/flow` 回 `templates` 取代 `prompts`。Execute 與 Review 的 prompt 從「你不能加 task」改成「不要加 task」，因為 tool 都在了。`{{mode}}` 變數、`TASUKI_MODE`、`RunSpec.mode` 拿掉，契約第一句不再說 mode。
+  - Workflow 頁：Mode 下拉拿掉，多 Dispatch 與 Needs a person's feedback 兩個開關，Add a rule 變成下拉，Blank 或五個範本，按了把 prompt、要指的結果、`session` 與開關填好。歷史畫面把兩個開關當成 on／off 的變更列出來。
+  - fake runner 不能再看 mode，改成讀 prompt 的「Your job:」那一行決定要拆、要執行、要 rework 還是要 review，target 是 task 就是 dispatch，像真的 agent 讀 prompt 一樣。E2E 的規則因此都帶一行 prompt。
+  - 存過的流程沒有轉換：還寫著 `mode` 的流程啟動時會被拒絕（store 裡存的流程對不上），要重存一次。
+- 實測（W9）：`pnpm test` 524 條、`pnpm check` 沒有錯誤；少掉的是 verdict 驗證那幾條，多的是兩個開關的檢查、`mode` 被當成不認得的欄位、沒有 prompt 時只有契約、歷史列出開關。`pnpm e2e` sqlite 與兩個登入的 project 全過，多一條：Workflow 頁新增一站、從 Split 範本加一條規則盯它、存檔，存進去的規則沒有 `mode`、prompt 是範本的，item 拖進那站後被拆成兩張 task、到 Split Review。Jira 的 project 22 條過，跳過 2 條：原本就有的 dispatch，與這條（KAN 沒有多的 status 給它開一站）；W8 的核准那條也在這一輪的 Jira 上過了（W8 自己那輪 Jira 被中途重 build 的看板打斷，作廢）。
 - 重新檢視：真的出現空結果滑進下一站、而且人沒看出來時，考慮讓規則選擇性加回幾項驗證（例如 `succeeded` 至少要有一張 task）。
 
 ## D110 預設 agent 是 claude 與 codex，fake 只給測試

@@ -79,21 +79,23 @@ const agents = { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 10 }
 
 // Rules split, execute and rework on the fake runner (S4, S6, S7b), and an AI review station
 // whose rule sends the item one of two ways (W2). Flow settings live in the store (D91), so
-// flow.setup.ts saves them through the API before the board tests start.
+// flow.setup.ts saves them through the API before the board tests start. A rule has no mode
+// (D109): the fake runner reads its job off the prompt's "Your job:" line, as the templates
+// start.
 const rules = [
   {
     id: 'split',
     watch: 'ready-to-split',
     claim: 'splitting',
     agent: 'fake',
-    mode: 'split',
+    prompt: 'Your job: split the item into tasks.',
     outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
   },
   {
     id: 'execute',
     watch: 'in-progress',
     agent: 'fake',
-    mode: 'execute',
+    prompt: "Your job: carry out the item's tasks until every one is done.",
     outcomes: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
   },
   {
@@ -101,15 +103,16 @@ const rules = [
     watch: 'ready-to-rework',
     claim: 'splitting',
     agent: 'fake',
-    mode: 'rework',
+    needsFeedback: true,
+    prompt: 'Your job: a person sent the item back after reviewing it.',
     outcomes: { succeeded: 'split-review', needs_input: 'blocked' },
   },
   {
     id: 'ai-review',
     watch: 'ai-review',
     agent: 'fake',
-    mode: 'review',
-    outcomes: { approve: 'in-review', changes: 'ready-to-rework' },
+    prompt: 'Your job: review the item.',
+    outcomes: { succeeded: 'in-review', changes: 'ready-to-rework' },
   },
   // M2 (S13): the engine runs each task on its own, at a station of its own so execute keeps
   // in-progress. KAN has no such status, so the Jira flow leaves it out.
@@ -117,7 +120,8 @@ const rules = [
     id: 'dispatch',
     watch: 'parallel',
     agent: 'fake',
-    mode: 'dispatch',
+    dispatch: true,
+    prompt: 'Your job: carry out task {{task.ref}} of the item.',
     outcomes: { succeeded: 'in-review', blocked_manual: 'blocked' },
   },
 ]
@@ -192,7 +196,7 @@ const trackers = [
           },
           flow: {
             workflow: jiraWorkflow(),
-            rules: rules.filter((r) => r.mode !== 'dispatch'),
+            rules: rules.filter((r) => r.dispatch !== true),
           },
         },
       ]

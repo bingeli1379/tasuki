@@ -58,7 +58,7 @@ status 整串由使用者列。程式裡會點名某個 item status 的地方，
 - 每個 mode 都能宣告自己的結果，例如 execute 多一個 `needs_design`（作者 2026-11-21）。mode 內建、engine 有驗證的結果照舊驗，例如 execute 回 `succeeded` 時 task 要全 `done`。使用者宣告的結果不驗，照表搬。
 - 理由：驗證擋的是謊報完成。`failed`、`needs_input` 本來就讓 agent 隨時能停，自訂的結果被亂用時，item 也只會去到使用者自己指定的那一站，風險跟亂回 `failed` 同級。
 
-## 4. mode 留著，當成工具組（`review` 已完成，D84）
+## 4. mode 留著，當成工具組（`review` 已完成，D84；D109 推翻，規則沒有 mode 了）
 
 `mode` 決定 agent 拿到哪些 tool、engine 怎麼驗結果、行動層沒寫時用哪份預設 prompt。自訂 stage 之後它還是需要，因為「這一站的 agent 能動 task 嗎」不能交給 prompt 決定。
 

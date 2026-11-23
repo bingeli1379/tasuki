@@ -5,13 +5,13 @@ import {
   defaultStationName,
   ENGINE_OUTCOMES,
   InvalidInput,
-  MODE_OUTCOMES,
+  DISPATCH_OUTCOMES,
+  REQUIRED_OUTCOMES,
   saveFlow,
   TASK_STATUSES,
   type Account,
   type Roles,
   type Rule,
-  type RuleMode,
   type RuleSession,
   type SettingsVersion,
   type Station,
@@ -21,7 +21,6 @@ import {
   type TrackerPort,
   type Workflow,
 } from '@tasuki/core'
-import { defaultPrompt } from './prompts'
 
 // The part of the settings kept in the store and edited on the settings page (D91).
 export interface Flow {
@@ -42,7 +41,18 @@ export interface FlowContext {
 
 type Raw = Record<string, unknown>
 
-const MODES = Object.keys(MODE_OUTCOMES) as RuleMode[]
+const RULE_FIELDS = [
+  'id',
+  'watch',
+  'claim',
+  'agent',
+  'dispatch',
+  'needsFeedback',
+  'maxAttempts',
+  'outcomes',
+  'prompt',
+  'session',
+]
 const SESSIONS: readonly RuleSession[] = ['fresh', 'per-item']
 const ROLES: readonly (keyof Roles)[] = ['entry', 'failure']
 // sqlite keys a status by its logical name, so renaming one moves no data (D91).
@@ -164,6 +174,14 @@ function parseRules(
   const rules = value.map((raw: unknown, index): Rule => {
     if (!isObject(raw)) return fail(`rules[${index}] must be an object`)
     const path = `rules[${index}]${typeof raw['id'] === 'string' ? ` (${raw['id']})` : ''}`
+    for (const key of Object.keys(raw))
+      if (!RULE_FIELDS.includes(key))
+        fail(`${path}.${key}: not a rule field (${RULE_FIELDS.join(', ')})`)
+    const flag = (key: string): boolean => {
+      const v = raw[key] ?? false
+      if (typeof v !== 'boolean') fail(`${path}.${key} must be true or false`)
+      return v as boolean
+    }
     const text = (key: string): string => {
       const v = raw[key]
       if (typeof v !== 'string' || v === '') return fail(`${path}.${key} is required`)
@@ -179,8 +197,12 @@ function parseRules(
     if (claim === watch) fail(`${path}.claim must differ from watch`)
     const agent = text('agent')
     if (!ctx.agents.includes(agent)) fail(`${path}.agent: no agent "${agent}" on the Agents page`)
-    const mode = text('mode') as RuleMode
-    if (!MODES.includes(mode)) fail(`${path}.mode must be one of ${MODES.join(', ')}`)
+    const dispatch = flag('dispatch')
+    const needsFeedback = flag('needsFeedback')
+    if (dispatch && needsFeedback)
+      fail(
+        `${path}.needsFeedback: a dispatch rule runs the tasks there are, it waits for no feedback`,
+      )
     const rawOutcomes = raw['outcomes'] ?? {}
     if (!isObject(rawOutcomes)) return fail(`${path}.outcomes must be an object`)
     const outcomes: Rule['outcomes'] = {}
@@ -193,22 +215,26 @@ function parseRules(
       if (typeof target !== 'string') return fail(`${path}.outcomes.${name} must be a status`)
       outcomes[name] = status(`outcomes.${name}`, target)
     }
-    for (const name of MODE_OUTCOMES[mode])
-      if (outcomes[name] === undefined) fail(`${path}.outcomes.${name} is required in ${mode} mode`)
+    for (const name of dispatch ? DISPATCH_OUTCOMES : REQUIRED_OUTCOMES)
+      if (outcomes[name] === undefined)
+        fail(`${path}.outcomes.${name} is required${dispatch ? ' on a dispatch rule' : ''}`)
     // The item never leaves watch while its tasks run, and only the engine picks its exit,
     // from the tasks (D102).
-    if (mode === 'dispatch') {
+    if (dispatch) {
       if (claim !== undefined) fail(`${path}.claim: a dispatch rule keeps the item in watch`)
       const own = Object.keys(outcomes).find(
-        (name) => !MODE_OUTCOMES.dispatch.includes(name) && !ENGINE_OUTCOMES.includes(name),
+        (name) => !DISPATCH_OUTCOMES.includes(name) && !ENGINE_OUTCOMES.includes(name),
       )
       if (own !== undefined)
         fail(`${path}.outcomes.${own}: a dispatch rule ends only on succeeded or blocked_manual`)
     }
-    if (Object.keys(outcomes).every((name) => ENGINE_OUTCOMES.includes(name)))
-      fail(`${path}.outcomes must name at least one way for the agent to finish`)
     // Every rule can end on these; they go to the failure station unless it says otherwise.
     for (const name of ENGINE_OUTCOMES) outcomes[name] ??= failure
+    const prompt = (): string => {
+      const v = raw['prompt'] ?? ''
+      if (typeof v !== 'string') fail(`${path}.prompt must be text`)
+      return v as string
+    }
     const session = (raw['session'] ?? 'fresh') as RuleSession
     if (!SESSIONS.includes(session)) fail(`${path}.session must be one of ${SESSIONS.join(', ')}`)
     return {
@@ -216,10 +242,12 @@ function parseRules(
       watch,
       ...(claim === undefined ? {} : { claim }),
       agent,
-      mode,
+      dispatch,
+      needsFeedback,
       maxAttempts: positive(raw, 'maxAttempts', ctx.defaultMaxAttempts, path),
       outcomes,
-      prompt: raw['prompt'] === undefined ? defaultPrompt(mode) : text('prompt'),
+      // Left out or empty, the agent gets the engine's contract alone (D109).
+      prompt: prompt(),
       session,
     }
   })
@@ -254,22 +282,17 @@ export function parseFlow(raw: unknown, ctx: FlowContext): Flow {
     ctx,
     parsed.roles.failure,
   )
-  // Sending work back means leaving feedback for the rework rule's agent, so the station it
-  // watches is where the board asks for that feedback (D86).
-  const reworkAt = [...new Set(rules.filter((r) => r.mode === 'rework').map((r) => r.watch))]
+  // Sending work back means leaving feedback for the agent of the rule that needs it, so the
+  // station it watches is where the board asks for that feedback (D86, D109).
+  const reworkAt = [...new Set(rules.filter((r) => r.needsFeedback).map((r) => r.watch))]
   if (reworkAt.length > 1)
-    fail(`rules: rework rules must watch one status, not ${reworkAt.join(', ')}`)
+    fail(`rules: rules that need feedback must watch one status, not ${reworkAt.join(', ')}`)
   const workflow: Workflow =
     reworkAt[0] === undefined
       ? parsed
       : { ...parsed, roles: { ...parsed.roles, rework: reworkAt[0] } }
-  // The tasks a splitting or reworking agent can make start in one of these.
-  const splitter = rules.find((r) => r.mode === 'split' || r.mode === 'rework')
-  const missing = ['to-do', 'manual'].filter((s) => statuses.task?.[s] === undefined)
-  if (splitter !== undefined && missing.length > 0)
-    fail(`workflow.taskStatuses must map ${missing.join(', ')}: rule ${splitter.id} makes tasks`)
   // The engine moves a dispatched task through these (D102).
-  const dispatcher = rules.find((r) => r.mode === 'dispatch')
+  const dispatcher = rules.find((r) => r.dispatch)
   const undispatched = ['to-do', 'in-progress', 'manual', 'done'].filter(
     (s) => statuses.task?.[s] === undefined,
   )
@@ -277,8 +300,8 @@ export function parseFlow(raw: unknown, ctx: FlowContext): Flow {
     fail(
       `workflow.taskStatuses must map ${undispatched.join(', ')}: rule ${dispatcher.id} runs tasks`,
     )
-  // An executing agent walks every task status, and a custom one may.
-  const executor = rules.find((r) => r.mode === 'execute' || r.mode === 'custom')
+  // Any agent but a dispatched one may make tasks and walk every task status (D109).
+  const executor = rules.find((r) => !r.dispatch)
   const unmapped = TASK_STATUSES.filter((s) => statuses.task?.[s] === undefined)
   if (executor !== undefined && unmapped.length > 0)
     fail(`workflow.taskStatuses must map ${unmapped.join(', ')}: rule ${executor.id} runs tasks`)

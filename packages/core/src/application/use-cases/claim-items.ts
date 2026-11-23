@@ -47,7 +47,7 @@ export async function claimItems(
   for (const rule of rules) {
     for (const item of waiting.filter((i) => i.status === rule.watch)) {
       if (slots <= 0) return claimed
-      if (rule.mode === 'dispatch') {
+      if (rule.dispatch) {
         if (busy.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
         const runs = await claimTasks({ tracker, store }, rule, item, busy, slots, limits)
         for (const run of runs) busy.add(run.target)
@@ -57,7 +57,7 @@ export async function claimItems(
       }
       if (busyItems.has(item.ref) || item.labels.includes(limits.holdLabel)) continue
       const runs = await store.runsFor(item.ref)
-      if (rule.mode === 'rework' && !(await hasFeedback(tracker, item.ref, runs[0]))) {
+      if (rule.needsFeedback && !(await hasFeedback(tracker, item.ref, runs[0]))) {
         await askForFeedback(tracker, named, rule, item.ref)
         continue
       }

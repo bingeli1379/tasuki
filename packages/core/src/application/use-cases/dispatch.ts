@@ -89,7 +89,7 @@ export async function settleDispatched(
   rules: readonly Rule[],
   limits: { leaseSeconds: number; workspaceRoot: string; holdLabel: string },
 ): Promise<Ref[]> {
-  const dispatching = rules.filter((r) => r.mode === 'dispatch')
+  const dispatching = rules.filter((r) => r.dispatch)
   if (dispatching.length === 0) return []
   const busy = new Set((await store.liveRuns()).map((r) => r.item))
   const waiting = await tracker.list(
@@ -173,10 +173,7 @@ export async function finishTaskRun(
     await engineSays(tracker, run.target, lines.join('\n'))
     return 'cancelled'
   }
-  const { outcome, reason } = outcomeOf(rule.mode, run.verdict, exit, {
-    tasks: [],
-    produced: run.produced,
-  })
+  const { outcome, reason } = outcomeOf(run.verdict, exit)
   const to = DISPATCH_MOVES[outcome] ?? 'to-do'
   if (!(await moveTask(tracker, run.target, 'in-progress', to))) {
     await store.finishRun(run.id, 'cancelled')

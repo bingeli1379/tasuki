@@ -24,7 +24,7 @@ const AGENTS = {} as LiveAgents
 const APPROVALS = createApprovals({ now: () => new Date() }, async () => {})
 import { createApp } from './app'
 import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
-import { defaultPrompt } from './prompts'
+import { TEMPLATES } from './prompts'
 import { createRunTokens } from './run-tokens'
 
 const mapping: StatusMapping = {
@@ -607,14 +607,8 @@ describe('the flow settings (D91)', () => {
       flow: DEFAULT_FLOW,
       agents: ['fake'],
       defaultMaxAttempts: 3,
-      prompts: {
-        split: defaultPrompt('split'),
-        execute: defaultPrompt('execute'),
-        dispatch: defaultPrompt('dispatch'),
-        rework: defaultPrompt('rework'),
-        review: defaultPrompt('review'),
-        custom: '',
-      },
+      // What a new rule starts from on the page (D109).
+      templates: TEMPLATES,
       // sqlite takes any key.
       trackerStatuses: null,
     })
@@ -663,7 +657,7 @@ describe('the flow settings (D91)', () => {
     const { app } = await setup()
     const res = await put(app, undefined, {
       ...DEFAULT_FLOW,
-      rules: [{ id: 'split', watch: 'ready-to-split', agent: 'claude', mode: 'split' }],
+      rules: [{ id: 'split', watch: 'ready-to-split', agent: 'claude' }],
     })
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
@@ -794,7 +788,6 @@ describe('instance settings (D105)', () => {
       id: 'split',
       watch: 'ready-to-split',
       agent: 'fake',
-      mode: 'split',
       outcomes: { succeeded: 'split-review' },
     }
     const saved = await app.request('/api/flow', {

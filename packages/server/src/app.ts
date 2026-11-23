@@ -44,8 +44,6 @@ import {
   stopRun,
   updateItem,
   updateTask,
-  MODE_OUTCOMES,
-  type RuleMode,
   type StorePort,
   type TrackerPort,
 } from '@tasuki/core'
@@ -62,7 +60,7 @@ import type { LiveAgents } from './agent-settings'
 import type { Approvals, Decision } from './approvals'
 import { describeChanges } from './flow-changes'
 import { createMcpServer } from './mcp'
-import { defaultPrompt } from './prompts'
+import { TEMPLATES } from './prompts'
 import type { RunTokens } from './run-tokens'
 import type { LoginThrottle, SetupToken, SignIns } from './sign-ins'
 
@@ -373,12 +371,11 @@ export function createApp({
   // otherwise rewrite the prompts (the D57 exception, as for accounts).
   app.get('/api/flow', async (c) => {
     assertEditsFlow(c.var.actor)
-    const modes = Object.keys(MODE_OUTCOMES) as RuleMode[]
     return c.json({
       ...flow.saved(),
       agents: flow.context.agents,
       defaultMaxAttempts: flow.context.defaultMaxAttempts,
-      prompts: Object.fromEntries(modes.map((m) => [m, defaultPrompt(m)])),
+      templates: TEMPLATES,
       // null: any key works, and a station is keyed by its own id.
       trackerStatuses:
         tracker.listStatuses === undefined

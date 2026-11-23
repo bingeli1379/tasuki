@@ -6,7 +6,8 @@ const rule = (patch: Partial<Rule>): Rule => ({
   id: 'r',
   watch: 'ready-to-split',
   agent: 'a',
-  mode: 'split',
+  dispatch: false,
+  needsFeedback: false,
   maxAttempts: 3,
   outcomes: {
     succeeded: 'split-review',
@@ -21,10 +22,11 @@ const rule = (patch: Partial<Rule>): Rule => ({
 
 const moves = (rules: Rule[]): string[] =>
   ruleTransitions(rules).map((t) => `${t.kind} ${t.from} -> ${t.to}`)
+const itemMoves = (rules: Rule[]): string[] => moves(rules).filter((m) => m.startsWith('item'))
 
 describe('ruleTransitions', () => {
   it('lists each exit of a rule without a claim from its watch status, once', () => {
-    expect(moves([rule({})]).sort()).toEqual([
+    expect(itemMoves([rule({})]).sort()).toEqual([
       'item ready-to-split -> blocked',
       'item ready-to-split -> needs-answers',
       'item ready-to-split -> split-review',
@@ -32,7 +34,7 @@ describe('ruleTransitions', () => {
   })
 
   it('with a claim, moves in and back, exits from the claim, gives up from the watch', () => {
-    expect(moves([rule({ claim: 'splitting' })]).sort()).toEqual([
+    expect(itemMoves([rule({ claim: 'splitting' })]).sort()).toEqual([
       'item ready-to-split -> blocked',
       'item ready-to-split -> splitting',
       'item splitting -> blocked',
@@ -42,14 +44,13 @@ describe('ruleTransitions', () => {
     ])
   })
 
-  it('a rework with a claim asks for feedback from its watch status', () => {
-    const rework = rule({ mode: 'rework', watch: 'ready-to-rework', claim: 'splitting' })
+  it('a rule that needs feedback asks for feedback from its watch status', () => {
+    const rework = rule({ needsFeedback: true, watch: 'ready-to-rework', claim: 'splitting' })
     expect(moves([rework])).toContain('item ready-to-rework -> needs-answers')
   })
 
-  it('resumes from the blocked_manual exit, and an executing rule walks the task moves', () => {
+  it('resumes from the blocked_manual exit, and any agent but a dispatched one walks the task moves', () => {
     const execute = rule({
-      mode: 'execute',
       watch: 'in-progress',
       outcomes: {
         succeeded: 'in-review',
@@ -70,12 +71,11 @@ describe('ruleTransitions', () => {
       'task to-do -> in-progress',
       'task to-do -> manual',
     ])
-    expect(moves([rule({})]).some((m) => m.startsWith('task'))).toBe(false)
   })
 
   it('a dispatch rule claims a task, moves it by the verdict, and gives up on it (D102)', () => {
     const dispatch = rule({
-      mode: 'dispatch',
+      dispatch: true,
       watch: 'in-progress',
       outcomes: { succeeded: 'in-review', blocked_manual: 'blocked' },
     })

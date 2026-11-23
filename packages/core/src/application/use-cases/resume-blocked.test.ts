@@ -12,7 +12,8 @@ const execute: Rule = {
   id: 'execute',
   watch: 'in-progress',
   agent: 'a',
-  mode: 'execute',
+  dispatch: false,
+  needsFeedback: false,
   maxAttempts: 3,
   prompt: '',
   session: 'fresh',
@@ -124,7 +125,6 @@ describe('resumeBlocked', () => {
     const split: Rule = {
       ...execute,
       id: 'split',
-      mode: 'split',
       outcomes: { succeeded: 'split-review' },
     }
     expect(

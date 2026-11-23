@@ -97,7 +97,6 @@ function setup(fake = '', extra: Record<string, unknown> = {}) {
   const spec = (more: Partial<RunSpec> = {}): RunSpec => ({
     runId: 'run-1',
     target: 'T-1',
-    mode: 'split',
     workspace: dir,
     mcp: { url: 'http://127.0.0.1:8787/agent-mcp', token: 'secret-token' },
     prompt: 'Split T-1.',
@@ -263,7 +262,6 @@ describe('claude-cli runner', () => {
       expect(env).toMatchObject({
         TASUKI_RUN_ID: 'run-1',
         TASUKI_TARGET: 'T-1',
-        TASUKI_MODE: 'split',
         TASUKI_WORKSPACE: t.dir,
         FAKE_OUT: t.out,
       })

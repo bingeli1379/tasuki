@@ -198,3 +198,58 @@ test('the Agents page adds a claude agent in auto and never shows its token', as
   }
   expect(agents.find((a) => a.name === 'fake')?.options).toEqual({ seconds: 10 })
 })
+
+// W9 (D109): a rule has no mode. One added from the Split template is saved as an ordinary
+// rule, its prompt filled in, and the agent splits what lands in the status it watches.
+test('a rule added from a template is an ordinary rule, and runs', async ({ page, request }) => {
+  // KAN has no status to spare for a station of this test's own.
+  test.skip(test.info().project.name === 'jira')
+  test.setTimeout(120_000)
+  const stamp = Date.now()
+  const station = `Template Check ${stamp}`
+  const id = `tpl-${stamp}`
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Workflow' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Workflow' })
+  await dialog.getByRole('button', { name: 'Add a status' }).click()
+  await dialog.getByRole('listitem', { name: 'New status' }).getByLabel('Name').fill(station)
+  await dialog.getByRole('button', { name: 'Add a rule' }).click()
+  await page.getByRole('menuitem', { name: /^Split/ }).click()
+  const rule = dialog.getByRole('listitem', { name: 'New rule' })
+  await expect(rule.getByLabel('Prompt')).toHaveValue(/^Your job: split the item/)
+  await rule.getByLabel('Name').fill(id)
+  const named = dialog.getByRole('listitem', { name: id })
+  await named.getByLabel('Watches').click()
+  await page.getByRole('option', { name: station }).click()
+  await named.getByLabel(`${id} succeeded`).click()
+  await page.getByRole('option', { name: 'Split Review' }).click()
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+
+  const { flow } = (await (await request.get('/api/flow')).json()) as {
+    flow: {
+      rules: Record<string, unknown>[]
+      workflow: { statuses: { id: string; name: string }[] }
+    }
+  }
+  const saved = flow.rules.find((r) => r['id'] === id)
+  expect(saved).not.toHaveProperty('mode')
+  expect(saved?.['prompt']).toMatch(/^Your job: split the item/)
+  const watch = flow.workflow.statuses.find((s) => s.name === station)?.id
+  const created = await request.post('/api/items', { data: { title: `e2e ${id}`, body: '' } })
+  const { ref } = (await created.json()) as { ref: string }
+  const moved = await request.post(`/api/items/${ref}/transition`, {
+    data: { from: 'refining', to: watch },
+  })
+  expect(moved.ok()).toBe(true)
+  await expect(
+    page.getByRole('region', { name: /^Split Review/ }).getByRole('article', { name: `e2e ${id}` }),
+  ).toBeVisible({ timeout: 60_000 })
+  const detail = (await (await request.get(`/api/items/${ref}`)).json()) as {
+    tasks: unknown[]
+    runs: { rule: string; outcome?: string }[]
+  }
+  expect(detail.tasks).toHaveLength(2)
+  expect(detail.runs[0]).toMatchObject({ rule: id, outcome: 'succeeded' })
+})

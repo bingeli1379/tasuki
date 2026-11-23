@@ -33,7 +33,7 @@ export async function finishRun(
   const run = await store.getRun(runId)
   // Recovery already gave up on it, and the item may be on its next attempt by now.
   if (run.outcome !== undefined) return run.outcome
-  if (rule.mode === 'dispatch') return finishTaskRun({ tracker, store }, rule, run, exit, logTail)
+  if (rule.dispatch) return finishTaskRun({ tracker, store }, rule, run, exit, logTail)
   // A person asked it to stop: whatever it reported, nothing moves (invariant 6).
   if (run.cancelRequestedAt !== undefined) {
     await store.finishRun(run.id, 'cancelled')
@@ -50,10 +50,7 @@ export async function finishRun(
     return 'cancelled'
   }
   const tasks = await listTasks(tracker, run.target)
-  let { outcome, reason } = outcomeOf(rule.mode, run.verdict, exit, {
-    tasks,
-    produced: run.produced,
-  })
+  let { outcome, reason } = outcomeOf(run.verdict, exit)
   // e.g. blocked_manual from a split agent: leaving the item in the claim status with no
   // Run would strand it there.
   if (exitFor(rule, outcome) === undefined) {

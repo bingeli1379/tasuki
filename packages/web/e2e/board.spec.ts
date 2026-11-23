@@ -242,13 +242,13 @@ test('an AI review station sends the item where the outcome the agent picked goe
   await inReview.getByRole('button', { name: approved, exact: true }).click()
   const dialog = page.getByRole('dialog')
   const run = dialog.getByRole('listitem', { name: 'Run ai-review attempt 1' })
-  await expect(run).toContainText('approve')
+  await expect(run).toContainText('succeeded')
   await expect(run).toContainText(/AI Review\s*→\s*to\s*In Review/)
   await expect(dialog.getByRole('article', { name: 'Comment by Agent' })).toContainText(
-    'The fake runner reviewed this and says approve.',
+    'The fake runner reviewed this and says succeeded.',
   )
   await expect(dialog.getByRole('article', { name: 'Comment by Engine' })).toContainText(
-    'Rule ai-review, attempt 1: approve. AI Review → In Review.',
+    'Rule ai-review, attempt 1: succeeded. AI Review → In Review.',
   )
 
   // The other one went the other way. Rule rework picks it up from there and, with no
