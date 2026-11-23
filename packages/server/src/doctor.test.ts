@@ -20,7 +20,12 @@ function configWith(plugins: Record<string, string>, config: unknown): string {
   return join(dir, 'tasuki.config.jsonc')
 }
 
-const STORE = `{ name: 'store', apiVersion: 1, store: () => ({ latestFlow: async () => undefined }) }`
+// Polls every 30 seconds, so another engine counts as running for 90 (D105: the interval is
+// an instance setting, kept in the store).
+const STORE = `{ name: 'store', apiVersion: 1, store: () => ({
+  latestSettings: async (doc) =>
+    doc === 'instance' ? { version: 1, value: { poll: { intervalSeconds: 30 } } } : undefined,
+}) }`
 const tracker = (heartbeat: string) => `{
   name: 'tracker',
   apiVersion: 1,
@@ -58,7 +63,6 @@ describe('doctor', () => {
       {
         store: { plugin: 'store' },
         tracker: { plugin: 'tracker' },
-        poll: { intervalSeconds: 30 },
         agents: {
           main: { plugin: 'runner' },
           broken: { plugin: 'runner', options: { broken: true } },
@@ -82,7 +86,7 @@ describe('doctor', () => {
         store: STORE,
         tracker: tracker(`{ engineId: 'other:/data', lastSeen: '2026-11-22T09:59:30.000Z' }`),
       },
-      { store: { plugin: 'store' }, tracker: { plugin: 'tracker' }, poll: { intervalSeconds: 30 } },
+      { store: { plugin: 'store' }, tracker: { plugin: 'tracker' } },
     )
     await runDoctor(stale, clock)
     expect(printed().some((l) => l.startsWith('error: engine'))).toBe(false)

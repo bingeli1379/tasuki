@@ -39,9 +39,9 @@ function tracker(units: WorkUnit[], held?: Record<Kind, string[]>): TrackerPort 
 }
 
 const store = storeStub({
-  saveFlow: async (expected, flow, savedBy) => ({
+  saveSettings: async (_doc, expected, value, savedBy) => ({
     version: (expected ?? 0) + 1,
-    flow,
+    value,
     savedBy,
     savedAt: '2026-11-22T00:00:00.000Z',
   }),
@@ -54,7 +54,7 @@ describe('saveFlow', () => {
       flow: { x: 1 },
       mapping: current,
     })
-    expect(saved).toMatchObject({ version: 4, flow: { x: 1 }, savedBy: 'Eli' })
+    expect(saved).toMatchObject({ version: 4, value: { x: 1 }, savedBy: 'Eli' })
   })
 
   it('a member cannot', async () => {

@@ -144,4 +144,20 @@ export const STORE_MIGRATIONS: readonly string[] = [
   // S13 (D102): the item a Run works for, which for a dispatched task is not its target.
   `ALTER TABLE run ADD COLUMN item TEXT NOT NULL DEFAULT '';
   UPDATE run SET item = target;`,
+  // W5 (D104): the station of an item whose tracker status several stations share.
+  `CREATE TABLE item_status (
+    ref    TEXT PRIMARY KEY,
+    status TEXT NOT NULL
+  );`,
+  // W6a (D105): the instance's settings join the flow's, each document versioned on its own.
+  `CREATE TABLE settings_version (
+    doc      TEXT NOT NULL,
+    version  INTEGER NOT NULL,
+    value    TEXT NOT NULL,
+    saved_by TEXT NOT NULL,
+    saved_at TEXT NOT NULL,
+    PRIMARY KEY (doc, version)
+  );
+  INSERT INTO settings_version SELECT 'flow', version, flow, saved_by, saved_at FROM flow_version;
+  DROP TABLE flow_version;`,
 ]

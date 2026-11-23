@@ -5,10 +5,10 @@
 | store | 內容 | 後端 |
 |---|---|---|
 | tracker | WorkUnit、Dependency、Comment、Attachment | sqlite 或 Jira，二選一，不同步 |
-| store | Run、engine_state、帳號與 session、流程設定的每一版 | 預設 sqlite，可換成別的 store plugin（D88） |
+| store | Run、engine_state、帳號與 session、流程設定的每一版、共用 key 時 item 在哪站（D104） | 預設 sqlite，可換成別的 store plugin（D88） |
 
 兩邊只靠 `ref`（key）互相指，不做外鍵。Jira 模式下 ticket 全看 Jira，但 Run 沒地方放，所以一定有 store。
-store 被清掉的話，`blocked` 的 item 當成人工 blocked 處理，不會自動接回。
+store 被清掉的話，`blocked` 的 item 當成人工 blocked 處理，不會自動接回；共用 key 的站上的 item 都回到那組的第一站（D104）。
 
 ## Domain 型別
 
@@ -113,6 +113,7 @@ type Outcome =
 | ref | `<refPrefix>-<n>`，前綴在 plugin 的 `options.refPrefix`，預設 `TSK`；n 是 `ref_counter` 發的流水號，刪掉的 task 的號碼不會再發（D52、D70） | issue key |
 | 刪 task | 同一個 transaction 刪掉它的 dependency（兩個方向）、comment、附件與它自己 | `DELETE /issue/{key}`，Jira 連 link、comment、附件一起刪 |
 | status 存什麼 | 流程設定對照的 tracker key（預設是邏輯名，改顯示名不動資料，D91） | status id（D50） |
+| 共用 key 的站 | 兩邊一樣：tracker 存那組的 key，item 不在第一站時，store 的 `item_status` 記它在哪站（D104） | 同左 |
 
 item 與 task 各有自己的 workflow，所以 Jira 的 status mapping 要兩份。
 engine 用的 token 是誰，engine 寫的東西就顯示成誰。用專用 bot 帳號或個人 token 都可以，comment 一律帶標記，所以兩種情況都分得出來是人還是 engine 寫的。
@@ -172,7 +173,7 @@ CREATE INDEX attachment_by_target ON attachment(target, id);
 CREATE TABLE ref_counter (last INTEGER NOT NULL);
 ```
 
-store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，S7d 建了 `engine_state` 並重建 `run` 讓 `cancel_requested_by` 多收 `pause`，S8 加了 `session_id`，D82 加了 `from_status`、`to_status`，W3 拿掉 `log_path`（log 由 engine 命名，D88），S13 加了 `item`（D102），見 `packages/sqlite/src/store-migrations.ts`；usage 的欄位等用到的切片再加）：
+store（S4 建了 `run` 表、只建了用到的欄位，S5 加了 `produced_questions`、`produced_tasks`，S7c 加了 cancel 的三欄，S7d 建了 `engine_state` 並重建 `run` 讓 `cancel_requested_by` 多收 `pause`，S8 加了 `session_id`，D82 加了 `from_status`、`to_status`，W3 拿掉 `log_path`（log 由 engine 命名，D88），S13 加了 `item`（D102），W5 建了 `item_status`（D104），見 `packages/sqlite/src/store-migrations.ts`；usage 的欄位等用到的切片再加）：
 
 ```sql
 CREATE TABLE run (
@@ -238,13 +239,23 @@ CREATE TABLE api_token (
   created_at TEXT NOT NULL
 );
 
--- W4a (D91): every save of the flow settings. The store keeps the JSON as given; the engine
--- checks it. The newest version is the one in use; none yet means the built-in default.
-CREATE TABLE flow_version (
-  version  INTEGER PRIMARY KEY,                 -- 1, 2, ...; a save names the one it started from
-  flow     TEXT NOT NULL,                       -- JSON: workflow, rules, labels
+-- W4a (D91), W6a (D105): every save of a settings document, the flow or the instance's. The
+-- store keeps the JSON as given; the engine checks it. The newest version of each is the one
+-- in use; none yet means the built-in default.
+CREATE TABLE settings_version (
+  doc      TEXT NOT NULL,                       -- 'flow' | 'instance'
+  version  INTEGER NOT NULL,                    -- 1, 2, ... per doc; a save names the one it started from
+  value    TEXT NOT NULL,                       -- JSON: workflow, rules, labels | poll, limits
   saved_by TEXT NOT NULL,                       -- the saver's display name, copied; '' with no sign-in
-  saved_at TEXT NOT NULL
+  saved_at TEXT NOT NULL,
+  PRIMARY KEY (doc, version)
+);
+
+-- W5 (D104): which station an item is in when its tracker status is shared by several.
+-- No row means the first of them; the tracker holds only the shared key.
+CREATE TABLE item_status (
+  ref    TEXT PRIMARY KEY,
+  status TEXT NOT NULL                          -- logical name
 );
 ```
 

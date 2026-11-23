@@ -3,6 +3,7 @@ import {
   clearHeartbeat,
   needsSetup,
   unmatchedStatuses,
+  withSharedStatuses,
   type Clock,
   type RunnerPort,
 } from '@tasuki/core'
@@ -13,6 +14,7 @@ import { isLoopback, loadConfig } from './config'
 import { agentChecks, engineCheck, engineIdOf, printFindings, trackerChecks } from './doctor'
 import { createEngine } from './engine'
 import { loadFlow } from './flow'
+import { loadInstance, pollDefaultFor } from './instance'
 import { loadAuth, loadRunner, loadStore, loadTracker, NO_STATUSES } from './plugin-loader'
 import { createRunTokens } from './run-tokens'
 import { createLoginThrottle, createSetupToken, createSignIns } from './sign-ins'
@@ -25,7 +27,7 @@ export interface StartOptions {
 // `tasuki start`: loads everything the config names, refuses on what the file gets wrong, then
 // serves and polls until the process is stopped.
 export async function startEngine(
-  configPath: string,
+  configPath: string | undefined,
   clock: Clock,
   options: StartOptions = {},
 ): Promise<void> {
@@ -38,19 +40,19 @@ export async function startEngine(
     ...base,
     statuses: NO_STATUSES,
   })
+  const instance = await loadInstance(store, pollDefaultFor(config.tracker.plugin))
   const flow = await loadFlow(store, {
     agents: Object.keys(config.agents),
-    defaultMaxAttempts: config.limits.defaultMaxAttempts,
+    defaultMaxAttempts: instance.current().limits.defaultMaxAttempts,
   })
   const ctx = { ...base, statuses: flow.statuses }
-  const tracker = await loadTracker(
-    config.tracker.plugin,
-    config.tracker.options,
-    config.configDir,
-    ctx,
+  const tracker = withSharedStatuses(
+    await loadTracker(config.tracker.plugin, config.tracker.options, config.configDir, ctx),
+    store,
+    flow.statuses,
   )
   const engineId = engineIdOf(config.dataDir)
-  const second = await engineCheck(tracker, clock, engineId, config.pollSeconds)
+  const second = await engineCheck(tracker, clock, engineId, instance.current().pollSeconds)
   if (second[0] !== undefined) throw new Error(second[0].message)
   flow.unmatched = await unmatchedStatuses(tracker, flow.current().statuses)
   const runners: Record<string, RunnerPort> = {}
@@ -98,6 +100,7 @@ export async function startEngine(
       tracker,
       store,
       flow,
+      instance,
       agents: Object.keys(config.agents),
       tokens,
       ...(auth === undefined ? {} : { auth }),
@@ -113,7 +116,7 @@ export async function startEngine(
     store,
     clock,
     flow,
-    limits: config.limits,
+    limits: () => instance.current().limits,
     workspaceRoot: join(config.dataDir, 'workspaces'),
     logDir: join(config.dataDir, 'logs'),
     runners,
@@ -130,7 +133,11 @@ export async function startEngine(
     })
   // The first round runs at start, so Runs a crash left behind are recovered right away.
   await engine.tick()
-  setInterval(() => void engine.tick(), config.pollSeconds * 1000)
+  // Each wait reads the interval again, so a save on the General page needs no restart.
+  const poll = (): void => {
+    setTimeout(() => void engine.tick().finally(poll), instance.current().pollSeconds * 1000)
+  }
+  poll()
   // Stop reaches the agent within a second, not a poll interval later.
   setInterval(() => void engine.enforce(), 1000)
   console.log(`data dir: ${config.dataDir}`)

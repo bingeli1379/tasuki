@@ -13,6 +13,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
+import { createLiveInstance } from './instance'
 import { createApp } from './app'
 import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
 import { defaultPrompt } from './prompts'
@@ -61,6 +62,7 @@ const appWith = (): ReturnType<typeof createApp> =>
     tracker: memoryTracker(),
     store: memoryStore(),
     flow: liveFlow(mapping),
+    instance: createLiveInstance({ pollSeconds: 5 }),
     agents: [],
     tokens: createRunTokens(),
   })
@@ -310,6 +312,7 @@ describe('tasks', () => {
       tracker,
       store,
       flow: liveFlow(taskMapping),
+      instance: createLiveInstance({ pollSeconds: 5 }),
       agents: [],
       tokens: createRunTokens(),
     })
@@ -541,7 +544,14 @@ describe('the flow settings (D91)', () => {
       db,
       'M',
     )
-    const app = createApp({ tracker, store, flow, agents: ['fake'], tokens: createRunTokens() })
+    const app = createApp({
+      tracker,
+      store,
+      flow,
+      instance: createLiveInstance({ pollSeconds: 5 }),
+      agents: ['fake'],
+      tokens: createRunTokens(),
+    })
     return { app, tracker }
   }
   const put = (app: ReturnType<typeof createApp>, version: number | undefined, flow: unknown) =>
@@ -649,7 +659,7 @@ describe('the flow settings (D91)', () => {
     const moved = await put(app, 1, renamed({ id: 'asked', name: 'Asked' }))
     expect(moved.status).toBe(400)
     expect(await moved.json()).toEqual({
-      error: `move these off the statuses removed or renamed first: ${item.ref} (needs-answers)`,
+      error: `move these off the statuses removed, rekeyed or no longer first of a shared key: ${item.ref} (needs-answers)`,
     })
   })
 })
@@ -664,6 +674,7 @@ describe('the built board', () => {
       tracker: memoryTracker(),
       store: memoryStore(),
       flow: liveFlow(mapping),
+      instance: createLiveInstance({ pollSeconds: 5 }),
       agents: [],
       tokens: createRunTokens(),
       webDir,
@@ -673,5 +684,89 @@ describe('the built board', () => {
     expect(await page.text()).toBe('<div id="app"></div>')
     expect((await app.request('/assets/app.js')).status).toBe(200)
     expect(await (await app.request('/api/health')).json()).toEqual({ ok: true })
+  })
+})
+
+describe('instance settings (D105)', () => {
+  const setup = async () => {
+    const store = memoryStore()
+    const flow = await loadFlow(store, { agents: ['fake'], defaultMaxAttempts: 3 })
+    const instance = createLiveInstance({ pollSeconds: 5 })
+    const app = createApp({
+      tracker: memoryTracker(),
+      store,
+      flow,
+      instance,
+      agents: ['fake'],
+      tokens: createRunTokens(),
+    })
+    return { app, flow, instance }
+  }
+  const put = (app: ReturnType<typeof createApp>, version: number | undefined, value: unknown) =>
+    app.request('/api/instance', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...(version === undefined ? {} : { version }), instance: value }),
+    })
+
+  it('starts on the defaults, never saved', async () => {
+    const { app } = await setup()
+    expect(await (await app.request('/api/instance')).json()).toEqual({
+      instance: {
+        poll: { intervalSeconds: 5 },
+        limits: {
+          maxConcurrentRuns: 2,
+          leaseSeconds: 120,
+          defaultMaxAttempts: 3,
+          softGraceSeconds: 300,
+          hardGraceSeconds: 10,
+        },
+      },
+    })
+  })
+
+  it('a save applies at once, and a save from an older version is a 409', async () => {
+    const { app, instance } = await setup()
+    expect(await (await put(app, undefined, { poll: { intervalSeconds: 2 } })).json()).toEqual({
+      version: 1,
+    })
+    expect(instance.current().pollSeconds).toBe(2)
+    expect(await (await app.request('/api/instance')).json()).toMatchObject({
+      version: 1,
+      instance: { poll: { intervalSeconds: 2 } },
+    })
+    expect((await put(app, undefined, {})).status).toBe(409)
+    expect(instance.current().pollSeconds).toBe(2)
+  })
+
+  it('refuses settings that cannot work, saying where, and keeps the ones in use', async () => {
+    const { app, instance } = await setup()
+    const res = await put(app, undefined, { limits: { leaseSeconds: 0 } })
+    expect(res.status).toBe(400)
+    expect(await res.json()).toEqual({
+      error: 'limits.leaseSeconds must be a whole number of at least 1',
+    })
+    expect(instance.current().limits.leaseSeconds).toBe(120)
+  })
+
+  it('a rule that sets no attempts follows the default as it changes', async () => {
+    const { app, flow } = await setup()
+    const rule = {
+      id: 'split',
+      watch: 'ready-to-split',
+      agent: 'fake',
+      mode: 'split',
+      outcomes: { succeeded: 'split-review' },
+    }
+    const saved = await app.request('/api/flow', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ flow: { ...DEFAULT_FLOW, rules: [rule] } }),
+    })
+    expect(saved.status).toBe(200)
+    expect(flow.current().rules[0]?.maxAttempts).toBe(3)
+    await put(app, undefined, { limits: { defaultMaxAttempts: 5 } })
+    expect(flow.current().rules[0]?.maxAttempts).toBe(5)
+    expect(flow.context.defaultMaxAttempts).toBe(5)
   })
 })

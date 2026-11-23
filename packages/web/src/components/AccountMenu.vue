@@ -1,13 +1,11 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { call, messageOf, sendJson, type Account, type AuthState } from '../api'
-import Accounts from './Accounts.vue'
 import ApiTokens from './ApiTokens.vue'
 
 const props = defineProps<{ me: Account; mode: AuthState['mode'] }>()
 
 const tokensOpen = ref(false)
-const accountsOpen = ref(false)
 const passwordOpen = ref(false)
 const current = ref('')
 const next = ref('')
@@ -22,9 +20,6 @@ const items = computed(() => [
   [
     ...(keepsAccounts.value ? [{ label: 'Change password', onSelect: () => openPassword() }] : []),
     { label: 'API tokens', onSelect: () => (tokensOpen.value = true) },
-    ...(props.me.access === 'admin'
-      ? [{ label: 'Accounts', onSelect: () => (accountsOpen.value = true) }]
-      : []),
   ],
   [{ label: 'Sign out', onSelect: () => void signOut() }],
 ])
@@ -62,12 +57,6 @@ async function signOut(): Promise<void> {
     </UButton>
   </UDropdownMenu>
   <ApiTokens v-model:open="tokensOpen" />
-  <Accounts
-    v-if="me.access === 'admin'"
-    v-model:open="accountsOpen"
-    :me="me"
-    :keeps-accounts="keepsAccounts"
-  />
   <UModal v-model:open="passwordOpen" title="Change password">
     <template #body>
       <form class="flex flex-col gap-4" @submit.prevent="changePassword">

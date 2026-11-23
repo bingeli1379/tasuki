@@ -81,18 +81,6 @@ describe('parseFlow', () => {
       {
         workflow: {
           ...stations(['a', 'b']),
-          statuses: [
-            { id: 'a', key: 'K' },
-            { id: 'b', key: 'K' },
-          ],
-        },
-      },
-      'workflow.statuses: a and b share the tracker key K',
-    ],
-    [
-      {
-        workflow: {
-          ...stations(['a', 'b']),
           statuses: [{ id: 'a', handledBy: 'engine' }, { id: 'b' }],
         },
       },
@@ -149,6 +137,24 @@ describe('parseFlow', () => {
   ])('refuses a flow that cannot work: %j', (raw, message) => {
     expect(() => parse(raw)).toThrow(new InvalidInput(message).message)
     expect(() => parse(raw)).toThrow(InvalidInput)
+  })
+
+  it('lets stations share a tracker key, keeping their order (D104)', () => {
+    const flow = parse({
+      workflow: {
+        statuses: [
+          { id: 'refining', key: 'K' },
+          { id: 'split-done', key: 'K' },
+          { id: 'done', key: 'D' },
+        ],
+        roles: { entry: 'refining', failure: 'done' },
+      },
+    })
+    expect(Object.entries(flow.statuses.item ?? {})).toEqual([
+      ['refining', 'K'],
+      ['split-done', 'K'],
+      ['done', 'D'],
+    ])
   })
 
   it('reads rules, filling maxAttempts from the file and the prompt from the mode', () => {

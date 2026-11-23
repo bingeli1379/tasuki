@@ -73,10 +73,8 @@ if (
   await emptyJiraProject()
 }
 
-// Polling every 2 seconds keeps the Jira run short; the agent takes 10, longer than the board
-// needs to read itself again and show it Running.
+// The poll interval is an instance setting, saved by flow.setup.ts (D105).
 const engineFile = {
-  poll: { intervalSeconds: 2 },
   agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 10 } } },
 }
 
@@ -141,15 +139,20 @@ const stations = [
   { id: 'triage', handledBy: 'person', outcomes: ['ready-to-split'] },
   { id: 'ai-review', name: 'AI Review' },
   { id: 'parallel' },
+  // W5 (D104): one more station on Refining's tracker status.
+  { id: 'split-done' },
 ]
+
+// Stations keyed to another one's tracker status.
+const sharing: Record<string, string> = { 'split-done': 'refining' }
 
 // Keyed by the KAN status ids the env maps each logical name to.
 function jiraWorkflow(): object {
   const keys: Record<string, string> = JSON.parse(String(process.env['JIRA_TEST_ITEM_STATUSES']))
   return {
     statuses: stations
-      .filter((s) => keys[s.id] !== undefined)
-      .map((s) => ({ ...s, key: keys[s.id] })),
+      .filter((s) => keys[sharing[s.id] ?? s.id] !== undefined)
+      .map((s) => ({ ...s, key: keys[sharing[s.id] ?? s.id] })),
     roles: DEFAULT_WORKFLOW.roles,
     taskStatuses: JSON.parse(String(process.env['JIRA_TEST_TASK_STATUSES'])),
   }
@@ -161,7 +164,13 @@ const trackers = [
     api: 8788,
     web: 5180,
     config: {},
-    flow: { workflow: { statuses: stations, roles: DEFAULT_WORKFLOW.roles }, rules },
+    flow: {
+      workflow: {
+        statuses: stations.map((s) => (sharing[s.id] ? { ...s, key: sharing[s.id] } : s)),
+        roles: DEFAULT_WORKFLOW.roles,
+      },
+      rules,
+    },
   },
   ...(withJira
     ? [

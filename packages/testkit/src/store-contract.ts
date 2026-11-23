@@ -1,8 +1,8 @@
 import {
-  FlowConflict,
   InvalidInput,
   NotFound,
   RunConflict,
+  SettingsConflict,
   type Clock,
   type NewRun,
   type StorePort,
@@ -211,43 +211,89 @@ export function describeStoreContract(
       expect(await store.isPaused()).toBe(false)
     })
 
-    it('the flow is unset until saved; each save is a version up, stamped and kept as given', async () => {
-      expect(await store.latestFlow()).toBeUndefined()
+    it('a settings document is unset until saved; each save is a version up, stamped and kept as given', async () => {
+      expect(await store.latestSettings('flow')).toBeUndefined()
       const flow = { workflow: { statuses: [{ id: 'refining' }] }, rules: [], note: null }
-      expect(await store.saveFlow(undefined, flow, 'Eli')).toEqual({
+      expect(await store.saveSettings('flow', undefined, flow, 'Eli')).toEqual({
         version: 1,
-        flow,
+        value: flow,
         savedBy: 'Eli',
         savedAt: at(T0),
       })
       now += 1000
-      await store.saveFlow(1, { rules: [] }, '')
-      expect(await store.latestFlow()).toEqual({
+      await store.saveSettings('flow', 1, { rules: [] }, '')
+      expect(await store.latestSettings('flow')).toEqual({
         version: 2,
-        flow: { rules: [] },
+        value: { rules: [] },
         savedBy: '',
         savedAt: at(T0 + 1000),
       })
     })
 
-    it('a save from a version that is no longer the latest is a FlowConflict and writes nothing', async () => {
-      await expect(store.saveFlow(1, {}, 'Eli')).rejects.toBeInstanceOf(FlowConflict)
-      await store.saveFlow(undefined, { a: 1 }, 'Eli')
-      await store.saveFlow(1, { a: 2 }, 'Eli')
-      await expect(store.saveFlow(1, { a: 3 }, 'Kai')).rejects.toBeInstanceOf(FlowConflict)
-      await expect(store.saveFlow(undefined, { a: 3 }, 'Kai')).rejects.toBeInstanceOf(FlowConflict)
-      expect(await store.latestFlow()).toMatchObject({ version: 2, flow: { a: 2 } })
+    it('a save from a version that is no longer the latest is a SettingsConflict and writes nothing', async () => {
+      await expect(store.saveSettings('flow', 1, {}, 'Eli')).rejects.toBeInstanceOf(
+        SettingsConflict,
+      )
+      await store.saveSettings('flow', undefined, { a: 1 }, 'Eli')
+      await store.saveSettings('flow', 1, { a: 2 }, 'Eli')
+      await expect(store.saveSettings('flow', 1, { a: 3 }, 'Kai')).rejects.toBeInstanceOf(
+        SettingsConflict,
+      )
+      await expect(store.saveSettings('flow', undefined, { a: 3 }, 'Kai')).rejects.toBeInstanceOf(
+        SettingsConflict,
+      )
+      expect(await store.latestSettings('flow')).toMatchObject({ version: 2, value: { a: 2 } })
     })
 
     it('the history holds every save, newest first, each as it was saved', async () => {
-      expect(await store.flowHistory()).toEqual([])
-      await store.saveFlow(undefined, { a: 1 }, 'Eli')
+      expect(await store.settingsHistory('flow')).toEqual([])
+      await store.saveSettings('flow', undefined, { a: 1 }, 'Eli')
       now += 1000
-      await store.saveFlow(1, { a: 2 }, 'Kai')
-      expect(await store.flowHistory()).toEqual([
-        { version: 2, flow: { a: 2 }, savedBy: 'Kai', savedAt: at(T0 + 1000) },
-        { version: 1, flow: { a: 1 }, savedBy: 'Eli', savedAt: at(T0) },
+      await store.saveSettings('flow', 1, { a: 2 }, 'Kai')
+      expect(await store.settingsHistory('flow')).toEqual([
+        { version: 2, value: { a: 2 }, savedBy: 'Kai', savedAt: at(T0 + 1000) },
+        { version: 1, value: { a: 1 }, savedBy: 'Eli', savedAt: at(T0) },
       ])
+    })
+
+    it('each settings document counts its own versions and keeps its own history (D105)', async () => {
+      await store.saveSettings('flow', undefined, { a: 1 }, 'Eli')
+      await store.saveSettings('flow', 1, { a: 2 }, 'Eli')
+      expect(await store.latestSettings('instance')).toBeUndefined()
+      expect(await store.saveSettings('instance', undefined, { b: 1 }, 'Kai')).toMatchObject({
+        version: 1,
+      })
+      await expect(store.saveSettings('instance', 2, { b: 2 }, 'Kai')).rejects.toBeInstanceOf(
+        SettingsConflict,
+      )
+      expect(await store.latestSettings('flow')).toMatchObject({ version: 2, value: { a: 2 } })
+      expect(await store.settingsHistory('instance')).toMatchObject([
+        { version: 1, value: { b: 1 } },
+      ])
+    })
+
+    it('item statuses start empty and come back only for the refs that have one (D104)', async () => {
+      expect(await store.itemStatuses([])).toEqual({})
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({})
+      expect(await store.setItemStatus('TSK-1', undefined, 'split-done')).toBe(true)
+      expect(await store.setItemStatus('TSK-2', undefined, 'reviewing')).toBe(true)
+      expect(await store.itemStatuses(['TSK-1', 'TSK-3'])).toEqual({ 'TSK-1': 'split-done' })
+      expect(await store.itemStatuses(['TSK-1', 'TSK-2'])).toEqual({
+        'TSK-1': 'split-done',
+        'TSK-2': 'reviewing',
+      })
+    })
+
+    it('setItemStatus is a compare-and-set on the entry, and undefined clears it', async () => {
+      await store.setItemStatus('TSK-1', undefined, 'split-done')
+      expect(await store.setItemStatus('TSK-1', undefined, 'other')).toBe(false)
+      expect(await store.setItemStatus('TSK-1', 'refining', 'other')).toBe(false)
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({ 'TSK-1': 'split-done' })
+      expect(await store.setItemStatus('TSK-1', 'split-done', 'ready')).toBe(true)
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({ 'TSK-1': 'ready' })
+      expect(await store.setItemStatus('TSK-1', 'ready', undefined)).toBe(true)
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({})
+      expect(await store.setItemStatus('TSK-1', 'ready', undefined)).toBe(false)
     })
 
     const newAccount = (userId: string, username = userId) => ({

@@ -11,3 +11,18 @@ setup('save the flow the board tests need', async ({ request }, info) => {
   })
   expect(saved.ok(), await saved.text()).toBe(true)
 })
+
+// Polling every 2 seconds keeps the Jira run short; the agent takes 10, longer than the board
+// needs to read itself again and show it Running. An instance setting since D105.
+setup('poll every 2 seconds', async ({ request }) => {
+  const current = await request.get('/api/instance')
+  expect(current.ok()).toBe(true)
+  const { version } = (await current.json()) as { version?: number }
+  const saved = await request.put('/api/instance', {
+    data: {
+      ...(version === undefined ? {} : { version }),
+      instance: { poll: { intervalSeconds: 2 } },
+    },
+  })
+  expect(saved.ok(), await saved.text()).toBe(true)
+})

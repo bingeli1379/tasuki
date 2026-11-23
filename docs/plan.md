@@ -65,6 +65,12 @@
 | S12c | container image（本機 build，在 OrbStack 跑），claude-cli 加 `api-key` 與 `oauth-token` 認證（已完成，D100） | `docker run` 起來後用 token 真的派一次 claude |
 | S12d | codex runner 與 testkit 的 runner 契約，做到契約測試會過（已完成，D101；作者沒有 Codex 帳號，真的跑留在待驗證） | config 寫 codex 的 agent，`doctor` 與契約測試通過 |
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2）：`dispatch` mode，跟 `execute` 並存（sqlite 已完成，D102；Jira 待驗證） | 規則換成 `dispatch`，沒有互相等待的 task 一起跑，task 詳情按 Stop 只停那一張 |
+| W5 | 幾站共用同一個 tracker status，item 在哪站記在 store（已完成，D104） | 設定頁把 `refining` 與 `split-done` 都設成 To Do，卡片在兩站之間移動時 Jira 不動、重新整理後還在原站；在 Jira 把卡拖走，看板跟著 Jira |
+| W6a | 啟動設定縮到開機必要的第一半：`poll`、`limits` 進 store（實例設定，General 頁只給 admin）、config 檔選用、`dataDir` 預設 `~/.tasuki`、環境變數、齒輪改成下拉選單（已完成，D105） | 空資料夾直接 `tasuki start` 起得來；在 General 頁改 poll，不用重啟就生效 |
+| W6b | tracker 進 store、加密金鑰、secret 只寫不讀、`init` 只問登入與 port（D105、D106） | 在設定頁接上 Jira，token 存完只看得到「已設定」 |
+| W7 | Agents 頁：agent 進 store、權限三段、settings JSON、認證三選一、偵測 CLI 給安裝指令、預設 claude 與 codex（D107、D108、D110） | 不碰檔案，在 Agents 頁把 claude 切成 auto，派一次 Run |
+| W8 | 被擋與核准：`--permission-prompt-tool` 接 tasuki MCP、看板的 Approve 與「以後都允許」、不會問人的被擋數到 3 次就停、`permission_denials` 掛在 Run 上、契約多一條（D107） | 白名單外的指令讓卡片亮「等你核准」，按 Approve 後 agent 接著跑 |
+| W9 | 拿掉 mode：規則全部等於 `custom`、`dispatch` 變開關、預設 prompt 變範本（D109） | 新增規則時從範本選 split，存完的規則沒有 mode 欄位，照樣跑完 |
 | S14 | 對外發佈：license、套件名稱查撞名（D23）、版本號與依賴範圍（D62、D96）、`npm publish`（core、testkit、內建 plugin、CLI）、container image 推到 registry、給使用者看的 README（含訂閱帳號與 API key 的條款）（D97） | 在一台乾淨的機器上從 npm 與 registry 裝起來，照 README 跑得起來 |
 
 S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整。調整照 S7e 的方式插成切片，全部定了才進 S14（D97）。所有對外發佈的事只放在 S14，前面的切片做到本機裝得起來為止。
@@ -83,7 +89,7 @@ S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整�
 |---|---|---|
 | orchestrator 在 LLM 手上排程（M1） | 依賴順序與平行度不保證 | 驗證 verdict 時檢查 task 圖；M2 留好路 |
 | Jira 的 workflow 不允許某些轉移 | 規則跑到一半失敗 | `doctor` 啟動前驗證 |
-| headless 權限設定錯誤 | agent 卡住或權限過大 | `allowedTools` 白名單，雲端用容器 |
+| headless 權限設定錯誤 | agent 卡住或權限過大 | 預設白名單加問人，被擋的掛在 Run 上（D107），雲端用容器 |
 | ticket 內容夾帶指令 | agent 被誤導 | 見 security-and-auth.md |
 | 訂閱帳號用在雲端服務的條款 | 帳號風險 | 雲端預設 API key，README 寫清楚 |
 | 改到一半的 workspace | 續跑時狀態髒 | agent 要能接受，見 stop-and-recovery.md |
@@ -132,4 +138,7 @@ S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整�
 - Jira Cloud：API token 的 rate limit。transitions API 已在 S2 實際走過（D59）；ADF 轉換（marklassian 加自寫的反向）與 comment property 已在 S3 實際走過（D61）。
 - Sortie 的 adapter 介面與 SQLite schema（決定 D20 的待辦）。
 - mermaid 圖在實際預覽下是否渲染正常（目前沒有在本機渲染驗證過）。
+- `--permission-prompt-tool`（D107）：claude 2.1.323 的 `--help` 只在 `--permission-prompts` 的說明裡提到它，沒列出來。要實際接一支 MCP tool 跑一次，確認收到什麼、要回什麼格式，以及人半小時沒回時 MCP 的呼叫會不會 timeout、CLI 會不會自己放棄。
+- auto 的 classifier 擋下的工具會不會寫進 `permission_denials`（D107）。2026-11-23 試了兩輪都沒輪到 classifier 出手：prompt 叫的它全放行，檔案叫的模型自己先拒絕。
+- codex 的 `--approve-for-me` 跟 runner 寫死的 `approval_policy=never` 能不能一起用（D107）。never 不發審核，自動審查可能沒東西可接，八成要改 `on-request`；白名單那段在 codex 要怎麼翻也一起看。
 - Claude 與 Codex 的服務條款（訂閱帳號用於自動化與服務）。S14 寫 README 前要查（D97）。

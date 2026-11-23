@@ -19,7 +19,7 @@ import {
 } from '@tasuki/core'
 import { mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import type { Limits } from './config'
+import type { Limits } from './instance'
 import type { LiveFlow } from './flow'
 import { CONTRACT } from './prompts'
 import type { RunTokens } from './run-tokens'
@@ -33,7 +33,8 @@ export interface EngineDeps {
   clock: Clock
   // Read once a round: a save of the flow takes effect on the next one (D91).
   flow: LiveFlow
-  limits: Limits
+  // Read again at each use: an admin's save on the General page applies at once (D105).
+  limits: () => Limits
   workspaceRoot: string
   // Each Run's log is <logDir>/<run id>.log, on this machine whichever store holds the Run.
   logDir: string
@@ -83,9 +84,9 @@ export function createEngine(deps: EngineDeps): Engine {
     const token = tokens.issue(run.id, rule)
     const renew = setInterval(
       () => {
-        store.renewLease(run.id, limits.leaseSeconds).catch((e: unknown) => log(String(e)))
+        store.renewLease(run.id, limits().leaseSeconds).catch((e: unknown) => log(String(e)))
       },
-      (limits.leaseSeconds * 1000) / 3,
+      (limits().leaseSeconds * 1000) / 3,
     )
     const logPath = join(deps.logDir, `${run.id}.log`)
     let exit: Promise<RunExit>
@@ -161,15 +162,15 @@ export function createEngine(deps: EngineDeps): Engine {
         await resumeReleased({ tracker, store, named }, rules, holdLabel)
         // No agent behind it, so a paused engine still moves an item whose tasks are through.
         await settleDispatched({ tracker, store, named }, rules, {
-          leaseSeconds: limits.leaseSeconds,
+          leaseSeconds: limits().leaseSeconds,
           workspaceRoot: deps.workspaceRoot,
           holdLabel,
         })
         // Paused, the round still recovers and resumes: none of that starts a Run.
         if (await store.isPaused()) return
         const claimed = await claimItems({ tracker, store, named }, rules, {
-          maxConcurrentRuns: limits.maxConcurrentRuns,
-          leaseSeconds: limits.leaseSeconds,
+          maxConcurrentRuns: limits().maxConcurrentRuns,
+          leaseSeconds: limits().leaseSeconds,
           workspaceRoot: deps.workspaceRoot,
           holdLabel,
         })
@@ -194,7 +195,7 @@ export function createEngine(deps: EngineDeps): Engine {
           if (agent === undefined || run.cancelRequestedAt === undefined) continue
           const now = clock.now().getTime()
           if (run.cancelMode === 'soft') {
-            if (now - Date.parse(run.cancelRequestedAt) < limits.softGraceSeconds * 1000) continue
+            if (now - Date.parse(run.cancelRequestedAt) < limits().softGraceSeconds * 1000) continue
             await store.requestCancel(run.id, 'hard', run.cancelRequestedBy ?? 'stop')
           }
           if (agent.termAt === undefined) {
@@ -202,7 +203,7 @@ export function createEngine(deps: EngineDeps): Engine {
             agent.handle.terminate('SIGTERM')
           } else if (
             agent.killed !== true &&
-            now - agent.termAt >= limits.hardGraceSeconds * 1000
+            now - agent.termAt >= limits().hardGraceSeconds * 1000
           ) {
             agent.killed = true
             agent.handle.terminate('SIGKILL')

@@ -9,11 +9,11 @@ import {
   saveFlow,
   TASK_STATUSES,
   type Account,
-  type FlowVersion,
   type Roles,
   type Rule,
   type RuleMode,
   type RuleSession,
+  type SettingsVersion,
   type Station,
   type StatusMap,
   type StatusMapping,
@@ -33,7 +33,8 @@ export interface Flow {
   holdLabel: string
 }
 
-// What a flow is checked against from the file: rules name its agents.
+// What a flow is checked against from the file and the instance settings: rules name the
+// file's agents, and take the instance's attempts when they set none.
 export interface FlowContext {
   agents: readonly string[]
   defaultMaxAttempts: number
@@ -110,13 +111,6 @@ function parseWorkflow(value: unknown): { workflow: Workflow; statuses: StatusMa
       outcomes: outcomes as string[],
     }
   })
-  const owners = Object.entries(keys).filter(([, k], i, all) =>
-    all.some(([, other], j) => j !== i && other === k),
-  )
-  if (owners.length > 0)
-    fail(
-      `workflow.statuses: ${owners.map(([id]) => id).join(' and ')} share the tracker key ${owners[0]?.[1]}`,
-    )
   for (const station of stations)
     for (const to of station.outcomes) {
       if (keys[to] === undefined)
@@ -295,8 +289,10 @@ export function parseFlow(raw: unknown, ctx: FlowContext): Flow {
 // The flow in use, swapped whole on a save: each request and each poll round reads it once,
 // and a Run keeps the rule it was started with.
 export interface LiveFlow {
-  // What it is checked against from the file.
+  // What it is checked against from the file and the instance settings.
   readonly context: FlowContext
+  // Checks the flow in use again against a new context: an admin changed the default attempts.
+  rebase(ctx: FlowContext): void
   current(): Flow
   // What the settings page edits: the flow as saved, or the default before any save.
   saved(): { version?: number; flow: unknown }
@@ -310,13 +306,14 @@ export interface LiveFlow {
     actor: Account,
     expected: number | undefined,
     raw: unknown,
-  ): Promise<FlowVersion>
+  ): Promise<SettingsVersion>
 }
 
 export function createLiveFlow(
   ctx: FlowContext,
   initial: { flow: Flow; raw: unknown; version?: number },
 ): LiveFlow {
+  let context = ctx
   let flow = initial.flow
   let map = createStatusMap(flow.statuses)
   let saved: { version?: number; flow: unknown } =
@@ -324,7 +321,13 @@ export function createLiveFlow(
       ? { flow: initial.raw }
       : { version: initial.version, flow: initial.raw }
   const live: LiveFlow = {
-    context: ctx,
+    get context() {
+      return context
+    },
+    rebase(next) {
+      context = next
+      flow = parseFlow(saved.flow, next)
+    },
     current: () => flow,
     saved: () => saved,
     unmatched: [],
@@ -335,7 +338,7 @@ export function createLiveFlow(
     },
     async save(deps, actor, expected, raw) {
       assertEditsFlow(actor)
-      const next = parseFlow(raw, ctx)
+      const next = parseFlow(raw, context)
       const version = await saveFlow(deps, actor, flow.statuses, {
         expected,
         flow: raw,
@@ -354,8 +357,8 @@ export function createLiveFlow(
 // The flow as last saved, or the default; a saved one the file no longer fits (an agent its
 // rules use was renamed) stops the start, since only the file can put that right.
 export async function loadFlow(store: StorePort, ctx: FlowContext): Promise<LiveFlow> {
-  const latest = await store.latestFlow()
-  const raw = latest?.flow ?? DEFAULT_FLOW
+  const latest = await store.latestSettings('flow')
+  const raw = latest?.value ?? DEFAULT_FLOW
   let flow: Flow
   try {
     flow = parseFlow(raw, ctx)

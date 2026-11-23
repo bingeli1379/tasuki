@@ -34,7 +34,7 @@ test('the first admin comes from the setup token, adds a member, and the member 
   await expect(page.getByRole('region', { name: /^Refining/ })).toBeVisible()
 
   // A member, from the accounts page only an admin has.
-  await page.getByRole('button', { name: 'Account' }).click()
+  await page.getByRole('button', { name: 'Settings' }).click()
   await page.getByRole('menuitem', { name: 'Accounts' }).click()
   const accounts = page.getByRole('dialog', { name: 'Accounts' })
   await accounts.getByRole('button', { name: 'Add account' }).click()
