@@ -49,9 +49,18 @@ async function stranded(
 ): Promise<string[]> {
   const empty = await unheld(tracker, before)
   const found: string[] = []
+  // Of stations sharing a key, items in the first are not recorded (D104): once another
+  // station becomes first, they would all show up there.
+  const firstOf = (mapping: StatusMapping, kind: Kind, key: string): string | undefined =>
+    Object.entries(mapping[kind] ?? {}).find(([, k]) => k === key)?.[0]
   for (const kind of KINDS) {
     const gone = Object.entries(before[kind] ?? {})
-      .filter(([status, key]) => after[kind]?.[status] !== key && !empty[kind].includes(status))
+      .filter(
+        ([status, key]) =>
+          (after[kind]?.[status] !== key ||
+            (firstOf(before, kind, key) === status && firstOf(after, kind, key) !== status)) &&
+          !empty[kind].includes(status),
+      )
       .map(([status]) => status)
     if (gone.length > 0)
       for (const unit of await tracker.list(kind, gone)) found.push(`${unit.ref} (${unit.status})`)
@@ -80,7 +89,7 @@ export async function saveFlow(
   const left = await stranded(deps.tracker, current, change.mapping)
   if (left.length > 0)
     throw new InvalidInput(
-      `move these off the statuses removed or renamed first: ${left.join(', ')}`,
+      `move these off the statuses removed, rekeyed or no longer first of a shared key: ${left.join(', ')}`,
     )
   return deps.store.saveFlow(change.expected, change.flow, actor.displayName)
 }

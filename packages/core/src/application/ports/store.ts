@@ -96,6 +96,17 @@ export interface StorePort {
   // Every save, newest first.
   flowHistory(): Promise<FlowVersion[]>
 
+  // Which station each item is in where several share its tracker status (D104); an item
+  // with no entry is in the first of them. Only refs that have one come back.
+  itemStatuses(refs: readonly Ref[]): Promise<Record<Ref, string>>
+  // Compare-and-set on the entry, undefined meaning none: false, writing nothing, when the
+  // entry is not expected. status undefined clears it.
+  setItemStatus(
+    ref: Ref,
+    expected: string | undefined,
+    status: string | undefined,
+  ): Promise<boolean>
+
   // Throws InvalidInput when the userId, the username or the externalId is taken.
   createAccount(account: NewAccount): Promise<Account>
   getAccount(userId: string): Promise<Account | undefined>

@@ -649,7 +649,7 @@ describe('the flow settings (D91)', () => {
     const moved = await put(app, 1, renamed({ id: 'asked', name: 'Asked' }))
     expect(moved.status).toBe(400)
     expect(await moved.json()).toEqual({
-      error: `move these off the statuses removed or renamed first: ${item.ref} (needs-answers)`,
+      error: `move these off the statuses removed, rekeyed or no longer first of a shared key: ${item.ref} (needs-answers)`,
     })
   })
 })

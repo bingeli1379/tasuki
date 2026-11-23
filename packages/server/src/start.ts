@@ -3,6 +3,7 @@ import {
   clearHeartbeat,
   needsSetup,
   unmatchedStatuses,
+  withSharedStatuses,
   type Clock,
   type RunnerPort,
 } from '@tasuki/core'
@@ -43,11 +44,10 @@ export async function startEngine(
     defaultMaxAttempts: config.limits.defaultMaxAttempts,
   })
   const ctx = { ...base, statuses: flow.statuses }
-  const tracker = await loadTracker(
-    config.tracker.plugin,
-    config.tracker.options,
-    config.configDir,
-    ctx,
+  const tracker = withSharedStatuses(
+    await loadTracker(config.tracker.plugin, config.tracker.options, config.configDir, ctx),
+    store,
+    flow.statuses,
   )
   const engineId = engineIdOf(config.dataDir)
   const second = await engineCheck(tracker, clock, engineId, config.pollSeconds)

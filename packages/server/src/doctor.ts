@@ -2,6 +2,7 @@ import {
   otherEngine,
   ruleTransitions,
   unmatchedStatuses,
+  withSharedStatuses,
   type Clock,
   type DoctorFinding,
   type RunnerPort,
@@ -142,11 +143,10 @@ export async function runDoctor(configPath: string, clock: Clock): Promise<numbe
   }
   const ctx = { ...base, statuses: flow.statuses }
   try {
-    const tracker = await loadTracker(
-      config.tracker.plugin,
-      config.tracker.options,
-      config.configDir,
-      ctx,
+    const tracker = withSharedStatuses(
+      await loadTracker(config.tracker.plugin, config.tracker.options, config.configDir, ctx),
+      store,
+      flow.statuses,
     )
     findings.push(
       ...(await engineCheck(tracker, clock, engineIdOf(config.dataDir), config.pollSeconds)),

@@ -235,6 +235,23 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
     async flowHistory() {
       return db.prepare('SELECT * FROM flow_version ORDER BY version DESC').all().map(toFlow)
     },
+    async itemStatuses(refs) {
+      if (refs.length === 0) return {}
+      const rows = db
+        .prepare(`SELECT ref, status FROM item_status WHERE ref IN (${refs.map(() => '?').join()})`)
+        .all(...refs)
+      return Object.fromEntries(rows.map((r) => [String(r['ref']), String(r['status'])]))
+    },
+    async setItemStatus(ref, expected, status) {
+      const row = db.prepare('SELECT status FROM item_status WHERE ref = ?').get(ref)
+      if ((row === undefined ? undefined : String(row['status'])) !== expected) return false
+      if (status === undefined) db.prepare('DELETE FROM item_status WHERE ref = ?').run(ref)
+      else
+        db.prepare(
+          'INSERT INTO item_status VALUES (?, ?) ON CONFLICT(ref) DO UPDATE SET status = excluded.status',
+        ).run(ref, status)
+      return true
+    },
     async createAccount(a) {
       const userId = a.userId ?? randomUUID()
       try {

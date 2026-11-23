@@ -144,4 +144,9 @@ export const STORE_MIGRATIONS: readonly string[] = [
   // S13 (D102): the item a Run works for, which for a dispatched task is not its target.
   `ALTER TABLE run ADD COLUMN item TEXT NOT NULL DEFAULT '';
   UPDATE run SET item = target;`,
+  // W5 (D104): the station of an item whose tracker status several stations share.
+  `CREATE TABLE item_status (
+    ref    TEXT PRIMARY KEY,
+    status TEXT NOT NULL
+  );`,
 ]

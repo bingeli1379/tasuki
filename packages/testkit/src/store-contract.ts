@@ -250,6 +250,30 @@ export function describeStoreContract(
       ])
     })
 
+    it('item statuses start empty and come back only for the refs that have one (D104)', async () => {
+      expect(await store.itemStatuses([])).toEqual({})
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({})
+      expect(await store.setItemStatus('TSK-1', undefined, 'split-done')).toBe(true)
+      expect(await store.setItemStatus('TSK-2', undefined, 'reviewing')).toBe(true)
+      expect(await store.itemStatuses(['TSK-1', 'TSK-3'])).toEqual({ 'TSK-1': 'split-done' })
+      expect(await store.itemStatuses(['TSK-1', 'TSK-2'])).toEqual({
+        'TSK-1': 'split-done',
+        'TSK-2': 'reviewing',
+      })
+    })
+
+    it('setItemStatus is a compare-and-set on the entry, and undefined clears it', async () => {
+      await store.setItemStatus('TSK-1', undefined, 'split-done')
+      expect(await store.setItemStatus('TSK-1', undefined, 'other')).toBe(false)
+      expect(await store.setItemStatus('TSK-1', 'refining', 'other')).toBe(false)
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({ 'TSK-1': 'split-done' })
+      expect(await store.setItemStatus('TSK-1', 'split-done', 'ready')).toBe(true)
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({ 'TSK-1': 'ready' })
+      expect(await store.setItemStatus('TSK-1', 'ready', undefined)).toBe(true)
+      expect(await store.itemStatuses(['TSK-1'])).toEqual({})
+      expect(await store.setItemStatus('TSK-1', 'ready', undefined)).toBe(false)
+    })
+
     const newAccount = (userId: string, username = userId) => ({
       userId,
       username,

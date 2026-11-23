@@ -1064,7 +1064,13 @@
   - 紀錄放 store 不放 Jira 的 issue property：讀看板不用跟 Jira 多要 property，同一組裡移動不打 Jira，store 有 transaction，compare-and-set 做得到；property 是後寫的蓋掉先寫的。一個 project 只接一個 engine（D66），不會有兩台機器的紀錄對不上。代價是紀錄跟著 `dataDir`，作者接受。
   - 包在 core 不放進 tracker plugin：兩個內建的 tracker 與第三方的都直接能用，契約不變。
 - 代價：
-  - store 多一張表與三個方法，每個 store plugin 都要實作，testkit 的 store 契約多幾條。
+  - store 多一張表與兩個方法（`itemStatuses`、`setItemStatus`），每個 store plugin 都要實作，testkit 的 store 契約多兩條。
   - 跨組移動與同一組裡移動在 Jira 上各多一次 `get`，因為要先確認 item 在哪站。
   - Jira 上看不到細的站，同一組的卡在 Jira 看板上是同一欄。這是作者要的。
-- 重新檢視：要讓不經過 tasuki 的人或工具看得到細的站時（改放 issue property）；要讓 task status 也共用 key 時；`dataDir` 掉了位置也不能掉時。
+- 實作（W5，2026-11-23）：
+  - core 的 `withSharedStatuses`（`shared-statuses.ts`）包 TrackerPort，`start` 與 `doctor` 載入 tracker 之後套上，跟 `namingComments` 同一種包法。沒有站共用 key 時，`transition` 直接交給 tracker，不多讀一次。
+  - 讀流程設定時拿掉「兩站共用 key」的錯誤，設定頁也不再標「Another status uses it」。sqlite 的設定頁沒有 tracker status 欄位（站用 id 當 key），要共用只能從 API 存流程，E2E 就是這樣存的。
+  - 存流程設定的「搬不走」檢查多算一組換了第一站的情況，錯誤訊息改成 `move these off the statuses removed, rekeyed or no longer first of a shared key`。
+  - store 的 migration 建 `item_status`。
+- 實測：`pnpm test` 502 條、`pnpm check` 沒有錯誤或警告。core 多 9 條單元測試：同一組裡移動不打 tracker、`list` 只回要的站、跨組移動後寫或刪紀錄、從同一組的另一站移動是 `StatusConflict`、同時移動只有一個成功、在 tracker 被移走後跟著 tracker 而且移回來也不會回到舊站、建在第一站以外會記、刪 item 會清、task 不受影響、`doctor` 不問同一組裡的移動。store 契約多兩條。E2E 兩邊的流程都多一站 `split-done`，跟 `refining` 共用 status，多一條主路徑：從 Move to 移到 Split Done，重新整理後還在。Jira 那邊再確認 KAN 上還是 To Do，用 Jira API 轉到 Done 之後看板跟著到 Done。sqlite 19 條、Jira 18 條過，跳過的一條是原本就有的 dispatch。
+- 重新檢視：要讓不經過 tasuki 的人或工具看得到細的站時（改放 issue property）；要讓 task status 也共用 key 時；`dataDir` 掉了位置也不能掉時；sqlite 的設定頁要能設共用時。

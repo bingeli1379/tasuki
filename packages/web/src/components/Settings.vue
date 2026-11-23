@@ -288,12 +288,7 @@ const repeated = (ids: string[]): Set<string> =>
   new Set(ids.filter((id, i) => id !== '' && ids.indexOf(id) !== i))
 const repeatedStations = computed(() => repeated(stations.value.map((s) => s.id)))
 const repeatedRules = computed(() => repeated(rules.value.map((r) => r.id)))
-const repeatedKeys = computed(() =>
-  loaded.value?.trackerStatuses ? repeated(stations.value.map((s) => s.key)) : new Set<string>(),
-)
-const clashes = computed(
-  () => repeatedStations.value.size + repeatedRules.value.size + repeatedKeys.value.size > 0,
-)
+const clashes = computed(() => repeatedStations.value.size + repeatedRules.value.size > 0)
 
 // Everything pointing at the station moves with its id.
 function setId(station: StationDraft, id: string): void {
@@ -529,11 +524,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                     @update:model-value="(v) => setId(s, String(v))"
                   />
                 </UFormField>
-                <UFormField
-                  v-if="loaded.trackerStatuses"
-                  label="Tracker status"
-                  :error="repeatedKeys.has(s.key) && 'Another status uses it'"
-                >
+                <UFormField v-if="loaded.trackerStatuses" label="Tracker status">
                   <USelect
                     v-model="s.key"
                     :items="trackerItems"

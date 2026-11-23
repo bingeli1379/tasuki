@@ -51,7 +51,13 @@ describe('store migrations', () => {
 
   it('S13 gives every Run before it its target as the item it works for', () => {
     const db = openDatabase(':memory:')
-    migrate(db, STORE_MIGRATIONS.slice(0, -1))
+    migrate(
+      db,
+      STORE_MIGRATIONS.slice(
+        0,
+        STORE_MIGRATIONS.findIndex((m) => m.includes('ADD COLUMN item')),
+      ),
+    )
     db.exec(`INSERT INTO run (id, target, rule, agent, attempt, workspace, state, lease_until,
       started_at, last_activity_at) VALUES ('r1', 'T-1', 'split', 'fake', 1, '/w',
       'running', 'x', 'y', 'z')`)

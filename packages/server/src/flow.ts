@@ -110,13 +110,6 @@ function parseWorkflow(value: unknown): { workflow: Workflow; statuses: StatusMa
       outcomes: outcomes as string[],
     }
   })
-  const owners = Object.entries(keys).filter(([, k], i, all) =>
-    all.some(([, other], j) => j !== i && other === k),
-  )
-  if (owners.length > 0)
-    fail(
-      `workflow.statuses: ${owners.map(([id]) => id).join(' and ')} share the tracker key ${owners[0]?.[1]}`,
-    )
   for (const station of stations)
     for (const to of station.outcomes) {
       if (keys[to] === undefined)

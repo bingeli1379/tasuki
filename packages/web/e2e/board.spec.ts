@@ -95,6 +95,58 @@ test('dragging an item to another column moves it, and it stays there', async ({
   await reloadUntilVisible(page, needsAnswers.getByRole('article', { name: title }))
 })
 
+test('two stations on one tracker status keep the item apart, and the tracker still wins', async ({
+  page,
+  request,
+}, info) => {
+  const title = `e2e shared ${Date.now()}`
+  const ref = await createThroughApi(request, title)
+  await page.goto('/')
+  const refining = page.getByRole('region', { name: /^Refining/ })
+  const splitDone = page.getByRole('region', { name: /^Split Done/ })
+  await reloadUntilVisible(page, refining.getByRole('article', { name: title }))
+
+  // Split Done is the last column, past the edge of the window, so not a drag.
+  await refining.getByRole('button', { name: title, exact: true }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'More actions' }).click()
+  await page.getByRole('menuitem', { name: 'Move to' }).click()
+  await page.getByRole('menuitem', { name: 'Split Done', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Close' }).click()
+  await expect(splitDone.getByRole('article', { name: title })).toBeVisible()
+  await reloadUntilVisible(page, splitDone.getByRole('article', { name: title }))
+  await expect(refining.getByRole('article', { name: title })).toHaveCount(0)
+  if (info.project.name !== 'jira') return
+
+  // Jira only holds the shared status; moving the card there takes it off both stations.
+  const { JIRA_BASE_URL, JIRA_EMAIL, JIRA_API_TOKEN } = process.env
+  const keys: Record<string, string> = JSON.parse(String(process.env['JIRA_TEST_ITEM_STATUSES']))
+  const headers = {
+    Authorization: `Basic ${Buffer.from(`${JIRA_EMAIL}:${JIRA_API_TOKEN}`).toString('base64')}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json',
+  }
+  const issue = `${JIRA_BASE_URL}/rest/api/3/issue/${ref}`
+  const status = (await (await fetch(`${issue}?fields=status`, { headers })).json()) as {
+    fields: { status: { id: string } }
+  }
+  expect(status.fields.status.id).toBe(keys['refining'])
+  const { transitions } = (await (await fetch(`${issue}/transitions`, { headers })).json()) as {
+    transitions: { id: string; to: { id: string } }[]
+  }
+  const toDone = transitions.find((t) => t.to.id === keys['done'])
+  expect(toDone).toBeDefined()
+  const moved = await fetch(`${issue}/transitions`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ transition: { id: toDone?.id } }),
+  })
+  expect(moved.ok).toBe(true)
+  const done = page.getByRole('region', { name: /^Done/ })
+  await reloadUntilVisible(page, done.getByRole('article', { name: title }))
+  await expect(splitDone.getByRole('article', { name: title })).toHaveCount(0)
+})
+
 test('moving an item someone else already moved says where it went', async ({ page, request }) => {
   const title = `e2e conflict ${Date.now()}`
   const ref = await createThroughApi(request, title)
@@ -113,7 +165,7 @@ test('moving an item someone else already moved says where it went', async ({ pa
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('button', { name: 'More actions' }).click()
   await page.getByRole('menuitem', { name: 'Move to' }).click()
-  await page.getByRole('menuitem', { name: 'Done' }).click()
+  await page.getByRole('menuitem', { name: 'Done', exact: true }).click()
 
   // exact: the toast also renders a hidden copy for screen readers, prefixed "Notification".
   await expect(
