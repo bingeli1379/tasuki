@@ -3,6 +3,7 @@ import { describeTrackerContract } from '@tasuki/testkit'
 import { existsSync } from 'node:fs'
 import { describe, expect, it } from 'vite-plus/test'
 import { createClient, createFetch, JiraHttpError } from './client'
+import { JIRA_FORM } from './form'
 import { parseOptions } from './options'
 import { allowsMove, createJiraTracker } from './tracker'
 
@@ -63,6 +64,26 @@ if (configured) {
     dataDir: '',
     statuses: createStatusMap(mapping),
   }
+
+  describe('jira-cloud form', () => {
+    it('looks up the ids the settings page offers from the address, the token and the project (D105)', async () => {
+      const choices = await JIRA_FORM.choices?.({
+        ...options,
+        project: options.project.toLowerCase(),
+      })
+      const values = (key: string) => choices?.[key]?.map((c) => c.value)
+      expect(values('issueTypes.item')).toContain(options.issueTypes.item)
+      expect(values('issueTypes.task')).toContain(options.issueTypes.task)
+      expect(values('issueTypes.item')).not.toContain(options.issueTypes.task)
+      expect(values('dependencyLinkType')).toContain(options.dependencyLinkType)
+    })
+
+    it('asks for what is missing before asking Jira', async () => {
+      await expect(JIRA_FORM.choices?.({ baseUrl: options.baseUrl })).rejects.toThrow(
+        'fill in project first',
+      )
+    })
+  })
 
   describe('jira-cloud listStatuses', () => {
     it('lists, per kind, the statuses its issue type can be in, by id', async () => {

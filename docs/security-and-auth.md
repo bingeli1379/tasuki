@@ -49,11 +49,11 @@ auth 是 plugin 的一個角色，config 寫法跟其他角色一樣（`plugin` 
 
 | access | 能做的事 |
 |---|---|
-| `admin` | 下面全部，加上管帳號：建帳號或加人、重設密碼（builtin）、改別人的 access、停用與刪除帳號；改實例設定（General 頁的 poll 與 limits，D105）。 |
+| `admin` | 下面全部，加上管帳號：建帳號或加人、重設密碼（builtin）、改別人的 access、停用與刪除帳號；改實例設定（Tracker 頁的 tracker 與它的 token、General 頁的 poll 與 limits，D105）。 |
 | `maintainer` | 下面全部，加上改流程設定（stage、規則、prompt）。 |
 | `member` | 用看板與 `/mcp` 做所有操作：建 item、移動、留言、Stop、hold、刪 item。 |
 
-- 看板的齒輪是下拉選單，照 access 列出能改的：Workflow 給 `admin` 與 `maintainer`，General 與 Accounts 只給 `admin`（D105）。`maintainer` 在網頁上改得到的只有流程設定，agent 的工具、plugin、環境變數在啟動設定的檔案裡，網頁上碰不到，所以拿到 `maintainer` 也不能放寬 AI 在 engine 機器上的權限（D91）。
+- 看板的齒輪是下拉選單，照 access 列出能改的：Workflow 給 `admin` 與 `maintainer`，Tracker、General 與 Accounts 只給 `admin`（D105）。`maintainer` 在網頁上改得到的只有流程設定，agent 的工具、plugin、環境變數在啟動設定的檔案裡，網頁上碰不到，所以拿到 `maintainer` 也不能放寬 AI 在 engine 機器上的權限（D91）。
 - 外部帳號要 `admin` 先加進來才能登入，外部系統說帳密對也一樣（D90）。加人只填 username 與 access，可以一次貼一整串，一行一個；已經在的跳過並列出來。名單上沒有的人登入時跟密碼錯看起來一樣，不透露名單上有誰。
 - 外部帳號第一次登入時，把外部系統回的 `userId` 綁到這筆帳號（`external_id`），之後都用它對。公司把同一個 username 給了別人，新的人對不上，進不來。加了還沒登入過的帳號在帳號頁標「Not signed in yet」，顯示名在第一次登入時換成外部系統給的。
 - 停用的帳號不能登入，它的 session 與個人 API token 立刻失效。
@@ -145,6 +145,7 @@ Claude Code 與 Codex 不會填登入表單，也不適合放一個幾天就過�
 - config 不放明文，使用 `${ENV_VAR}`。本機開發可以放在 config 旁邊的 `.env`，它不進 git（D49）。
 - `agents.<name>.env` 只傳給被 spawn 的那個 CLI，engine 自己不用。
 - 反過來，engine 自己的環境不傳給 agent。`.env` 會載入 engine 的 process，裡面有 tracker 的 token，所以 runner 只放行找得到 CLI、登入與 shell 需要的幾個變數，其他要給 agent 的寫進 `options.env`（D76）。
+- tracker 的 secret（Jira token）在 Tracker 頁輸入，存進 store 前用 AES-256-GCM 加密，API 只回傳有沒有設、不回傳值（D106）。金鑰是 `TASUKI_SECRET_KEY`，沒給時第一次存 secret 才在 `dataDir` 產生 `secret.key`（權限 600）。只拿到 store 解不開；拿到整個 `dataDir` 就解得開，正式環境用環境變數給金鑰。金鑰換了，存過的 secret 解不開，啟動時說明，重填就好。
 - engine 不把 secret 寫進 log、`system` comment 或 API 回應。
 - 流程設定（store 裡、設定頁上改的那份）沒有 secret 也沒有機器上的路徑，agent 的 `env`、`plugins`、`allowedTools` 都在檔案裡（D91）。流程設定不進使用者 MCP：使用者的 AI 會讀 item，被 item 帶偏時不能拿它改規則的 prompt（D57 的例外，跟帳號一樣）。
 

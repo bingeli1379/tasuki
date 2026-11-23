@@ -13,6 +13,8 @@ import { styleText } from 'node:util'
 import { loadConfig } from './config'
 import { loadFlow, type LiveFlow } from './flow'
 import { loadInstance, pollDefaultFor, type LiveInstance } from './instance'
+import { loadSecrets } from './secrets'
+import { readTrackerSettings, type TrackerSettings } from './tracker-settings'
 import { loadAuth, loadRunner, loadStore, loadTracker, NO_STATUSES } from './plugin-loader'
 
 export interface Finding extends DoctorFinding {
@@ -124,6 +126,7 @@ export async function runDoctor(configPath: string | undefined, clock: Clock): P
   // The store holds the flow, and the rules in it are what the rest is checked against.
   let flow: LiveFlow
   let instance: LiveInstance
+  let tracker: TrackerSettings
   let store: Awaited<ReturnType<typeof loadStore>>
   try {
     store = await loadStore(config.store.plugin, config.store.options, config.configDir, {
@@ -135,7 +138,9 @@ export async function runDoctor(configPath: string | undefined, clock: Clock): P
     return report()
   }
   try {
-    instance = await loadInstance(store, pollDefaultFor(config.tracker.plugin))
+    tracker = (await readTrackerSettings(store, loadSecrets(config.dataDir), config.configDir))
+      .settings
+    instance = await loadInstance(store, pollDefaultFor(tracker.plugin))
     flow = await loadFlow(store, {
       agents: Object.keys(config.agents),
       defaultMaxAttempts: instance.current().limits.defaultMaxAttempts,
@@ -146,22 +151,22 @@ export async function runDoctor(configPath: string | undefined, clock: Clock): P
   }
   const ctx = { ...base, statuses: flow.statuses }
   try {
-    const tracker = withSharedStatuses(
-      await loadTracker(config.tracker.plugin, config.tracker.options, config.configDir, ctx),
+    const port = withSharedStatuses(
+      await loadTracker(tracker.plugin, tracker.options, config.configDir, ctx),
       store,
       flow.statuses,
     )
     findings.push(
       ...(await engineCheck(
-        tracker,
+        port,
         clock,
         engineIdOf(config.dataDir),
         instance.current().pollSeconds,
       )),
-      ...(await trackerChecks(tracker, config.tracker.plugin, flow)),
+      ...(await trackerChecks(port, tracker.plugin, flow)),
     )
   } catch (e) {
-    fail(`tracker ${config.tracker.plugin}`, e)
+    fail(`tracker ${tracker.plugin}`, e)
   }
   const runners: Record<string, RunnerPort> = {}
   for (const [name, agent] of Object.entries(config.agents)) {

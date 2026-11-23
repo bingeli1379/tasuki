@@ -86,22 +86,29 @@ export interface LiveInstance {
   // What the General page edits: the settings as saved, or nothing before any save.
   saved(): { version?: number; value: unknown }
   save(store: StorePort, actor: Account, expected: number | undefined, raw: unknown): Promise<void>
+  // Reads the saved settings again against new defaults: the tracker was swapped.
+  rebase(ctx: InstanceContext): void
 }
 
 export function createLiveInstance(
   ctx: InstanceContext,
   latest?: { version: number; value: unknown },
 ): LiveInstance {
+  let context = ctx
   let saved: { version?: number; value: unknown } = latest ?? { value: {} }
-  let current = parseInstance(saved.value, ctx)
+  let current = parseInstance(saved.value, context)
   return {
     current: () => current,
     saved: () => saved,
+    rebase(next) {
+      context = next
+      current = parseInstance(saved.value, context)
+    },
     async save(store, actor, expected, raw) {
       // Who may comes before what is wrong with it, as for the flow.
       assertEditsInstance(actor)
-      const next = parseInstance(raw, ctx)
-      const version = await saveInstance(store, actor, expected, raw)
+      const next = parseInstance(raw, context)
+      const version = await saveInstance(store, 'instance', actor, expected, raw)
       current = next
       saved = { version: version.version, value: raw }
     },

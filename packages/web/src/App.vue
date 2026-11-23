@@ -5,6 +5,7 @@ import { ApiError, call, messageOf, sendJson, type Account, type AuthState, type
 import AccountMenu from './components/AccountMenu.vue'
 import Accounts from './components/Accounts.vue'
 import General from './components/General.vue'
+import Tracker from './components/Tracker.vue'
 import ItemDetail from './components/ItemDetail.vue'
 import Settings from './components/Settings.vue'
 import SignIn from './components/SignIn.vue'
@@ -44,6 +45,7 @@ const paused = ref(false)
 const unmatched = ref<string[]>([])
 const settingsOpen = ref(false)
 const generalOpen = ref(false)
+const trackerOpen = ref(false)
 const accountsOpen = ref(false)
 const editsFlow = computed(
   () =>
@@ -55,7 +57,12 @@ const editsFlow = computed(
 const isAdmin = computed(() => auth.value?.mode === 'none' || auth.value?.me?.access === 'admin')
 const settingsItems = computed(() => [
   ...(editsFlow.value ? [{ label: 'Workflow', onSelect: () => (settingsOpen.value = true) }] : []),
-  ...(isAdmin.value ? [{ label: 'General', onSelect: () => (generalOpen.value = true) }] : []),
+  ...(isAdmin.value
+    ? [
+        { label: 'Tracker', onSelect: () => (trackerOpen.value = true) },
+        { label: 'General', onSelect: () => (generalOpen.value = true) },
+      ]
+    : []),
   ...(isAdmin.value && auth.value?.me !== undefined
     ? [{ label: 'Accounts', onSelect: () => (accountsOpen.value = true) }]
     : []),
@@ -501,6 +508,7 @@ onMounted(start)
               />
             </UDropdownMenu>
             <Settings v-if="editsFlow" v-model:open="settingsOpen" @saved="load" />
+            <Tracker v-if="isAdmin" v-model:open="trackerOpen" @saved="load" />
             <General v-if="isAdmin" v-model:open="generalOpen" />
             <Accounts
               v-if="isAdmin && auth.me"

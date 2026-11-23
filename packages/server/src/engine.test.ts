@@ -27,6 +27,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
+import type { LiveTracker } from './tracker-settings'
+
+// The Tracker page is tested on its own; these pin the tracker they are handed.
+const PINNED = {} as LiveTracker
 import { createApp } from './app'
 import { createEngine } from './engine'
 import { createLiveFlow, type Flow } from './flow'
@@ -199,6 +203,7 @@ function setup(
     store,
     flow: liveFlow([split, execute, rework, review, executeOrDesign]),
     instance: createLiveInstance({ pollSeconds: 5 }),
+    trackerSettings: PINNED,
     agents: ['fake'],
     tokens,
   })

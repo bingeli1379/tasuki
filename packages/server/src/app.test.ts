@@ -14,6 +14,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
+import type { LiveTracker } from './tracker-settings'
+
+// The Tracker page is tested on its own; these pin the tracker they are handed.
+const PINNED = {} as LiveTracker
 import { createApp } from './app'
 import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
 import { defaultPrompt } from './prompts'
@@ -63,6 +67,7 @@ const appWith = (): ReturnType<typeof createApp> =>
     store: memoryStore(),
     flow: liveFlow(mapping),
     instance: createLiveInstance({ pollSeconds: 5 }),
+    trackerSettings: PINNED,
     agents: [],
     tokens: createRunTokens(),
   })
@@ -313,6 +318,7 @@ describe('tasks', () => {
       store,
       flow: liveFlow(taskMapping),
       instance: createLiveInstance({ pollSeconds: 5 }),
+      trackerSettings: PINNED,
       agents: [],
       tokens: createRunTokens(),
     })
@@ -549,6 +555,7 @@ describe('the flow settings (D91)', () => {
       store,
       flow,
       instance: createLiveInstance({ pollSeconds: 5 }),
+      trackerSettings: PINNED,
       agents: ['fake'],
       tokens: createRunTokens(),
     })
@@ -675,6 +682,7 @@ describe('the built board', () => {
       store: memoryStore(),
       flow: liveFlow(mapping),
       instance: createLiveInstance({ pollSeconds: 5 }),
+      trackerSettings: PINNED,
       agents: [],
       tokens: createRunTokens(),
       webDir,
@@ -697,6 +705,7 @@ describe('instance settings (D105)', () => {
       store,
       flow,
       instance,
+      trackerSettings: PINNED,
       agents: ['fake'],
       tokens: createRunTokens(),
     })

@@ -56,10 +56,11 @@ export default definePlugin({
 - `ctx` 是 engine 注入的東西：`Clock`、config 所在的資料夾 `configDir`（options 裡的相對路徑對它解析）、解析成絕對路徑的 `dataDir`、`statuses`（邏輯名與 tracker 端 status key 的雙向對照）。plugin 不自己取時間，也不自己決定資料放哪裡。port 進出的 status 一律是邏輯名，翻成 tracker 的 key 是 plugin 的事。logger 等第一個需要它的切片再加。
 - `options` 是 config 裡該 plugin 的 `options`，`${VAR}` 已經展開。
 - 工廠用函式而不是 class，因為注入點就是參數，第三方不用繼承 `core` 的任何東西。
+- `forms.tracker` 選填，描述 Tracker 頁要畫的表單（D111）：`fields` 每一欄是 `key`（options 裡的點路徑，例如 `issueTypes.item`）、`label`、`type`（`text`、`secret`、`select`）、`required`、`description`、`placeholder`；`secret` 的欄位 engine 會加密存放、不再顯示（D106）。`choices(options)` 選填，用填到一半的 options 查出 `select` 欄位的選項，例如 Jira 用網址、token 與 project 查 issue type；查不到就丟 `Error`，訊息給填表的人看。沒有 `forms.tracker` 的 tracker plugin，Tracker 頁沒有欄位可填，只能用預設的 options。
 
 ## config 怎麼指定
 
-config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），找不到再從 engine 自己安裝的位置解析，再用 `import()` 載入。內建的 plugin 是 CLI 的依賴，全域裝 CLI 就一起裝好；第三方的裝在 config 旁邊，同名時 config 旁邊的優先（D98）。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
+tracker 在 Tracker 頁、其他角色在 config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），找不到再從 engine 自己安裝的位置解析，再用 `import()` 載入。內建的 plugin 是 CLI 的依賴，全域裝 CLI 就一起裝好；第三方的裝在 config 旁邊，同名時 config 旁邊的優先（D98）。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
 
 ```jsonc
 "tracker": {

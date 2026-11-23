@@ -67,7 +67,7 @@
 | S13 | engine 依賴圖排程 task、單張 task 的 kill（M2）：`dispatch` mode，跟 `execute` 並存（sqlite 已完成，D102；Jira 待驗證） | 規則換成 `dispatch`，沒有互相等待的 task 一起跑，task 詳情按 Stop 只停那一張 |
 | W5 | 幾站共用同一個 tracker status，item 在哪站記在 store（已完成，D104） | 設定頁把 `refining` 與 `split-done` 都設成 To Do，卡片在兩站之間移動時 Jira 不動、重新整理後還在原站；在 Jira 把卡拖走，看板跟著 Jira |
 | W6a | 啟動設定縮到開機必要的第一半：`poll`、`limits` 進 store（實例設定，General 頁只給 admin）、config 檔選用、`dataDir` 預設 `~/.tasuki`、環境變數、齒輪改成下拉選單（已完成，D105） | 空資料夾直接 `tasuki start` 起得來；在 General 頁改 poll，不用重啟就生效 |
-| W6b | tracker 進 store、加密金鑰、secret 只寫不讀、`init` 只問登入與 port（D105、D106） | 在設定頁接上 Jira，token 存完只看得到「已設定」 |
+| W6b | tracker 進 store、Tracker 頁的表單由 plugin 描述、加密金鑰、secret 只寫不讀、`init` 不再問 tracker（已完成，D105、D106、D111；`init` 只剩登入與 port 要等 W7 把 agent 搬走） | 在設定頁接上 Jira，token 存完只看得到「已設定」 |
 | W7 | Agents 頁：agent 進 store、權限三段、settings JSON、認證三選一、偵測 CLI 給安裝指令、預設 claude 與 codex（D107、D108、D110） | 不碰檔案，在 Agents 頁把 claude 切成 auto，派一次 Run |
 | W8 | 被擋與核准：`--permission-prompt-tool` 接 tasuki MCP、看板的 Approve 與「以後都允許」、不會問人的被擋數到 3 次就停、`permission_denials` 掛在 Run 上、契約多一條（D107） | 白名單外的指令讓卡片亮「等你核准」，按 Approve 後 agent 接著跑 |
 | W9 | 拿掉 mode：規則全部等於 `custom`、`dispatch` 變開關、預設 prompt 變範本（D109） | 新增規則時從範本選 split，存完的規則沒有 mode 欄位，照樣跑完 |
@@ -118,7 +118,7 @@ S13 做完、進 S14 之前，作者自己把整個產品測過一輪並調整�
 11. （已定，D69）不變量 3：Run 結束（`cancelled` 除外）或被 `abandoned` 時，engine 把殘留的 `in-progress` task 送回 `to-do`，每張留一則原因。
 12. （已定，D70，D74 改）engine 與 agent 不重開 `done` 的 task。人可以改回 `to-do` 或 `manual`，但只在 item 沒有存活的 Run 時。
 13. config 的 JSON Schema 怎麼產生。D28 的 `isolatedDeclarations` 要求每個 export 有明確型別，zod 這類 schema 物件很難滿足，所以傾向型別手寫。要補 `$schema` 給編輯器用時再決定（手寫、或從型別產生）。
-14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。`doctor` 已經會列出 workflow 不允許的轉移，與沒有放進任何一欄的 status（D95）；還沒做的是下面的代為去改與欄位順序。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。目前測試 project 先手動設定，功能做完後回來處理。team-managed 的 workflow 可以用 `POST /workflows/update` 改，S2 設定 KAN 時用過（D59）。Jira 看板的欄位也要一起檢查：`doctor` 用公開的 `GET /rest/agile/1.0/board/{id}/configuration` 比對，tasuki 用到的 status 沒有出現在任何一欄就警告（那些卡片在 Jira 看板上會看不到），欄位順序跟 state-machine.md 不同也提示。公開 API 不能改看板欄位，所以順序對不上時問使用者要不要「試著」自動排：用 Jira 網頁自己用的內部 API `PUT /rest/greenhopper/1.0/rapidviewconfig/columns`（2026-11-20 在 KAN 的 team-managed 看板上試過，回 500 但順序已經存進去），排完重讀一次確認；失敗或結果不對，就退回列出正確順序請使用者自己拖。內部 API 沒有文件、隨時會變，不能當成唯一的路。
+14. config 與 Jira 的 workflow 不同步。sqlite 的 status 完全由 config 決定，改 config 就生效；Jira 的 status、轉移、issue type 在 Jira 那邊，config 改了 Jira 不會跟著變。`doctor` 已經會列出 workflow 不允許的轉移，與沒有放進任何一欄的 status（D95）；還沒做的是下面的代為去改與欄位順序。方向：`init` 或 `doctor` 發現對不上時，問使用者要不要代為去改 Jira。改的是別人的 Jira workflow，按下去之前要讓使用者清楚看到會改哪些 status 與轉移、確定他知道自己在做什麼（作者 2026-11-23）；tracker 搬進設定頁之後（W6b），這個入口也跟著搬過去。目前測試 project 先手動設定，功能做完後回來處理。team-managed 的 workflow 可以用 `POST /workflows/update` 改，S2 設定 KAN 時用過（D59）。Jira 看板的欄位也要一起檢查：`doctor` 用公開的 `GET /rest/agile/1.0/board/{id}/configuration` 比對，tasuki 用到的 status 沒有出現在任何一欄就警告（那些卡片在 Jira 看板上會看不到），欄位順序跟 state-machine.md 不同也提示。公開 API 不能改看板欄位，所以順序對不上時問使用者要不要「試著」自動排：用 Jira 網頁自己用的內部 API `PUT /rest/greenhopper/1.0/rapidviewconfig/columns`（2026-11-20 在 KAN 的 team-managed 看板上試過，回 500 但順序已經存進去），排完重讀一次確認；失敗或結果不對，就退回列出正確順序請使用者自己拖。內部 API 沒有文件、隨時會變，不能當成唯一的路。
 
 15. 看板大量 item 的效能：Done 欄只會越來越長，看板與 `list_board` 目前整包讀回、沒有虛擬滾動，卡片又能拖拉。要不要分頁、收合或虛擬滾動，還沒定（S9c 討論時提出）。
 

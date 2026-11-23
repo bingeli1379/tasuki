@@ -243,9 +243,9 @@ CREATE TABLE api_token (
 -- store keeps the JSON as given; the engine checks it. The newest version of each is the one
 -- in use; none yet means the built-in default.
 CREATE TABLE settings_version (
-  doc      TEXT NOT NULL,                       -- 'flow' | 'instance'
+  doc      TEXT NOT NULL,                       -- 'flow' | 'instance' | 'tracker'
   version  INTEGER NOT NULL,                    -- 1, 2, ... per doc; a save names the one it started from
-  value    TEXT NOT NULL,                       -- JSON: workflow, rules, labels | poll, limits
+  value    TEXT NOT NULL,                       -- JSON: workflow, rules, labels | poll, limits | plugin, options (secrets sealed)
   saved_by TEXT NOT NULL,                       -- the saver's display name, copied; '' with no sign-in
   saved_at TEXT NOT NULL,
   PRIMARY KEY (doc, version)

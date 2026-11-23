@@ -178,21 +178,20 @@ const trackers = [
           name: 'jira',
           api: 8789,
           web: 5181,
-          config: {
-            tracker: {
-              plugin: '@tasuki/jira-cloud',
-              options: {
-                baseUrl: process.env['JIRA_BASE_URL'],
-                // Left as ${VAR} so the token never lands in the temp config file.
-                email: '${JIRA_EMAIL}',
-                apiToken: '${JIRA_API_TOKEN}',
-                project: process.env['JIRA_TEST_PROJECT'],
-                issueTypes: {
-                  item: process.env['JIRA_TEST_ITEM_TYPE'],
-                  task: process.env['JIRA_TEST_TASK_TYPE'],
-                },
-                dependencyLinkType: process.env['JIRA_TEST_LINK_TYPE'],
+          config: {},
+          // Saved on the Tracker page's API by flow.setup.ts, like an admin would (D105).
+          tracker: {
+            plugin: '@tasuki/jira-cloud',
+            options: {
+              baseUrl: process.env['JIRA_BASE_URL'],
+              email: process.env['JIRA_EMAIL'],
+              apiToken: process.env['JIRA_API_TOKEN'],
+              project: process.env['JIRA_TEST_PROJECT'],
+              issueTypes: {
+                item: process.env['JIRA_TEST_ITEM_TYPE'],
+                task: process.env['JIRA_TEST_TASK_TYPE'],
               },
+              dependencyLinkType: process.env['JIRA_TEST_LINK_TYPE'],
             },
           },
           flow: {
@@ -257,7 +256,7 @@ const config: PlaywrightTestConfig = defineConfig({
       name: `${t.name}-flow`,
       testMatch: 'flow.setup.ts',
       use: { baseURL: `http://localhost:${t.web}` },
-      metadata: { flow: t.flow },
+      metadata: { flow: t.flow, ...('tracker' in t ? { tracker: t.tracker } : {}) },
     })),
     ...[...trackers, signIn, signInHttp].map((t) => ({
       name: t.name,

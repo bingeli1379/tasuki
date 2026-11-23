@@ -57,6 +57,7 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createAgentMcpServer } from './agent-mcp'
 import { DEFAULT_FLOW, type LiveFlow } from './flow'
 import type { LiveInstance } from './instance'
+import type { LiveTracker } from './tracker-settings'
 import { describeChanges } from './flow-changes'
 import { createMcpServer } from './mcp'
 import { defaultPrompt } from './prompts'
@@ -87,6 +88,8 @@ export interface AppDeps {
   flow: LiveFlow
   // Poll and limits, edited by an admin on the General page (D105).
   instance: LiveInstance
+  // Which tracker tracker forwards to, edited by an admin on the Tracker page (D105).
+  trackerSettings: LiveTracker
   // The agent names the config file defines, the only ones a rule can use.
   agents: readonly string[]
   tokens: RunTokens
@@ -145,6 +148,7 @@ export function createApp({
   store,
   flow,
   instance,
+  trackerSettings,
   agents,
   tokens,
   auth,
@@ -417,6 +421,28 @@ export function createApp({
     if (defaultMaxAttempts !== flow.context.defaultMaxAttempts)
       flow.rebase({ ...flow.context, defaultMaxAttempts })
     return c.json({ version: instance.saved().version })
+  })
+  // The Tracker page (D105): which tracker and its options, for an admin only. A secret is
+  // never sent back, only whether it is set (D106).
+  app.get('/api/tracker', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await trackerSettings.view())
+  })
+  app.get('/api/tracker/form', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await trackerSettings.form(c.req.query('plugin') ?? ''))
+  })
+  app.post('/api/tracker/choices', async (c) => {
+    const body = await c.req.json<{ plugin?: unknown; options?: unknown }>()
+    const plugin = typeof body.plugin === 'string' ? body.plugin : ''
+    return c.json(await trackerSettings.choices(c.var.actor, plugin, body.options))
+  })
+  app.put('/api/tracker', async (c) => {
+    const body = await c.req.json<{ version?: unknown; plugin?: unknown; options?: unknown }>()
+    const version = typeof body.version === 'number' ? body.version : undefined
+    return c.json({
+      version: await trackerSettings.save(c.var.actor, version, body.plugin, body.options),
+    })
   })
   app.get('/api/board', async (c) => {
     const { workflow, rules, holdLabel } = flow.current()

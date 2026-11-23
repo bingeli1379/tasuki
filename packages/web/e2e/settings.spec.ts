@@ -130,3 +130,28 @@ test('the General page saves the poll interval and shows it again', async ({ pag
   await dialog.getByRole('button', { name: 'Save' }).click()
   await expect(dialog).toBeHidden()
 })
+
+// W6b (D105, D106): the Tracker page shows the tracker in use with its own form; a token is
+// never sent back, and saving with it left blank keeps the one in use, so the board still
+// reads the tracker after.
+test('the Tracker page shows the tracker in use and never its token', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Settings' }).click()
+  await page.getByRole('menuitem', { name: 'Tracker' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Tracker' })
+  if (test.info().project.name === 'jira') {
+    await expect(dialog.getByText('Jira Cloud')).toBeVisible()
+    const token = dialog.getByLabel('API token')
+    await expect(token).toHaveValue('')
+    await expect(token).toHaveAttribute('placeholder', 'Set; leave blank to keep it')
+    await expect(dialog.getByLabel('Project key')).toHaveValue(/\S/)
+  } else {
+    await expect(dialog.getByText('sqlite, kept by tasuki')).toBeVisible()
+    await expect(dialog.getByLabel('Ref prefix')).toBeVisible()
+  }
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+  await page.reload()
+  await expect(page.getByRole('region', { name: /^Refining/ })).toBeVisible()
+  await expect(page.getByText(/not matched to the tracker yet/)).toHaveCount(0)
+})

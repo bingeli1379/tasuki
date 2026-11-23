@@ -42,8 +42,8 @@ export interface Session {
 }
 
 // The settings kept in the store, each with versions of its own: the flow (D91), edited by
-// an admin or a maintainer, and the instance's (D105), by an admin only.
-export type SettingsDoc = 'flow' | 'instance'
+// an admin or a maintainer; the instance's and the tracker's (D105), by an admin only.
+export type SettingsDoc = 'flow' | 'instance' | 'tracker'
 
 // One save of a settings document. The store keeps it as given; the engine checks it.
 export interface SettingsVersion {

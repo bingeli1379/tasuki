@@ -2,6 +2,7 @@ import {
   API_VERSION,
   type AuthContext,
   type AuthPort,
+  type OptionsForm,
   type Plugin,
   type PluginContext,
   type RunnerPort,
@@ -48,11 +49,7 @@ function resolvePlugin(name: string, configDir: string): string {
   }
 }
 
-async function load<R extends 'tracker' | 'store' | 'runner' | 'auth'>(
-  name: string,
-  configDir: string,
-  role: R,
-): Promise<NonNullable<Plugin[R]>> {
+async function loadPlugin(name: string, configDir: string): Promise<Plugin> {
   const entry = await step(name, 'resolve', () => resolvePlugin(name, configDir))
   const mod = await step(
     name,
@@ -66,10 +63,31 @@ async function load<R extends 'tracker' | 'store' | 'runner' | 'auth'>(
     }
     if (p.apiVersion !== API_VERSION)
       throw new Error(`apiVersion ${p.apiVersion}, engine expects ${API_VERSION}`)
+    return p
+  })
+}
+
+async function load<R extends 'tracker' | 'store' | 'runner' | 'auth'>(
+  name: string,
+  configDir: string,
+  role: R,
+): Promise<NonNullable<Plugin[R]>> {
+  const p = await loadPlugin(name, configDir)
+  return step(name, 'check export', () => {
     const factory = p[role]
     if (factory === undefined) throw new Error(`does not provide a ${role}`)
     return factory
   })
+}
+
+// The form the settings page draws for a tracker plugin's options; none when it gives none.
+export async function loadTrackerForm(
+  name: string,
+  configDir: string,
+): Promise<OptionsForm | undefined> {
+  const p = await loadPlugin(name, configDir)
+  if (p.tracker === undefined) throw new Error(`plugin "${name}": does not provide a tracker`)
+  return p.forms?.tracker
 }
 
 export async function loadTracker(

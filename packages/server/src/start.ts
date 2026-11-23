@@ -3,9 +3,9 @@ import {
   clearHeartbeat,
   needsSetup,
   unmatchedStatuses,
-  withSharedStatuses,
   type Clock,
   type RunnerPort,
+  type TrackerPort,
 } from '@tasuki/core'
 import { mkdirSync } from 'node:fs'
 import { join } from 'node:path'
@@ -15,7 +15,9 @@ import { agentChecks, engineCheck, engineIdOf, printFindings, trackerChecks } fr
 import { createEngine } from './engine'
 import { loadFlow } from './flow'
 import { loadInstance, pollDefaultFor } from './instance'
-import { loadAuth, loadRunner, loadStore, loadTracker, NO_STATUSES } from './plugin-loader'
+import { loadAuth, loadRunner, loadStore, NO_STATUSES } from './plugin-loader'
+import { loadSecrets } from './secrets'
+import { createLiveTracker, readTrackerSettings } from './tracker-settings'
 import { createRunTokens } from './run-tokens'
 import { createLoginThrottle, createSetupToken, createSignIns } from './sign-ins'
 
@@ -40,20 +42,24 @@ export async function startEngine(
     ...base,
     statuses: NO_STATUSES,
   })
-  const instance = await loadInstance(store, pollDefaultFor(config.tracker.plugin))
+  const secrets = loadSecrets(config.dataDir)
+  const saved = await readTrackerSettings(store, secrets, config.configDir)
+  const instance = await loadInstance(store, pollDefaultFor(saved.settings.plugin))
   const flow = await loadFlow(store, {
     agents: Object.keys(config.agents),
     defaultMaxAttempts: instance.current().limits.defaultMaxAttempts,
   })
   const ctx = { ...base, statuses: flow.statuses }
-  const tracker = withSharedStatuses(
-    await loadTracker(config.tracker.plugin, config.tracker.options, config.configDir, ctx),
-    store,
-    flow.statuses,
-  )
   const engineId = engineIdOf(config.dataDir)
-  const second = await engineCheck(tracker, clock, engineId, instance.current().pollSeconds)
-  if (second[0] !== undefined) throw new Error(second[0].message)
+  const otherEngine = async (t: TrackerPort) =>
+    (await engineCheck(t, clock, engineId, instance.current().pollSeconds))[0]?.message
+  const live = await createLiveTracker(
+    { store, flow, instance, secrets, ctx: base, engineId, otherEngine },
+    saved,
+  )
+  const tracker = live.port
+  const second = await otherEngine(tracker)
+  if (second !== undefined) throw new Error(second)
   flow.unmatched = await unmatchedStatuses(tracker, flow.current().statuses)
   const runners: Record<string, RunnerPort> = {}
   for (const [name, agent] of Object.entries(config.agents))
@@ -61,7 +67,7 @@ export async function startEngine(
   // What the file sets has to work before anything runs; what the flow asks of the tracker
   // is put right on the settings page, so it is only printed (D95).
   const agentFindings = await agentChecks(runners)
-  printFindings([...(await trackerChecks(tracker, config.tracker.plugin, flow)), ...agentFindings])
+  printFindings([...(await trackerChecks(tracker, live.current().plugin, flow)), ...agentFindings])
   if (agentFindings.some((f) => f.level === 'error'))
     throw new Error('an agent cannot run: see the errors above, or run doctor')
   const tokens = createRunTokens()
@@ -98,6 +104,7 @@ export async function startEngine(
   serve({
     fetch: createApp({
       tracker,
+      trackerSettings: live,
       store,
       flow,
       instance,
@@ -141,7 +148,7 @@ export async function startEngine(
   // Stop reaches the agent within a second, not a poll interval later.
   setInterval(() => void engine.enforce(), 1000)
   console.log(`data dir: ${config.dataDir}`)
-  console.log(`tracker: ${config.tracker.plugin}`)
+  console.log(`tracker: ${live.current().plugin}`)
   console.log(`store: ${config.store.plugin}`)
   console.log(`auth: ${config.auth?.plugin ?? 'none, nobody signs in'}`)
   if (setupToken !== undefined) {

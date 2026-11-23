@@ -8,8 +8,6 @@
   // anywhere else, set auth and publicUrl instead.
   "server": { "host": "0.0.0.0", "port": 8787, "allowInsecure": true },
 
-  "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
-
   // There is no login to inherit in here: the agent signs in with an API key from the Claude
   // Console. "oauth-token" with CLAUDE_CODE_OAUTH_TOKEN in env is also accepted
   // (security-and-auth.md).

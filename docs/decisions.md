@@ -1103,6 +1103,14 @@
   - 看板的齒輪改成下拉選單，原本的設定頁改名 Workflow；Accounts 從頭像選單搬過來。
   - 範圍外留給後面的：`init` 照舊問 tracker 與 agent，因為它們還在檔案裡（W6b、W7 時改）；General 頁沒有歷史畫面，store 照樣留著每一版。
 - 實測：`pnpm test` 516 條、`pnpm check` 沒有錯誤。store 契約多一條（兩份文件各自計版本與歷史）；config 多六條（沒有檔案、工作目錄的檔案、`--config` 不存在、環境變數蓋過檔案、port 不合法、預設 `~/.tasuki`）；實例設定的解析、只有 admin 能存、REST 的預設值、存了馬上生效與 409、存錯不影響現在的值、`defaultMaxAttempts` 改了規則跟著改。拿掉 rebase 與 `--config` 不存在的檢查各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 23 條全過，多一條 General 頁的主路徑：改 poll、重新整理還在、改回去；poll 2 秒改成 setup 用 API 存。Jira 的 project 20 條過，跳過的一條是原本就有的 dispatch。開機時 Jira 的 poll 預設 30 秒，上一輪被砍掉的 engine 留下的心跳要 90 秒才過期，連續重跑 Jira E2E 要等一下。
+- 實作（W6b，2026-11-23）：
+  - tracker 是 store 裡第三份設定文件 `tracker`（`plugin` 加 `options`），自己有版本號，只給 `admin`。檔案裡的 `tracker` 拿掉，寫了就拒絕啟動。
+  - 看板與 engine 拿到的 tracker 是一個轉手的 Proxy，存檔時換掉後面那個，所以不用重啟，也不用讓每個拿著 tracker 的地方重建。共用 key（D104）的那層包在新的 tracker 外面。
+  - 存檔時：照 plugin 的表單檢查必填、用新的 options 載一次 plugin（失敗就拒絕）。換了 plugin 或 secret 以外的 options 算換 tracker，要沒有 Run 在跑、舊 tracker 上沒有 item（只查 tracker 有的 status，Jira 不給查不存在的），也要新的 tracker 上沒有別的 engine（D66）；成功後清掉舊 tracker 上自己的心跳，poll 的預設跟著新 tracker 換。只換 secret 不查這些。最後重算還沒對上的站，看板照 W4 的提示叫人去 Workflow 頁對 key。
+  - REST：`GET`、`PUT /api/tracker`，`GET /api/tracker/form?plugin=` 給切換 plugin 時用，`POST /api/tracker/choices` 給「Look up」用，secret 留空時用存著的那個去查。
+  - `init` 不再問 tracker 與 Jira，改成問 agent、登入、port。原本向 Jira 查 issue type 與 link type 的程式搬進 jira plugin 的 `forms.tracker.choices`（D50 照舊），`init` 寫 `.env` 的那段拿掉。
+  - E2E 的 Jira project 不再把 tracker 寫進暫存的 config，setup 依序存 poll、tracker、流程，跟 admin 在頁面上做的一樣。
+- 實測（W6b）：`pnpm test` 525 條、`pnpm check` 沒有錯誤。tracker 設定多七條：預設是 sqlite、board 空的時候存了馬上換、還有 item 時拒絕並列出、secret 封起來存而且 API 看不到、留空沿用、金鑰不對時解不開、只換 token 不查別的 engine、必填與載不起來與別的 engine 都拒絕而且不動到正在用的、只有 admin、換 tracker 時 poll 預設跟著換。Jira 的契約多兩條：照網址、token 與 project 查出 issue type 與 link type（project 小寫也查得到）、缺欄位先說缺什麼。`init` 改成兩條。拿掉「不回傳 secret」與「舊 tracker 上還有 item」各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 23 條、Jira 20 條全過（跳過的一條是原本就有的 dispatch），多一條 Tracker 頁的主路徑：看到正在用的 tracker，Jira 的 token 欄位是空的、只寫著已設定，留空存檔後看板照樣讀得到 tracker。
 - 重新檢視：有人要設定進 git 時；要多個 instance 共用一份設定時。
 
 ## D106 介面上的密碼與 token 加密存放，只能寫不能讀
@@ -1114,6 +1122,11 @@
   - 金鑰不見就解不開，看板提示哪些 secret 要重填，不讓 engine 帶著解不開的設定去派 Run。
 - 理由：照 n8n 的預設，第一次用的人不用先學金鑰；Kibana 與 Metabase 都是用一把檔案或環境變數的金鑰加密介面上的 secret。
 - 代價：金鑰與 DB 預設放在同一個資料夾，`dataDir` 整包外流等於兩個一起外流。這是方便換來的，文件要寫清楚。
+- 實作（W6b，2026-11-23）：
+  - AES-256-GCM，存成 `enc:v1:<iv>:<tag>:<密文>`，只封 plugin 表單上標成 `secret` 的欄位（D111）。`TASUKI_SECRET_KEY` 是任意字串，取 SHA-256 當金鑰；沒給時用 `dataDir/secret.key`（32 bytes、base64、權限 600），第一次存 secret 才產生，沒有 secret 的 instance、或 `doctor` 只是讀設定，都不會寫出金鑰。
+  - 解不開時（金鑰換了）啟動失敗，訊息說明把金鑰放回去或重填。看板上標出要重填的 secret 這半還沒做，要等真的有人遇到。
+  - Tracker 頁的 secret 欄位存過之後顯示「Set; leave blank to keep it」，留空存檔沿用原本的；換了 plugin 就不沿用。
+- 實測：見 D105 的 W6b。
 - 重新檢視：要換金鑰（rotation）時；多個 instance 要共用 store 時。
 
 ## D107 agent 的權限三段、hook、被擋與核准
@@ -1172,3 +1185,12 @@
 - 背景：同 D105。
 - 決定：Agents 頁一開始預先放好 claude 與 codex 兩個 agent，認證沒設好或 CLI 沒裝的標出來（D108）。fake runner 不出現在設定頁，只給測試與 E2E 用。`init` 不再問 agent。
 - 重新檢視：第三方 runner plugin 要出現在預設清單時。
+
+## D111 plugin 自己描述 options 的表單
+
+- 背景：W6b 動工前（2026-11-23）。tracker 搬進設定頁（D105），Jira 要填網址、token、project 與三個 id，第三方 tracker 也要能設；W7 的 Agents 頁會遇到一樣的問題。D91 當初不把 agent 搬進 DB，理由之一就是「要做成表單就得要 plugin 描述自己的欄位，plugin 契約變大」。
+- 選項：A. plugin 匯出表單描述，看板照著畫，內建與第三方同一條路；B. 看板寫死 sqlite 與 Jira 的表單，第三方只給 JSON 框。
+- 決定（作者選 A）：`definePlugin` 多一個選填的 `forms.tracker`：`fields`（`key` 是 options 裡的點路徑、`label`、`type` 是 `text`、`secret`、`select`、`required`、`description`、`placeholder`）與選填的 `choices(options)`，用填到一半的 options 查出 `select` 的選項。`secret` 的欄位由 engine 加密、不再顯示（D106）。現在只有 `tracker`，W7 再加 `runner`。
+- 理由：W7 一定要；B 讓內建的拿到第三方沒有的待遇，跟 D44 打架；`init` 裡向 Jira 查 id 的程式剛好有地方放，`init` 不用再認得 Jira。
+- 代價：plugin 契約變大，欄位型別先只有三種，數字、清單、巢狀物件都還不行。表單只做必填檢查，其他的驗證照舊在工廠裡做，錯誤在存檔時回給頁面。
+- 重新檢視：W7 的 runner 表單需要更多型別時；有第三方 plugin 需要條件欄位（選了 A 才出現 B）時。

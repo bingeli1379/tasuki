@@ -32,6 +32,7 @@ export default definePlugin({
 - 工廠拿到 `ctx`（`clock`、`configDir`、`dataDir`、`statuses`，auth 多一個 `store`）跟 config 裡的 `options`。現在時間一律從 `ctx.clock` 拿，資料放在 `ctx.dataDir` 底下，options 裡的相對路徑對 `ctx.configDir` 解析。
 - `options` 是 config 原封不動交過來的（`${VAR}` 已經展開），engine 不驗。在工廠裡自己檢查，不對就丟 `Error`，訊息寫是哪個欄位，例如 `options.refPrefix must be ...`。engine 會在前面加上 plugin 名字，然後拒絕啟動。
 - tracker：port 進出的 status 一律是邏輯名（`refining`、`to-do`）。存進 tracker 之前用 `ctx.statuses.toTracker(kind, status)` 翻成自己的 key，讀回來用 `fromTracker` 翻回去。
+- 要讓 Tracker 頁畫得出表單，加上 `forms: { tracker: { fields, choices } }`（D111，欄位見 plugins.md）。標成 `secret` 的欄位由 engine 加密，plugin 拿到的是明文。
 - 選用的方法沒有就不寫：`listStatuses`（tracker 有固定的 status 清單時）、`doctor`（只有 plugin 查得到的問題）、`readHeartbeat` / `writeHeartbeat`（不只一個 process 能打開同一個 project 時，用來擋第二個 engine）。每個方法的細節看 `@tasuki/core` 的型別註解。
 
 ## 契約測試
