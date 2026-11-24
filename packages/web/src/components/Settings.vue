@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import {
   defaultStationName,
+  DISPATCH_OUTCOMES,
   ENGINE_OUTCOMES,
-  MODE_OUTCOMES,
+  REQUIRED_OUTCOMES,
   TASK_STATUS_DISPLAY,
   TASK_STATUSES,
-  type RuleMode,
 } from '@tasuki/core'
 import { computed, ref, watch } from 'vue'
 import { ApiError, call, messageOf, sendJson } from '../api'
@@ -32,7 +32,8 @@ interface RuleDraft {
   watch: string
   claim: string
   agent: string
-  mode: RuleMode
+  dispatch: boolean
+  needsFeedback: boolean
   // null: the file's defaultMaxAttempts.
   maxAttempts: number | null
   session: 'fresh' | 'per-item'
@@ -67,24 +68,22 @@ interface FlowResponse {
   agents: string[]
   // What a rule with no attempts of its own gets, from the config file.
   defaultMaxAttempts: number
-  prompts: Record<RuleMode, string>
+  // What a new rule can start from (D109).
+  templates: RuleTemplate[]
   // null: the tracker takes any key, and a station is keyed by its id.
   trackerStatuses: { item: TrackerStatus[]; task: TrackerStatus[] } | null
 }
 
-// Keyed by every mode core has, so a new one fails the type check until it is named here.
-const MODE_TEXT: Record<RuleMode, { label: string; hint: string }> = {
-  split: { label: 'Split', hint: 'Breaks the item into tasks' },
-  execute: { label: 'Execute', hint: 'Works through the tasks' },
-  dispatch: { label: 'Dispatch', hint: 'One agent per task, run in parallel by the engine' },
-  rework: { label: 'Rework', hint: 'Turns feedback into tasks' },
-  review: { label: 'Review', hint: 'Reads and comments, then picks an outcome' },
-  custom: { label: 'Custom', hint: 'Every tool, nothing checked: the prompt says it all' },
+interface RuleTemplate {
+  id: string
+  label: string
+  hint: string
+  prompt: string
+  outcomes: string[]
+  session: 'fresh' | 'per-item'
+  dispatch: boolean
+  needsFeedback: boolean
 }
-const MODES = (Object.keys(MODE_OUTCOMES) as RuleMode[]).map((value) => ({
-  value,
-  ...MODE_TEXT[value],
-}))
 // The outcomes tasuki knows, as a person reads them. One a rule adds shows its own name.
 const OUTCOME_TEXT: Record<string, { label: string; hint: string }> = {
   succeeded: { label: 'Done', hint: 'The agent finished the job' },
@@ -152,7 +151,12 @@ function fromFlow(res: FlowResponse): void {
       roles: { entry: string; failure: string }
       taskStatuses?: Record<string, string>
     }
-    rules?: (Omit<RuleDraft, 'claim' | 'prompt' | 'session' | 'maxAttempts'> & {
+    rules?: (Omit<
+      RuleDraft,
+      'claim' | 'prompt' | 'session' | 'maxAttempts' | 'dispatch' | 'needsFeedback'
+    > & {
+      dispatch?: boolean
+      needsFeedback?: boolean
       maxAttempts?: number
       claim?: string
       prompt?: string
@@ -177,6 +181,8 @@ function fromFlow(res: FlowResponse): void {
   rules.value = (flow.rules ?? []).map((r) => ({
     ...r,
     claim: r.claim ?? '',
+    dispatch: r.dispatch ?? false,
+    needsFeedback: r.needsFeedback ?? false,
     maxAttempts: r.maxAttempts ?? null,
     prompt: r.prompt ?? '',
     session: r.session ?? 'fresh',
@@ -249,7 +255,8 @@ function toFlow(): unknown {
       watch: r.watch,
       ...(r.claim === '' ? {} : { claim: r.claim }),
       agent: r.agent,
-      mode: r.mode,
+      ...(r.dispatch ? { dispatch: true } : {}),
+      ...(r.needsFeedback ? { needsFeedback: true } : {}),
       ...(r.maxAttempts === null ? {} : { maxAttempts: r.maxAttempts }),
       ...(r.session === 'fresh' ? {} : { session: r.session }),
       outcomes: Object.fromEntries(Object.entries(r.outcomes).filter(([, to]) => to !== '')),
@@ -331,29 +338,41 @@ function moveStation(index: number, by: -1 | 1): void {
   if (station) list.splice(index + by, 0, station)
 }
 
-function addRule(): void {
+// A template only fills the new rule in; from then on it is a rule like any other (D109).
+function addRule(template?: RuleTemplate): void {
   const agent = loaded.value?.agents[0] ?? ''
+  const taken = new Set(rules.value.map((r) => r.id))
   rules.value.push({
-    id: '',
+    id: template !== undefined && !taken.has(template.id) ? template.id : '',
     watch: '',
     claim: '',
     agent,
-    mode: 'review',
+    dispatch: template?.dispatch ?? false,
+    needsFeedback: template?.needsFeedback ?? false,
     maxAttempts: null,
-    session: 'fresh',
-    outcomes: {},
-    prompt: '',
+    session: template?.session ?? 'fresh',
+    outcomes: Object.fromEntries((template?.outcomes ?? []).map((name) => [name, ''])),
+    prompt: template?.prompt ?? '',
   })
 }
+const addItems = computed(() => [
+  [{ label: 'Blank', description: 'Only the engine’s contract', onSelect: () => addRule() }],
+  (loaded.value?.templates ?? []).map((t) => ({
+    label: t.label,
+    description: t.hint,
+    onSelect: () => addRule(t),
+  })),
+])
 
-// The outcomes a rule shows: its mode's, the ones every rule has, then its own. A dispatch
-// rule's item ends only where the engine sends it from its tasks (D102).
+// The outcomes a rule shows: the one every rule needs, the ones every rule has, then its own.
+// A dispatch rule's item ends only where the engine sends it from its tasks (D102).
 const outcomeNames = (rule: RuleDraft): string[] =>
-  rule.mode === 'dispatch'
-    ? [...MODE_OUTCOMES.dispatch]
-    : [...new Set([...MODE_OUTCOMES[rule.mode], ...ENGINE_OUTCOMES, ...Object.keys(rule.outcomes)])]
+  rule.dispatch
+    ? [...DISPATCH_OUTCOMES]
+    : [...new Set([...REQUIRED_OUTCOMES, ...ENGINE_OUTCOMES, ...Object.keys(rule.outcomes)])]
 const ownOutcome = (rule: RuleDraft, name: string): boolean =>
-  !MODE_OUTCOMES[rule.mode].includes(name) && !ENGINE_OUTCOMES.includes(name)
+  !(rule.dispatch ? DISPATCH_OUTCOMES : REQUIRED_OUTCOMES).includes(name) &&
+  !ENGINE_OUTCOMES.includes(name)
 
 function addOutcome(index: number, rule: RuleDraft): void {
   const name = (newOutcome.value[index] ?? '')
@@ -365,17 +384,15 @@ function addOutcome(index: number, rule: RuleDraft): void {
   newOutcome.value[index] = ''
 }
 
-// Rework works from what it did before, so it starts out continuing the item's last
-// conversation; any other mode starts fresh. Picked by hand afterwards, it stays as picked.
-function setMode(rule: RuleDraft, mode: RuleMode): void {
-  rule.mode = mode
-  rule.session = mode === 'rework' ? 'per-item' : 'fresh'
-  if (mode === 'dispatch') {
-    rule.claim = ''
-    rule.outcomes = Object.fromEntries(
-      Object.entries(rule.outcomes).filter(([name]) => MODE_OUTCOMES.dispatch.includes(name)),
-    )
-  }
+// A dispatch rule keeps the item in watch and ends only where its tasks send it (D102).
+function setDispatch(rule: RuleDraft, on: boolean): void {
+  rule.dispatch = on
+  if (!on) return
+  rule.claim = ''
+  rule.needsFeedback = false
+  rule.outcomes = Object.fromEntries(
+    Object.entries(rule.outcomes).filter(([name]) => DISPATCH_OUTCOMES.includes(name)),
+  )
 }
 
 function dropOutcome(rule: RuleDraft, name: string): void {
@@ -442,7 +459,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                       </figcaption>
                       <pre
                         class="max-h-60 overflow-auto rounded bg-elevated p-2 text-xs whitespace-pre-wrap"
-                        >{{ c[side] || 'The default for its mode' }}</pre>
+                        >{{ c[side] || 'No prompt' }}</pre>
                     </figure>
                   </div>
                 </details>
@@ -573,8 +590,8 @@ function dropOutcome(rule: RuleDraft, name: string): void {
         <section aria-label="Rules" class="flex flex-col gap-3">
           <h3 class="font-semibold text-highlighted">Rules</h3>
           <p class="text-sm text-muted">
-            An agent picks up items in the status a rule watches. Its mode decides which tools the
-            agent gets and what the engine checks before moving the item on.
+            An agent picks up items in the status a rule watches, does what the prompt says, and the
+            engine moves the item where the outcome it reports goes.
           </p>
           <ul class="flex flex-col gap-3">
             <li
@@ -594,7 +611,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                   @click="rules.splice(i, 1)"
                 />
               </div>
-              <div class="grid gap-2 sm:grid-cols-4">
+              <div class="grid gap-2 sm:grid-cols-3">
                 <UFormField
                   label="Name"
                   :error="repeatedRules.has(r.id) && 'Another rule has this name'"
@@ -611,14 +628,6 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                 </UFormField>
                 <UFormField label="Agent">
                   <USelect v-model="r.agent" :items="loaded.agents" class="w-full" />
-                </UFormField>
-                <UFormField label="Mode">
-                  <USelect
-                    :model-value="r.mode"
-                    :items="MODES"
-                    class="w-full"
-                    @update:model-value="(v) => setMode(r, v as RuleMode)"
-                  />
                 </UFormField>
               </div>
               <div class="flex flex-col gap-1">
@@ -655,7 +664,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                   />
                 </div>
                 <form
-                  v-if="r.mode !== 'dispatch'"
+                  v-if="!r.dispatch"
                   class="grid grid-cols-[1fr_auto] items-center gap-2 sm:grid-cols-3"
                   @submit.prevent="addOutcome(i, r)"
                 >
@@ -671,7 +680,7 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                 </form>
               </div>
               <div class="grid gap-2 sm:grid-cols-3">
-                <UFormField v-if="r.mode !== 'dispatch'" label="While working">
+                <UFormField v-if="!r.dispatch" label="While working">
                   <USelect
                     :model-value="r.claim || NONE"
                     :items="[{ label: 'Leave it where it is', value: NONE }, ...stationItems]"
@@ -700,20 +709,24 @@ function dropOutcome(rule: RuleDraft, name: string): void {
                   />
                 </UFormField>
               </div>
-              <UFormField
-                label="Prompt"
-                :hint="
-                  r.mode === 'custom'
-                    ? 'Empty: only the engine’s contract'
-                    : 'Empty: the default for its mode'
-                "
-              >
+              <div class="flex flex-col gap-2">
+                <USwitch
+                  :model-value="r.dispatch"
+                  label="Dispatch"
+                  description="The engine runs the item's tasks itself, one agent per task, and moves the item when they are through."
+                  @update:model-value="(v) => setDispatch(r, v)"
+                />
+                <USwitch
+                  v-if="!r.dispatch"
+                  v-model="r.needsFeedback"
+                  label="Needs a person's feedback"
+                  description="Runs only once a person left a note since its last run; sending an item back here asks for one."
+                />
+              </div>
+              <UFormField label="Prompt" hint="Empty: only the engine’s contract">
                 <UTextarea
                   v-model="r.prompt"
-                  :placeholder="
-                    loaded.prompts[r.mode] ||
-                    'Custom has no default: the agent gets only the engine\'s contract'
-                  "
+                  placeholder="What the agent is to do here. Add a rule from a template to start from one."
                   :rows="4"
                   :maxrows="10"
                   autoresize
@@ -722,14 +735,16 @@ function dropOutcome(rule: RuleDraft, name: string): void {
               </UFormField>
             </li>
           </ul>
-          <UButton
-            label="Add a rule"
-            icon="i-lucide-plus"
-            variant="outline"
-            class="self-start"
-            :disabled="loaded.agents.length === 0"
-            @click="addRule"
-          />
+          <UDropdownMenu :items="addItems" :content="{ align: 'start' }">
+            <UButton
+              label="Add a rule"
+              icon="i-lucide-plus"
+              trailing-icon="i-lucide-chevron-down"
+              variant="outline"
+              class="self-start"
+              :disabled="loaded.agents.length === 0"
+            />
+          </UDropdownMenu>
         </section>
 
         <section

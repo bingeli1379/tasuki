@@ -1103,6 +1103,14 @@
   - 看板的齒輪改成下拉選單，原本的設定頁改名 Workflow；Accounts 從頭像選單搬過來。
   - 範圍外留給後面的：`init` 照舊問 tracker 與 agent，因為它們還在檔案裡（W6b、W7 時改）；General 頁沒有歷史畫面，store 照樣留著每一版。
 - 實測：`pnpm test` 516 條、`pnpm check` 沒有錯誤。store 契約多一條（兩份文件各自計版本與歷史）；config 多六條（沒有檔案、工作目錄的檔案、`--config` 不存在、環境變數蓋過檔案、port 不合法、預設 `~/.tasuki`）；實例設定的解析、只有 admin 能存、REST 的預設值、存了馬上生效與 409、存錯不影響現在的值、`defaultMaxAttempts` 改了規則跟著改。拿掉 rebase 與 `--config` 不存在的檢查各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 23 條全過，多一條 General 頁的主路徑：改 poll、重新整理還在、改回去；poll 2 秒改成 setup 用 API 存。Jira 的 project 20 條過，跳過的一條是原本就有的 dispatch。開機時 Jira 的 poll 預設 30 秒，上一輪被砍掉的 engine 留下的心跳要 90 秒才過期，連續重跑 Jira E2E 要等一下。
+- 實作（W6b，2026-11-23）：
+  - tracker 是 store 裡第三份設定文件 `tracker`（`plugin` 加 `options`），自己有版本號，只給 `admin`。檔案裡的 `tracker` 拿掉，寫了就拒絕啟動。
+  - 看板與 engine 拿到的 tracker 是一個轉手的 Proxy，存檔時換掉後面那個，所以不用重啟，也不用讓每個拿著 tracker 的地方重建。共用 key（D104）的那層包在新的 tracker 外面。
+  - 存檔時：照 plugin 的表單檢查必填、用新的 options 載一次 plugin（失敗就拒絕）。換了 plugin 或 secret 以外的 options 算換 tracker，要沒有 Run 在跑、舊 tracker 上沒有 item（只查 tracker 有的 status，Jira 不給查不存在的），也要新的 tracker 上沒有別的 engine（D66）；成功後清掉舊 tracker 上自己的心跳，poll 的預設跟著新 tracker 換。只換 secret 不查這些。最後重算還沒對上的站，看板照 W4 的提示叫人去 Workflow 頁對 key。
+  - REST：`GET`、`PUT /api/tracker`，`GET /api/tracker/form?plugin=` 給切換 plugin 時用，`POST /api/tracker/choices` 給「Look up」用，secret 留空時用存著的那個去查。
+  - `init` 不再問 tracker 與 Jira，改成問 agent、登入、port。原本向 Jira 查 issue type 與 link type 的程式搬進 jira plugin 的 `forms.tracker.choices`（D50 照舊），`init` 寫 `.env` 的那段拿掉。
+  - E2E 的 Jira project 不再把 tracker 寫進暫存的 config，setup 依序存 poll、tracker、流程，跟 admin 在頁面上做的一樣。
+- 實測（W6b）：`pnpm test` 525 條、`pnpm check` 沒有錯誤。tracker 設定多七條：預設是 sqlite、board 空的時候存了馬上換、還有 item 時拒絕並列出、secret 封起來存而且 API 看不到、留空沿用、金鑰不對時解不開、只換 token 不查別的 engine、必填與載不起來與別的 engine 都拒絕而且不動到正在用的、只有 admin、換 tracker 時 poll 預設跟著換。Jira 的契約多兩條：照網址、token 與 project 查出 issue type 與 link type（project 小寫也查得到）、缺欄位先說缺什麼。`init` 改成兩條。拿掉「不回傳 secret」與「舊 tracker 上還有 item」各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 23 條、Jira 20 條全過（跳過的一條是原本就有的 dispatch），多一條 Tracker 頁的主路徑：看到正在用的 tracker，Jira 的 token 欄位是空的、只寫著已設定，留空存檔後看板照樣讀得到 tracker。
 - 重新檢視：有人要設定進 git 時；要多個 instance 共用一份設定時。
 
 ## D106 介面上的密碼與 token 加密存放，只能寫不能讀
@@ -1114,6 +1122,11 @@
   - 金鑰不見就解不開，看板提示哪些 secret 要重填，不讓 engine 帶著解不開的設定去派 Run。
 - 理由：照 n8n 的預設，第一次用的人不用先學金鑰；Kibana 與 Metabase 都是用一把檔案或環境變數的金鑰加密介面上的 secret。
 - 代價：金鑰與 DB 預設放在同一個資料夾，`dataDir` 整包外流等於兩個一起外流。這是方便換來的，文件要寫清楚。
+- 實作（W6b，2026-11-23）：
+  - AES-256-GCM，存成 `enc:v1:<iv>:<tag>:<密文>`，只封 plugin 表單上標成 `secret` 的欄位（D111）。`TASUKI_SECRET_KEY` 是任意字串，取 SHA-256 當金鑰；沒給時用 `dataDir/secret.key`（32 bytes、base64、權限 600），第一次存 secret 才產生，沒有 secret 的 instance、或 `doctor` 只是讀設定，都不會寫出金鑰。
+  - 解不開時（金鑰換了）啟動失敗，訊息說明把金鑰放回去或重填。看板上標出要重填的 secret 這半還沒做，要等真的有人遇到。
+  - Tracker 頁的 secret 欄位存過之後顯示「Set; leave blank to keep it」，留空存檔沿用原本的；換了 plugin 就不沿用。
+- 實測：見 D105 的 W6b。
 - 重新檢視：要換金鑰（rotation）時；多個 instance 要共用 store 時。
 
 ## D107 agent 的權限三段、hook、被擋與核准
@@ -1142,7 +1155,33 @@
 - 理由：
   - 問人而不是直接拒絕：不用重跑，context 還在，也不會跑一個小時才發現被卡。
   - engine 自己讀被擋的紀錄，不靠 agent 回報：agent 被擋時會說自己沒權限，然後照樣回報成功。
-- 重新檢視：`--permission-prompt-tool` 驗完時（格式、等太久會不會 timeout）；classifier 擋的會不會進 `permission_denials` 驗完時；3 次不對時。
+- 實作（W7，2026-11-24）：
+  - agent 是 store 裡第四份設定文件 `agents`（名字對到 `plugin` 加 `options`），自己有版本號，只給 `admin`。檔案裡的 `agents` 拿掉，寫了就拒絕啟動。名字是小寫英數字與 `-`，建了不能改名（規則用名字指它）；還有規則指著的不能拿掉。存檔時照 plugin 的表單檢查必填、每個 agent 載一次 plugin，失敗就拒絕；成功就換掉，下一個 Run 用新的，跑著的照舊，流程設定認得的 agent 名單跟著換。
+  - 權限三段放在 runner 自己的 `options.permissions`，不放 core。動工前以為 W8 的 engine 要知道現在是不是白名單才知道要掛核准，看過 runner 之後發現 `--permission-prompt-tool` 是 runner 組指令時加的，engine 只要接得住請求，不用知道是哪一段。「以後都允許」要寫回哪個欄位留給 W8 決定。
+  - claude：`allowlist` 是 `dontAsk`，`auto` 是 `--permission-mode auto --permission-prompts none`，`bypass` 是 `bypassPermissions`；`settings` 用 `--settings` 傳 JSON 字串。codex：`allowlist` 是 `--sandbox workspace-write` 加 `approval_policy="never"`，`auto` 是 `--approve-for-me`，`bypass` 用 `--dangerously-bypass-approvals-and-sandbox`（`--yolo` 是藏起來的別名，用寫在 help 上的那個）。codex 原本的 `sandbox` 拿掉。
+  - 兩個 runner 都只把選中的認證方式的變數交給 CLI，沒選的那個丟掉：頁面上存過的 secret 只能換不能清，原本 claude 遇到兩個都有就拒絕載入，會讓人卡在頁面上出不去。
+  - codex 的基礎層 `appendSystemPrompt` 接在 engine 的 prompt 後面，因為 codex 沒有 `--append-system-prompt`（D77 的重新檢視條件）。
+  - CLI 沒裝或跑不起來不再擋啟動，只印出來：預設的 codex 在沒裝的機器上會讓整個 engine 起不來。用到它的 Run 照樣會失敗，Agents 頁標出來並附 D108 的安裝指令。`doctor` 只查有規則指著的 agent。
+  - REST：`GET`、`PUT /api/agents`，`GET /api/agents/form?plugin=`，`GET /api/agents/check` 跑每個 agent 的 doctor，頁面另外要，因為 `requires` 會起一次 CLI。跟流程設定一樣不進使用者 MCP。
+  - `init` 不再問 agent，只剩登入與 port。E2E 的 setup 用 API 存 fake agent，因為頁面不列它（D110）。
+  - 範圍外：給 agent 的其他環境變數（例如 `GITLAB_TOKEN`）沒有欄位，store 裡的值也不展開 `${VAR}`，等有人要再加一種可以放 secret 的 key-value 欄位；`inheritSettings` 沒有勾選框，表單還沒有布林型別。
+- 實測（W7）：`pnpm test` 537 條、`pnpm check` 沒有錯誤，多的是 agent 設定六條（預設 claude 與 codex、存了下一個 Run 用新的並讓規則選得到、secret 封起來且不回傳且留空沿用、還有規則指著的拒絕、必填與載不起來與名字不合法都拒絕而且不動到正在用的、只有 admin），runner 多了權限三段、`--settings`、只留選中的認證、codex 基礎層接在後面。拿掉「還有規則指著的不能刪」與「不回傳 secret」各紅一條。`pnpm e2e` sqlite 與兩個登入的 project 全過，Jira 21 條過（跳過的一條是原本就有的 dispatch）；`pnpm verify:cli-install` 過，它的 config 從 W6a 起就還寫著已經搬走的 `poll`，這次跟 `agents` 一起拿掉。多一條 Agents 頁的主路徑：加一個 claude agent、切成 auto、填 OAuth token，重新整理後還是 auto，token 欄位是空的、只寫著已設定。真的跑一次（claude 2.1.323，haiku，sqlite，2026-11-24）：只放 port 的空資料夾 `tasuki start`，API 把 claude 切成 auto，掛一條 split 規則，item 拖進 `ready-to-split`，stream 的 `permissionMode` 是 `auto`，9 turns、$0.0036、`permission_denials` 是空的，拆出一張 task，item 到 `split-review`。
+- 實驗（W8 動工前，claude 2.1.323，haiku，2026-11-24）：
+  - `--permission-mode default --permission-prompt-tool <mcp tool>`：CLI 送 `{tool_name, input, tool_use_id}`，回 `{"behavior":"allow","updatedInput":…}` 就照跑，回 `{"behavior":"deny","message":…}` 就把 message 當成那次呼叫的錯誤交給模型，也記進 `permission_denials`。`echo` 這類唯讀指令在 default mode 不會問。
+  - 等太久：stdio 的 MCP 等 150 秒照樣接得到答案；HTTP 的 MCP（tasuki 的 facade 就是）60 秒就回 `The operation timed out`，模型會重問一次，再逾時就照契約提問、回報 `needs_input`。設 `MCP_TOOL_TIMEOUT` 之後 HTTP 等 90 秒也接得到。
+  - 沒人可以問時（`dontAsk`）tool_result 是 `Permission to use <tool> has been denied…`，PreToolUse hook 用 exit 2 擋的是 `PreToolUse:<tool> hook error: …`，兩種都是 `is_error`，也都進 `permission_denials`。工具自己失敗（例如 exit code 1）也是 `is_error`，所以只看這兩種開頭。
+- 實作（W8，2026-11-24）：
+  - claude 的 `allowlist` 改成 `--permission-mode default --permission-prompt-tool mcp__tasuki__ask_permission`，`MCP_TOOL_TIMEOUT` 設 24 小時（`options.env` 可以蓋掉）。超過的話 agent 拿到逾時，照契約去提問。
+  - `ask_permission` 掛在 agent 的 facade 上，每個 mode 都有。請求放在 engine 的記憶體（跟 run token 一樣），不進 store：等它的 agent 在同一個 process 裡，engine 重啟就一起沒了。CLI 那頭不等了（HTTP 請求斷掉）就從看板拿掉；Run 結束時還掛著的一律回 deny。
+  - 看板 `/api/board` 多 `approvals`，卡片標「Waiting for you」，詳情列出要跑的指令與 Approve、Always allow、Deny，REST 是 `POST /api/approvals/:id`（`allow`、`allow-always`、`deny`）。使用者 MCP 有 `list_approvals`、`approve_permission`、`deny_permission`，兩邊呼叫同一個 `answer`（D57）。能移動 item 的人都能按 Approve 與 Deny；Always allow 改的是 agent，只給 `admin`。
+  - Always allow 寫回哪裡由 runner 的表單決定：`forms.runner.allow(call)` 回 `{ key, entry }`，claude 是 `allowedTools`，指令寫成 `Bash(<原樣的指令>)`，其他 tool 整個允許。沒有 `allow` 的 runner 只能允許一次。寫回走 Agents 頁同一條存檔路徑，下一個 Run 起生效；這次的已經放行了。
+  - Deny 給 agent 的訊息叫它不要繞路、提問並回報 `needs_input`。契約多一條同樣意思的，涵蓋模型自己拒絕的那種（沒有結構化訊號）。
+  - claude runner 邊讀 stream 邊數上面那兩種被擋，第 3 次就送 SIGTERM，`RunExit.stoppedFor` 寫原因；engine 看到 `stoppedFor` 就算 `needs_input`，不看 agent 回報什麼，`Why:` 就是那個原因。人按 Deny 的不算。auto 的 classifier 擋下時的文字還沒看過，認不出來就不算，靠契約那條讓 agent 自己收手。
+  - Run 結束時 runner 讀最後一行的 `permission_denials`，放進 `RunExit.denials`，engine 存進 Run（store 多 `recordDenials`，sqlite 的 run 多一欄 `denials`），system comment 列出被擋的指令，Run 詳情也列。
+  - codex 沒有 `--permission-prompt-tool` 的對應，白名單外照舊拒絕，也不數被擋。
+  - fake runner 多 `[fake:ask]`：先問一次 `git push`，准了照常，拒了就提問、回報 `needs_input`，並像 CLI 一樣回報那次被擋。
+- 實測（W8，claude 2.1.323，haiku，sqlite，2026-11-24）：agent 的白名單只有 `Read`，item 叫它先跑 `git --version`。第一次沒設 `MCP_TOOL_TIMEOUT`：看板上出現請求，60 秒後 CLI 回逾時，重問一次又逾時，agent 照契約提問、回報 `needs_input`，item 到 `needs-answers`。加上 24 小時之後重跑：請求在看板上掛了 122 秒才按 Always allow，agent 照樣接著跑完，task 內文寫進 `git version 2.56.0`，item 到 `split-review`，agent 的 `allowedTools` 變成 `Read`、`Bash(git --version)`，Agents 設定存成第 2 版。`pnpm test` 548 條、`pnpm check` 沒有錯誤；多的是看板等人到按下去 agent 接著跑、Deny 的訊息與 Run 結束時回 deny、CLI 不等了就從看板拿掉、runner 停掉的 agent 進 `needs_input` 並列出被擋的、只有 admin 能 Always allow、使用者 MCP 答一筆、Always allow 寫回清單只寫一次、claude 數到 3 次就停（工具自己失敗的不算）、讀 `permission_denials`、Always allow 的寫法、store 契約多 `recordDenials`。E2E 多一條：兩張 `[fake:ask]` 的卡都亮「Waiting for you」，一張按 Approve 後到 Split Review，一張按 Deny 後 Run 是 `needs_input`、詳情列出被擋的 `git push`。
+- 重新檢視：classifier 擋的會不會進 `permission_denials`、文字長怎樣驗完時；3 次不對時；24 小時不夠時。
 
 ## D108 agent 的認證三種都留，CLI 沒裝時給指令不代裝
 
@@ -1165,6 +1204,16 @@
   - 原本各 mode 的預設 prompt 與 outcomes 變成「新增規則」旁邊的範本選單，按了填好，存進去就是普通的規則，不留 mode 欄位。
   - agent 還是沒有改 item status 的 tool，不變量照舊。
 - 代價：D92 寫的那層保護沒了。item 內容夾帶「直接回報成功」、或 LLM 沒拆出 task 也說成功，item 會帶著空的結果滑進下一站。作者接受。
+- 實作（W9，2026-11-24）：
+  - D109 沒寫到的：engine 靠 mode 認出 rework 的地方不只驗證，還有看板打回時要回饋的那站（D86）、只能有一條、沒有回饋就不開跑改問人（D75）。這三個改成規則上的第二個開關 `needsFeedback`，跟 `dispatch` 一樣是行為不是限制。兩個不能同時開，`dispatch` 只跑現有的 task。
+  - 規則上不認得的欄位一律拒絕。舊的 `mode` 因此撞到一般驗證，不是被默默忽略（照 CLAUDE.md 的不兼容）。
+  - 驗 verdict 的那張表整張拿掉，`outcomeOf` 只看 exit code、有沒有 verdict、runner 有沒有自己停掉。`succeeded` 每條規則都必填（`dispatch` 還要 `blocked_manual`），Review 範本因此用 `succeeded` 代表「沒問題」，原本的 `approve` 不再預設。「至少要有一個不是 needs_input、failed、max_attempts 的結果」那條檢查碰不到了，拿掉。
+  - 每條不是 `dispatch` 的規則都要五個 task status 都對照，因為它的 agent 能建 task、能走 task 圖。`dispatch` 的 worker 照舊只有讀與留言。原本 split 規則只要 `to-do` 與 `manual` 的那條併進來。
+  - 預設 prompt 變成 `TEMPLATES`（Split、Execute、Dispatch、Rework、Review），`/api/flow` 回 `templates` 取代 `prompts`。Execute 與 Review 的 prompt 從「你不能加 task」改成「不要加 task」，因為 tool 都在了。`{{mode}}` 變數、`TASUKI_MODE`、`RunSpec.mode` 拿掉，契約第一句不再說 mode。
+  - Workflow 頁：Mode 下拉拿掉，多 Dispatch 與 Needs a person's feedback 兩個開關，Add a rule 變成下拉，Blank 或五個範本，按了把 prompt、要指的結果、`session` 與開關填好。歷史畫面把兩個開關當成 on／off 的變更列出來。
+  - fake runner 不能再看 mode，改成讀 prompt 的「Your job:」那一行決定要拆、要執行、要 rework 還是要 review，target 是 task 就是 dispatch，像真的 agent 讀 prompt 一樣。E2E 的規則因此都帶一行 prompt。
+  - 存過的流程沒有轉換：還寫著 `mode` 的流程啟動時會被拒絕（store 裡存的流程對不上），要重存一次。
+- 實測（W9）：`pnpm test` 524 條、`pnpm check` 沒有錯誤；少掉的是 verdict 驗證那幾條，多的是兩個開關的檢查、`mode` 被當成不認得的欄位、沒有 prompt 時只有契約、歷史列出開關。`pnpm e2e` sqlite 與兩個登入的 project 全過，多一條：Workflow 頁新增一站、從 Split 範本加一條規則盯它、存檔，存進去的規則沒有 `mode`、prompt 是範本的，item 拖進那站後被拆成兩張 task、到 Split Review。Jira 的 project 22 條過，跳過 2 條：原本就有的 dispatch，與這條（KAN 沒有多的 status 給它開一站）；W8 的核准那條也在這一輪的 Jira 上過了（W8 自己那輪 Jira 被中途重 build 的看板打斷，作廢）。
 - 重新檢視：真的出現空結果滑進下一站、而且人沒看出來時，考慮讓規則選擇性加回幾項驗證（例如 `succeeded` 至少要有一張 task）。
 
 ## D110 預設 agent 是 claude 與 codex，fake 只給測試
@@ -1172,3 +1221,12 @@
 - 背景：同 D105。
 - 決定：Agents 頁一開始預先放好 claude 與 codex 兩個 agent，認證沒設好或 CLI 沒裝的標出來（D108）。fake runner 不出現在設定頁，只給測試與 E2E 用。`init` 不再問 agent。
 - 重新檢視：第三方 runner plugin 要出現在預設清單時。
+
+## D111 plugin 自己描述 options 的表單
+
+- 背景：W6b 動工前（2026-11-23）。tracker 搬進設定頁（D105），Jira 要填網址、token、project 與三個 id，第三方 tracker 也要能設；W7 的 Agents 頁會遇到一樣的問題。D91 當初不把 agent 搬進 DB，理由之一就是「要做成表單就得要 plugin 描述自己的欄位，plugin 契約變大」。
+- 選項：A. plugin 匯出表單描述，看板照著畫，內建與第三方同一條路；B. 看板寫死 sqlite 與 Jira 的表單，第三方只給 JSON 框。
+- 決定（作者選 A）：`definePlugin` 多一個選填的 `forms.tracker`：`fields`（`key` 是 options 裡的點路徑、`label`、`type` 是 `text`、`secret`、`select`、`required`、`description`、`placeholder`）與選填的 `choices(options)`，用填到一半的 options 查出 `select` 的選項。`secret` 的欄位由 engine 加密、不再顯示（D106）。現在只有 `tracker`，W7 再加 `runner`。
+- 理由：W7 一定要；B 讓內建的拿到第三方沒有的待遇，跟 D44 打架；`init` 裡向 Jira 查 id 的程式剛好有地方放，`init` 不用再認得 Jira。
+- 代價：plugin 契約變大，欄位型別先只有三種，數字、清單、巢狀物件都還不行。表單只做必填檢查，其他的驗證照舊在工廠裡做，錯誤在存檔時回給頁面。
+- 重新檢視：W7 的 runner 表單需要更多型別時；有第三方 plugin 需要條件欄位（選了 A 才出現 B）時。

@@ -44,8 +44,6 @@ import {
   stopRun,
   updateItem,
   updateTask,
-  MODE_OUTCOMES,
-  type RuleMode,
   type StorePort,
   type TrackerPort,
 } from '@tasuki/core'
@@ -57,9 +55,12 @@ import { AsyncLocalStorage } from 'node:async_hooks'
 import { createAgentMcpServer } from './agent-mcp'
 import { DEFAULT_FLOW, type LiveFlow } from './flow'
 import type { LiveInstance } from './instance'
+import type { LiveTracker } from './tracker-settings'
+import type { LiveAgents } from './agent-settings'
+import type { Approvals, Decision } from './approvals'
 import { describeChanges } from './flow-changes'
 import { createMcpServer } from './mcp'
-import { defaultPrompt } from './prompts'
+import { TEMPLATES } from './prompts'
 import type { RunTokens } from './run-tokens'
 import type { LoginThrottle, SetupToken, SignIns } from './sign-ins'
 
@@ -87,8 +88,12 @@ export interface AppDeps {
   flow: LiveFlow
   // Poll and limits, edited by an admin on the General page (D105).
   instance: LiveInstance
-  // The agent names the config file defines, the only ones a rule can use.
-  agents: readonly string[]
+  // Which tracker tracker forwards to, edited by an admin on the Tracker page (D105).
+  trackerSettings: LiveTracker
+  // The agents rules pick from, edited by an admin on the Agents page (D107).
+  agentSettings: LiveAgents
+  // Calls agents wait on a person for (D107).
+  approvals: Approvals
   tokens: RunTokens
   // Unset: nobody signs in, and every request acts as an admin.
   auth?: AppAuth
@@ -145,7 +150,9 @@ export function createApp({
   store,
   flow,
   instance,
-  agents,
+  trackerSettings,
+  agentSettings,
+  approvals,
   tokens,
   auth,
   publicUrl,
@@ -364,12 +371,11 @@ export function createApp({
   // otherwise rewrite the prompts (the D57 exception, as for accounts).
   app.get('/api/flow', async (c) => {
     assertEditsFlow(c.var.actor)
-    const modes = Object.keys(MODE_OUTCOMES) as RuleMode[]
     return c.json({
       ...flow.saved(),
-      agents,
+      agents: flow.context.agents,
       defaultMaxAttempts: flow.context.defaultMaxAttempts,
-      prompts: Object.fromEntries(modes.map((m) => [m, defaultPrompt(m)])),
+      templates: TEMPLATES,
       // null: any key works, and a station is keyed by its own id.
       trackerStatuses:
         tracker.listStatuses === undefined
@@ -418,6 +424,48 @@ export function createApp({
       flow.rebase({ ...flow.context, defaultMaxAttempts })
     return c.json({ version: instance.saved().version })
   })
+  // The Tracker page (D105): which tracker and its options, for an admin only. A secret is
+  // never sent back, only whether it is set (D106).
+  app.get('/api/tracker', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await trackerSettings.view())
+  })
+  app.get('/api/tracker/form', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await trackerSettings.form(c.req.query('plugin') ?? ''))
+  })
+  app.post('/api/tracker/choices', async (c) => {
+    const body = await c.req.json<{ plugin?: unknown; options?: unknown }>()
+    const plugin = typeof body.plugin === 'string' ? body.plugin : ''
+    return c.json(await trackerSettings.choices(c.var.actor, plugin, body.options))
+  })
+  app.put('/api/tracker', async (c) => {
+    const body = await c.req.json<{ version?: unknown; plugin?: unknown; options?: unknown }>()
+    const version = typeof body.version === 'number' ? body.version : undefined
+    return c.json({
+      version: await trackerSettings.save(c.var.actor, version, body.plugin, body.options),
+    })
+  })
+  // The Agents page (D107): which agents rules pick from, for an admin only. A secret is never
+  // sent back, only whether it is set (D106).
+  app.get('/api/agents', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await agentSettings.view())
+  })
+  app.get('/api/agents/form', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await agentSettings.form(c.req.query('plugin') ?? ''))
+  })
+  // Each agent's CLI probed, which may take a while, so the page asks for it on its own.
+  app.get('/api/agents/check', async (c) => {
+    assertEditsInstance(c.var.actor)
+    return c.json(await agentSettings.check())
+  })
+  app.put('/api/agents', async (c) => {
+    const body = await c.req.json<{ version?: unknown; agents?: unknown }>()
+    const version = typeof body.version === 'number' ? body.version : undefined
+    return c.json({ version: await agentSettings.save(c.var.actor, version, body.agents) })
+  })
   app.get('/api/board', async (c) => {
     const { workflow, rules, holdLabel } = flow.current()
     const board = await listBoard(
@@ -428,7 +476,15 @@ export function createApp({
       rules,
       holdLabel,
     )
-    return c.json({ ...board, unmatched: flow.unmatched })
+    return c.json({ ...board, unmatched: flow.unmatched, approvals: approvals.pending() })
+  })
+  // A call an agent waits on (D107): anyone who moves items answers it; allowing it for good
+  // changes the agent, which is an admin's.
+  app.post('/api/approvals/:id', async (c) => {
+    const body = await c.req.json<{ decision?: unknown }>()
+    if (body.decision !== 'allow' && body.decision !== 'allow-always' && body.decision !== 'deny')
+      throw new InvalidInput('decision must be allow, allow-always or deny')
+    return c.json(await approvals.answer(c.var.actor, c.req.param('id'), body.decision as Decision))
   })
   app.post('/api/items', async (c) => {
     const body = await c.req.json<{ title?: unknown; body?: unknown }>()
@@ -583,7 +639,9 @@ export function createApp({
   // recommends for that mode.
   app.all('/mcp', async (c) => {
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createMcpServer({ tracker, store, flow }).connect(transport)
+    await createMcpServer({ tracker, store, flow, approvals, actor: c.var.actor }).connect(
+      transport,
+    )
     return transport.handleRequest(c.req.raw)
   })
   // The facade for agents the engine started: only a live Run's token gets in.
@@ -595,7 +653,14 @@ export function createApp({
     if (run?.state !== 'running' || rule === undefined)
       return c.json({ error: 'not a live run token' }, 401)
     const transport = new WebStandardStreamableHTTPServerTransport({ enableJsonResponse: true })
-    await createAgentMcpServer({ tracker, store, run, rule }).connect(transport)
+    await createAgentMcpServer({
+      tracker,
+      store,
+      run,
+      rule,
+      ask: (call, signal) =>
+        approvals.ask({ runId: run.id, item: run.item, agent: run.agent, ...call }, signal),
+    }).connect(transport)
     return transport.handleRequest(c.req.raw)
   })
   // The board has no client-side routes: / and its assets are all there is.

@@ -33,7 +33,7 @@ export async function finishRun(
   const run = await store.getRun(runId)
   // Recovery already gave up on it, and the item may be on its next attempt by now.
   if (run.outcome !== undefined) return run.outcome
-  if (rule.mode === 'dispatch') return finishTaskRun({ tracker, store }, rule, run, exit, logTail)
+  if (rule.dispatch) return finishTaskRun({ tracker, store }, rule, run, exit, logTail)
   // A person asked it to stop: whatever it reported, nothing moves (invariant 6).
   if (run.cancelRequestedAt !== undefined) {
     await store.finishRun(run.id, 'cancelled')
@@ -50,10 +50,7 @@ export async function finishRun(
     return 'cancelled'
   }
   const tasks = await listTasks(tracker, run.target)
-  let { outcome, reason } = outcomeOf(rule.mode, run.verdict, exit, {
-    tasks,
-    produced: run.produced,
-  })
+  let { outcome, reason } = outcomeOf(run.verdict, exit)
   // e.g. blocked_manual from a split agent: leaving the item in the claim status with no
   // Run would strand it there.
   if (exitFor(rule, outcome) === undefined) {
@@ -78,6 +75,16 @@ export async function finishRun(
   ]
   if (reason !== undefined) lines.push(`Why: ${reason}.`)
   if (run.summary !== undefined && run.summary !== '') lines.push('', run.summary)
+  // What its CLI would not let it do, so a person sees what to allow (D107).
+  if (exit.denials !== undefined && exit.denials.length > 0)
+    lines.push(
+      '',
+      'Refused by its CLI:',
+      ...exit.denials.map((d) => {
+        const command = (d.input as { command?: unknown } | null)?.command
+        return `- ${d.tool}${typeof command === 'string' ? `: \`${command}\`` : ''}`
+      }),
+    )
   if ((exit.code !== 0 || run.verdict === undefined) && logTail.trim() !== '')
     lines.push('', 'The end of the log:', '', '```', logTail.trimEnd(), '```')
   await tracker.addComment({

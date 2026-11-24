@@ -23,7 +23,9 @@ import plugin from './index'
 
 // Stands in for the claude CLI: records how it was started, then does what FAKE says.
 // no-session: refuses any --resume the way claude does. hang: starts a child of its own and
-// waits, so terminate has a process tree to end.
+// waits, so terminate has a process tree to end. refused: is refused Bash with nobody to ask,
+// over and over, the way claude 2.1.323 words it, until it is ended. denied: has one call
+// refused and lists it in its last line.
 const STAND_IN = `#!/usr/bin/env node
 const { writeFileSync, appendFileSync } = require('node:fs')
 const { spawn } = require('node:child_process')
@@ -42,6 +44,20 @@ if (process.env.FAKE === 'init' && !args.includes('--version')) {
     skills: ['sdd:apply'],
   }))
   setInterval(() => {}, 1000)
+} else if (process.env.FAKE === 'refused') {
+  let n = 0
+  setInterval(() => {
+    n++
+    console.log(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', id: 't' + n, name: n % 2 ? 'Bash' : 'Write' }] } }))
+    console.log(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't' + n, is_error: true,
+      content: n % 2 ? "Permission to use Bash has been denied because Claude Code is running in don't ask mode." : 'PreToolUse:Write hook error: [exit 2]: no' }] } }))
+    // A call that failed for its own reasons is not a refusal.
+    console.log(JSON.stringify({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 'x', is_error: true, content: 'Exit code 1' }] } }))
+  }, 20)
+} else if (process.env.FAKE === 'denied') {
+  console.log(JSON.stringify({ type: 'result', subtype: 'success', permission_denials: [
+    { tool_name: 'Bash', tool_use_id: 't1', tool_input: { command: 'git push --force' } },
+  ] }))
 } else if (process.env.FAKE === 'hang') {
   const child = spawn('sleep', ['1000'], { stdio: 'ignore' })
   writeFileSync(process.env.FAKE_OUT + '.child', String(child.pid))
@@ -70,14 +86,17 @@ function setup(fake = '', extra: Record<string, unknown> = {}) {
         task: TASK_STATUS_DISPLAY,
       }),
     },
-    { command, env: { FAKE: fake, FAKE_OUT: out }, ...extra },
+    {
+      command,
+      ...extra,
+      env: { FAKE: fake, FAKE_OUT: out, ...(extra['env'] as object | undefined) },
+    },
   ) as RunnerPort
   const sessions: string[] = []
   let activity = 0
   const spec = (more: Partial<RunSpec> = {}): RunSpec => ({
     runId: 'run-1',
     target: 'T-1',
-    mode: 'split',
     workspace: dir,
     mcp: { url: 'http://127.0.0.1:8787/agent-mcp', token: 'secret-token' },
     prompt: 'Split T-1.',
@@ -124,7 +143,11 @@ describe('claude-cli runner', () => {
     expect(call?.cwd).toBe(realpathSync(t.dir))
     expect(t.arg(args, '-p')).toBe('Split T-1.')
     expect(t.arg(args, '--output-format')).toBe('stream-json')
-    expect(t.arg(args, '--permission-mode')).toBe('dontAsk')
+    // Whatever allowedTools does not cover is asked of a person through tasuki, who may take a
+    // while (D107).
+    expect(call?.env['MCP_TOOL_TIMEOUT']).toBe('86400000')
+    expect(t.arg(args, '--permission-mode')).toBe('default')
+    expect(t.arg(args, '--permission-prompt-tool')).toBe('mcp__tasuki__ask_permission')
     expect(t.arg(args, '--allowedTools')).toBe('mcp__tasuki,Read,Bash(git:*)')
     expect(t.arg(args, '--model')).toBe('haiku')
     expect(JSON.parse(t.arg(args, '--mcp-config') ?? '')).toEqual({
@@ -164,6 +187,64 @@ describe('claude-cli runner', () => {
     expect(args).toContain('--strict-mcp-config')
   })
 
+  it.each([
+    ['auto', ['--permission-mode', 'auto', '--permission-prompts', 'none']],
+    ['bypass', ['--permission-mode', 'bypassPermissions']],
+  ])('permissions %s runs it with %j', async (permissions, flags) => {
+    const t = setup('', { permissions, allowedTools: ['Read'] })
+    await t.runner.start(t.spec()).exit
+    const args = t.calls()[0]?.args ?? []
+    const at = args.indexOf('--permission-mode')
+    expect(args.slice(at, at + flags.length)).toEqual(flags)
+    expect(t.arg(args, '--allowedTools')).toBe('mcp__tasuki,Read')
+  })
+
+  it('ends an agent refused three times with nobody to ask, saying so (D107)', async () => {
+    const t = setup('refused', { permissions: 'auto' })
+    const exit = await t.runner.start(t.spec()).exit
+    expect(exit.signal).toBe('SIGTERM')
+    expect(exit.stoppedFor).toContain('refused it 3 times with nobody to ask (Bash, Write, Bash)')
+  })
+
+  it('hands back what the CLI refused when it exits', async () => {
+    const t = setup('denied')
+    expect(await t.runner.start(t.spec()).exit).toEqual<RunExit>({
+      code: 0,
+      signal: null,
+      denials: [{ tool: 'Bash', input: { command: 'git push --force' } }],
+    })
+  })
+
+  it('writes a call allowed for good as Claude Code allows it: a command as typed, a tool whole', () => {
+    const allow = plugin.forms?.runner?.allow
+    expect(allow?.({ tool: 'Bash', input: { command: 'git push' } })).toEqual({
+      key: 'allowedTools',
+      entry: 'Bash(git push)',
+    })
+    expect(allow?.({ tool: 'WebFetch', input: { url: 'https://x' } })).toEqual({
+      key: 'allowedTools',
+      entry: 'WebFetch',
+    })
+  })
+
+  it('hands claude the settings it is given, hooks and all', async () => {
+    const settings = { hooks: { PreToolUse: [] }, permissions: { deny: ['Bash(rm:*)'] } }
+    const t = setup('', { settings })
+    await t.runner.start(t.spec()).exit
+    expect(JSON.parse(t.arg(t.calls()[0]?.args ?? [], '--settings') ?? '')).toEqual(settings)
+  })
+
+  it('keeps only the sign-in it is told to use from what the Agents page holds', async () => {
+    const t = setup('', {
+      auth: 'oauth-token',
+      env: { CLAUDE_CODE_OAUTH_TOKEN: 't', ANTHROPIC_API_KEY: 'k' },
+    })
+    await t.runner.start(t.spec()).exit
+    const env = t.calls()[0]?.env ?? {}
+    expect(env['CLAUDE_CODE_OAUTH_TOKEN']).toBe('t')
+    expect(env['ANTHROPIC_API_KEY']).toBeUndefined()
+  })
+
   it('loads the machine settings when inheritSettings is on', async () => {
     const t = setup('', { inheritSettings: true })
     await t.runner.start(t.spec()).exit
@@ -181,7 +262,6 @@ describe('claude-cli runner', () => {
       expect(env).toMatchObject({
         TASUKI_RUN_ID: 'run-1',
         TASUKI_TARGET: 'T-1',
-        TASUKI_MODE: 'split',
         TASUKI_WORKSPACE: t.dir,
         FAKE_OUT: t.out,
       })
@@ -258,15 +338,11 @@ describe('claude-cli runner', () => {
     expect(make({ auth: 'oauth-token', env: { CLAUDE_CODE_OAUTH_TOKEN: '' } })).toThrow(
       'needs options.env.CLAUDE_CODE_OAUTH_TOKEN',
     )
-    expect(
-      make({
-        auth: 'oauth-token',
-        env: { CLAUDE_CODE_OAUTH_TOKEN: 't', ANTHROPIC_API_KEY: 'k' },
-      }),
-    ).toThrow('drop options.env.ANTHROPIC_API_KEY')
     expect(make({ auth: 'api-key', env: { ANTHROPIC_API_KEY: 'k' } })).not.toThrow()
     expect(make({ auth: 'oauth-token', env: { CLAUDE_CODE_OAUTH_TOKEN: 't' } })).not.toThrow()
     expect(make({ allowedTools: 'Read' })).toThrow('options.allowedTools must be a list')
+    expect(make({ permissions: 'all' })).toThrow('options.permissions must be')
+    expect(make({ settings: [] })).toThrow('options.settings must be an object')
     expect(make({ env: { A: 1 } })).toThrow('options.env must map names to strings')
     expect(make({ plugins: ['/nowhere/sdd'] })).toThrow('/nowhere/sdd does not exist')
     expect(make({ mcpServers: { tasuki: {} } })).toThrow('the name tasuki is taken')
@@ -282,6 +358,7 @@ describe('claude-cli doctor', () => {
     expect(findings).toHaveLength(1)
     expect(findings?.[0]?.level).toBe('error')
     expect(findings?.[0]?.message).toContain('/nonexistent/claude does not run')
+    expect(findings?.[0]?.fix).toContain('install.sh')
   })
 
   it('warns on empty allowedTools, and starts nothing more when nothing is required', async () => {

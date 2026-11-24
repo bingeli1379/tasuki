@@ -39,6 +39,25 @@ export interface Run {
   cancelMode?: 'soft' | 'hard'
   startedAt: string
   finishedAt?: string
+  // What its CLI refused it, once it is over (D107).
+  denials?: { tool: string; input: unknown }[]
+}
+
+// A call an agent waits on a person for (D107).
+export interface Approval {
+  id: string
+  runId: string
+  item: string
+  agent: string
+  tool: string
+  input: unknown
+  askedAt: string
+}
+
+// What a call would run, in a line: a shell command as typed, anything else as JSON.
+export const callText = (input: unknown): string => {
+  const command = (input as { command?: unknown } | null)?.command
+  return typeof command === 'string' ? command : JSON.stringify(input)
 }
 
 export interface Task {

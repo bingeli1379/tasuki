@@ -1,17 +1,28 @@
-import { API_VERSION, definePlugin, type Plugin, type RunExit, type RunSpec } from '@tasuki/core'
+import {
+  API_VERSION,
+  definePlugin,
+  type OptionsForm,
+  type Plugin,
+  type RunExit,
+  type RunSpec,
+} from '@tasuki/core'
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process'
 import { createWriteStream } from 'node:fs'
 
-const SANDBOXES = ['read-only', 'workspace-write', 'danger-full-access'] as const
-type Sandbox = (typeof SANDBOXES)[number]
+// What the agent may do without asking (D107). Codex has no per-tool list like claude's
+// allowedTools: allowlist is its workspace-write sandbox with nothing approved past it; auto
+// has its own reviewer approve; bypass drops the sandbox, which only belongs in a container.
+const PERMISSIONS = ['allowlist', 'auto', 'bypass'] as const
+type Permissions = (typeof PERMISSIONS)[number]
 
 interface CodexOptions {
   // The CLI to run; tests point it at a stand-in.
   command: string
   model?: string
-  // What the agent's shell commands may touch. Codex has no per-tool list like claude's
-  // allowedTools, and nobody is there to approve anything, so this is the whole permission.
-  sandbox: Sandbox
+  permissions: Permissions
+  // The agent's standing instructions (D77). Codex takes no system prompt on the command line,
+  // so they follow the engine's prompt instead of sitting under it.
+  appendSystemPrompt?: string
   // Passed to the spawned CLI only.
   env: Record<string, string>
   // false: the agent loads none of the machine's codex config.toml or rules, so a Run does the
@@ -57,20 +68,29 @@ function parseOptions(raw: unknown): CodexOptions {
       'options.auth must be inherit-login or api-key: a subscription login is the auth.json in CODEX_HOME',
     )
   if (o['allowedTools'] !== undefined)
-    throw new Error('options.allowedTools: codex has no per-tool list; set options.sandbox')
+    throw new Error('options.allowedTools: codex has no per-tool list; set options.permissions')
   if (o['requires'] !== undefined)
     throw new Error('options.requires: doctor cannot check a codex agent for it yet')
-  const sandbox = o['sandbox'] ?? 'workspace-write'
-  if (!SANDBOXES.includes(sandbox as Sandbox))
-    throw new Error(`options.sandbox must be ${SANDBOXES.join(', ')}`)
+  const permissions = o['permissions'] ?? 'allowlist'
+  if (!PERMISSIONS.includes(permissions as Permissions))
+    throw new Error(`options.permissions must be ${PERMISSIONS.join(', ')}`)
+  const base = o['appendSystemPrompt']
+  if (base !== undefined && typeof base !== 'string')
+    throw new Error('options.appendSystemPrompt must be text')
   const model = o['model'] ?? undefined
   if (model !== undefined && model !== null && typeof model !== 'string')
     throw new Error('options.model must be a model name')
   return {
     command: typeof o['command'] === 'string' ? o['command'] : 'codex',
     ...(typeof model === 'string' ? { model } : {}),
-    sandbox: sandbox as Sandbox,
-    env: env as Record<string, string>,
+    permissions: permissions as Permissions,
+    ...(base === undefined || base === '' ? {} : { appendSystemPrompt: base }),
+    // The key of the way not picked is dropped: the Agents page keeps a secret until replaced.
+    env: Object.fromEntries(
+      Object.entries(env as Record<string, string>).filter(
+        ([k]) => auth === 'api-key' || k !== 'CODEX_API_KEY',
+      ),
+    ),
     inheritSettings: o['inheritSettings'] === true,
   }
 }
@@ -86,17 +106,61 @@ function codexArgs(options: CodexOptions, spec: RunSpec, resume: string | undefi
     '--skip-git-repo-check',
     '--cd',
     spec.workspace,
-    '--sandbox',
-    options.sandbox,
+    ...PERMISSION_ARGS[options.permissions],
     ...(options.model === undefined ? [] : ['--model', options.model]),
     ...(options.inheritSettings ? [] : ['--ignore-user-config', '--ignore-rules']),
-    ...config('approval_policy', 'never'),
     ...config('mcp_servers.tasuki.url', spec.mcp.url),
     ...config('mcp_servers.tasuki.bearer_token_env_var', TOKEN_ENV),
     ...(resume === undefined ? [] : ['resume', resume]),
     // The prompt comes on stdin.
     '-',
   ]
+}
+
+// Each way of permitting in codex's own flags (D107; codex-cli 0.169.0, not run for real: the
+// author has no Codex account).
+const PERMISSION_ARGS: Record<Permissions, string[]> = {
+  allowlist: ['--sandbox', 'workspace-write', ...config('approval_policy', 'never')],
+  auto: ['--approve-for-me'],
+  bypass: ['--dangerously-bypass-approvals-and-sandbox'],
+}
+
+// The official install (github.com/openai/codex), shown when the CLI is missing; tasuki never
+// runs it itself (D108).
+const INSTALL = 'npm install -g @openai/codex'
+
+// What the Agents page asks for (D111).
+const FORM: OptionsForm = {
+  fields: [
+    {
+      key: 'permissions',
+      label: 'Permissions',
+      type: 'select',
+      required: true,
+      choices: [
+        { value: 'allowlist', label: 'Workspace only, anything more refused' },
+        { value: 'auto', label: "Auto: codex's reviewer decides" },
+        { value: 'bypass', label: 'Everything, no sandbox: only in a container' },
+      ],
+    },
+    {
+      key: 'auth',
+      label: 'Sign-in',
+      type: 'select',
+      choices: [
+        { value: 'inherit-login', label: "This machine's codex login" },
+        { value: 'api-key', label: 'An OpenAI API key' },
+      ],
+    },
+    { key: 'env.CODEX_API_KEY', label: 'API key', type: 'secret' },
+    { key: 'model', label: 'Model', type: 'text', placeholder: 'the CLI default' },
+    {
+      key: 'appendSystemPrompt',
+      label: 'Base prompt',
+      type: 'textarea',
+      description: "This agent's standing instructions, after every rule's prompt.",
+    },
+  ],
 }
 
 function agentEnv(options: CodexOptions): Record<string, string> {
@@ -111,6 +175,7 @@ function agentEnv(options: CodexOptions): Record<string, string> {
 const plugin: Plugin = definePlugin({
   name: '@tasuki/codex-cli',
   apiVersion: API_VERSION,
+  forms: { runner: FORM },
   runner: (_ctx, raw) => {
     const options = parseOptions(raw)
     return {
@@ -124,6 +189,7 @@ const plugin: Plugin = definePlugin({
             {
               level: 'error',
               message: `${options.command} does not run: ${version.error?.message ?? `--version exited with ${String(version.status)}`}`,
+              fix: INSTALL,
             },
           ]
         return []
@@ -134,7 +200,6 @@ const plugin: Plugin = definePlugin({
         const env = Object.assign(agentEnv(options), {
           TASUKI_RUN_ID: spec.runId,
           TASUKI_TARGET: spec.target,
-          TASUKI_MODE: spec.mode,
           TASUKI_WORKSPACE: spec.workspace,
           [TOKEN_ENV]: spec.mcp.token,
         })
@@ -154,7 +219,11 @@ const plugin: Plugin = definePlugin({
             })
             child = proc
             proc.stdin.on('error', () => {})
-            proc.stdin.end(spec.prompt)
+            proc.stdin.end(
+              options.appendSystemPrompt === undefined
+                ? spec.prompt
+                : `${spec.prompt}\n\n${options.appendSystemPrompt}`,
+            )
             proc.stdout.on('data', (chunk: Buffer) => {
               log.write(chunk)
               spec.onActivity()

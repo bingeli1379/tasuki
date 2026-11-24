@@ -13,7 +13,7 @@ const flow = (over: { statuses?: unknown[]; rules?: unknown[]; extra?: object } 
     taskStatuses: { 'to-do': 'to-do', manual: 'manual' },
   },
   rules: over.rules ?? [
-    { id: 'split', watch: 'ready', agent: 'fake', mode: 'split', outcomes: { succeeded: 'done' } },
+    { id: 'split', watch: 'ready', agent: 'fake', outcomes: { succeeded: 'done' } },
   ],
   labels: { hold: 'hold' },
   ...over.extra,
@@ -23,7 +23,6 @@ const rule = (over: object) => [
     id: 'split',
     watch: 'ready',
     agent: 'fake',
-    mode: 'split',
     outcomes: { succeeded: 'done' },
     ...over,
   },
@@ -96,7 +95,7 @@ describe('describeChanges', () => {
     [
       'a rule added and one removed',
       flow({
-        rules: [{ id: 'review', watch: 'ready', agent: 'fake', mode: 'review', outcomes: {} }],
+        rules: [{ id: 'review', watch: 'ready', agent: 'fake', outcomes: {} }],
       }),
       ['Removed the rule split', 'Added the rule review'],
     ],
@@ -106,7 +105,7 @@ describe('describeChanges', () => {
         rules: rule({
           watch: 'refining',
           claim: 'ready',
-          mode: 'rework',
+          needsFeedback: true,
           maxAttempts: 5,
           session: 'per-item',
           outcomes: { succeeded: 'ready', approve: 'done' },
@@ -115,7 +114,7 @@ describe('describeChanges', () => {
       [
         'Rule split watches: ready → refining',
         'Rule split while working: leave it where it is → ready',
-        'Rule split mode: split → rework',
+        'Rule split needs feedback: off → on',
         'Rule split attempts: default → 5',
         'Rule split session: fresh → per-item',
         'Rule split succeeded goes to: done → ready',

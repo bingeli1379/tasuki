@@ -18,9 +18,8 @@ describe('loadConfig', () => {
     for (const name of ENV) delete process.env[name]
   })
 
-  it('defaults to the sqlite tracker and store, and keeps the data in ~/.tasuki', () => {
+  it('defaults to the sqlite store, and keeps the data in ~/.tasuki', () => {
     const config = loadConfig(write('{ "version": 1, }'))
-    expect(config.tracker).toEqual({ plugin: '@tasuki/sqlite', options: {} })
     expect(config.store).toEqual({ plugin: '@tasuki/sqlite', options: {} })
     expect(config.dataDir).toBe(join(homedir(), '.tasuki'))
   })
@@ -33,7 +32,7 @@ describe('loadConfig', () => {
   it('needs no file: with none in the working folder it runs on the defaults (D105)', () => {
     const empty = mkdtempSync(join(tmpdir(), 'tasuki-config-'))
     const config = loadConfig(undefined, empty)
-    expect(config).toMatchObject({ configDir: empty, host: '127.0.0.1', port: 8787, agents: {} })
+    expect(config).toMatchObject({ configDir: empty, host: '127.0.0.1', port: 8787 })
     expect(config.auth).toBeUndefined()
   })
 
@@ -120,36 +119,33 @@ describe('loadConfig', () => {
 
   it('expands ${VAR} from a .env next to the config', () => {
     const path = write(
-      '{ "tracker": { "plugin": "x", "options": { "token": "${TASUKI_TEST_TOKEN}" } } }',
+      '{ "store": { "plugin": "x", "options": { "token": "${TASUKI_TEST_TOKEN}" } } }',
       'TASUKI_TEST_TOKEN=from-env-file\n',
     )
-    expect(loadConfig(path).tracker.options).toEqual({ token: 'from-env-file' })
+    expect(loadConfig(path).store.options).toEqual({ token: 'from-env-file' })
   })
 
   it('names the variable and where it is used when it is missing', () => {
     const path = write(
-      '{ "tracker": { "plugin": "x", "options": { "token": "${TASUKI_TEST_MISSING}" } } }',
+      '{ "store": { "plugin": "x", "options": { "token": "${TASUKI_TEST_MISSING}" } } }',
     )
     expect(() => loadConfig(path)).toThrow(
-      'config tracker.options.token: environment variable TASUKI_TEST_MISSING is not set',
+      'config store.options.token: environment variable TASUKI_TEST_MISSING is not set',
     )
-  })
-
-  it('reads agents', () => {
-    const config = loadConfig(
-      write(
-        JSON.stringify({
-          agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } } },
-        }),
-      ),
-    )
-    expect(config.agents).toEqual({
-      fake: { plugin: '@tasuki/fake-runner', options: { seconds: 1 } },
-    })
   })
 
   it('refuses a field it does not hold, the ones in the store included (D91, D105)', () => {
-    for (const field of ['workflow', 'rules', 'labels', 'statuses', 'poll', 'limits', 'workspace'])
+    for (const field of [
+      'workflow',
+      'rules',
+      'labels',
+      'statuses',
+      'poll',
+      'limits',
+      'workspace',
+      'tracker',
+      'agents',
+    ])
       expect(() => loadConfig(write(JSON.stringify({ [field]: {} })))).toThrow(
         `config ${field}: not a field of the config file`,
       )

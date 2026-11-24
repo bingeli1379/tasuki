@@ -3,6 +3,7 @@ import { hostname, tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { runDoctor } from './doctor'
+import { DEFAULT_FLOW } from './flow'
 
 const clock = { now: () => new Date('2026-11-22T10:01:00Z') }
 
@@ -20,11 +21,38 @@ function configWith(plugins: Record<string, string>, config: unknown): string {
   return join(dir, 'tasuki.config.jsonc')
 }
 
-// Polls every 30 seconds, so another engine counts as running for 90 (D105: the interval is
-// an instance setting, kept in the store).
+// Runs on the tracker plugin below and polls every 30 seconds, so another engine counts as
+// running for 90; two agents on the runner plugin below, each picked by a rule (D105, D107:
+// all of it settings kept in the store).
+const RULES = [
+  {
+    id: 'split',
+    watch: 'ready-to-split',
+    agent: 'main',
+    outcomes: { succeeded: 'split-review' },
+  },
+  {
+    id: 'review',
+    watch: 'in-progress',
+    agent: 'broken',
+    outcomes: { succeeded: 'in-review' },
+  },
+]
 const STORE = `{ name: 'store', apiVersion: 1, store: () => ({
   latestSettings: async (doc) =>
-    doc === 'instance' ? { version: 1, value: { poll: { intervalSeconds: 30 } } } : undefined,
+    ({
+      instance: { version: 1, value: { poll: { intervalSeconds: 30 } } },
+      tracker: { version: 1, value: { plugin: 'tracker', options: {} } },
+      agents: {
+        version: 1,
+        value: {
+          main: { plugin: 'runner', options: {} },
+          broken: { plugin: 'runner', options: { broken: true } },
+          unused: { plugin: 'runner', options: {} },
+        },
+      },
+      flow: { version: 1, value: ${JSON.stringify({ ...DEFAULT_FLOW, rules: RULES })} },
+    })[doc],
 }) }`
 const tracker = (heartbeat: string) => `{
   name: 'tracker',
@@ -60,14 +88,7 @@ describe('doctor', () => {
         tracker: tracker(`{ engineId: 'other:/data', lastSeen: '2026-11-22T10:00:30.000Z' }`),
         runner: RUNNER,
       },
-      {
-        store: { plugin: 'store' },
-        tracker: { plugin: 'tracker' },
-        agents: {
-          main: { plugin: 'runner' },
-          broken: { plugin: 'runner', options: { broken: true } },
-        },
-      },
+      { store: { plugin: 'store' } },
     )
     expect(await runDoctor(path, clock)).toBe(1)
     expect(printed()).toEqual([
@@ -86,7 +107,7 @@ describe('doctor', () => {
         store: STORE,
         tracker: tracker(`{ engineId: 'other:/data', lastSeen: '2026-11-22T09:59:30.000Z' }`),
       },
-      { store: { plugin: 'store' }, tracker: { plugin: 'tracker' } },
+      { store: { plugin: 'store' } },
     )
     await runDoctor(stale, clock)
     expect(printed().some((l) => l.startsWith('error: engine'))).toBe(false)
@@ -103,7 +124,6 @@ describe('doctor', () => {
       {
         dataDir: join(dir, 'data'),
         store: { plugin: 'store' },
-        tracker: { plugin: 'tracker' },
       },
     )
     await runDoctor(own, clock)

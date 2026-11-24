@@ -18,11 +18,13 @@ import {
   stopRun,
   updateItem,
   updateTask,
+  type Account,
   type StorePort,
   type TrackerPort,
 } from '@tasuki/core'
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js'
 import { z } from 'zod'
+import type { Approvals } from './approvals'
 import type { LiveFlow } from './flow'
 
 export interface McpDeps {
@@ -30,6 +32,8 @@ export interface McpDeps {
   store: StorePort
   // Read once: a server lives for one request.
   flow: LiveFlow
+  approvals: Approvals
+  actor: Account
 }
 
 const json = (value: unknown): { content: { type: 'text'; text: string }[] } => ({
@@ -38,7 +42,7 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 
 // The user's own AI client (Claude Code, Codex) acting as the user: the same use cases as
 // the board, so whatever a person can do on the board this can do too (D57).
-export function createMcpServer({ tracker, store, flow }: McpDeps): McpServer {
+export function createMcpServer({ tracker, store, flow, approvals, actor }: McpDeps): McpServer {
   const { workflow, rules, holdLabel } = flow.current()
   const statuses = flow.statuses
   const server = new McpServer({ name: 'tasuki', version: '0.0.0' })
@@ -358,6 +362,41 @@ export function createMcpServer({ tracker, store, flow }: McpDeps): McpServer {
             ],
           }
     },
+  )
+  server.registerTool(
+    'list_approvals',
+    {
+      description:
+        'List the calls agents are waiting on a person for: which run and item, the tool and ' +
+        'what it would run. Each waits until answered with approve_permission or ' +
+        'deny_permission, or until its run ends.',
+    },
+    async () => json(approvals.pending()),
+  )
+  server.registerTool(
+    'approve_permission',
+    {
+      description:
+        'Let an agent make the call it is waiting on, from list_approvals; it carries on from ' +
+        'there. always: also add it to the agent so it is not asked again (admin only). Only ' +
+        'approve what the user said to approve.',
+      inputSchema: {
+        id: z.string().describe('The request id from list_approvals'),
+        always: z.boolean().optional(),
+      },
+    },
+    async ({ id, always }) =>
+      json(await approvals.answer(actor, id, always === true ? 'allow-always' : 'allow')),
+  )
+  server.registerTool(
+    'deny_permission',
+    {
+      description:
+        'Refuse an agent the call it is waiting on, from list_approvals. It is told not to try ' +
+        'another way and to ask on the item instead.',
+      inputSchema: { id: z.string().describe('The request id from list_approvals') },
+    },
+    async ({ id }) => json(await approvals.answer(actor, id, 'deny')),
   )
   return server
 }

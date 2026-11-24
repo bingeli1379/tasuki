@@ -1,5 +1,5 @@
 import { runDoctor } from '@tasuki/server'
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vite-plus/test'
@@ -45,75 +45,29 @@ const clock = { now: () => new Date() }
 vi.spyOn(console, 'log').mockImplementation(() => {})
 
 describe('tasuki init', () => {
-  it('writes a sqlite config that doctor passes', async () => {
+  it('writes a config that doctor passes, the tracker and agents left to the board (D105)', async () => {
     const config = configIn()
-    scripted(['sqlite', ['fake'], 'none'])
+    scripted(['none', '8787'])
     await init(config)
     expect(answers).toEqual([])
-    expect(readFileSync(config, 'utf8')).toContain('"@tasuki/fake-runner"')
+    const text = readFileSync(config, 'utf8')
+    expect(text).not.toContain('"tracker"')
+    expect(text).not.toContain('"agents"')
     expect(await runDoctor(config, clock)).toBe(0)
   })
 
-  it('looks the Jira ids up, names them, and keeps the secrets in .env', async () => {
+  it('writes the port and the sign-in picked', async () => {
     const config = configIn()
-    const json = (body: unknown, status = 200): Response => Response.json(body, { status })
-    const fetchFn = vi.fn(async (url: string, req?: RequestInit) => {
-      const auth = new Headers(req?.headers).get('Authorization')
-      const path = new URL(url).pathname
-      if (path === '/rest/api/3/myself')
-        return auth === `Basic ${Buffer.from('me@x.io:right').toString('base64')}`
-          ? json({})
-          : json({}, 401)
-      if (path === '/rest/api/3/project/KAN')
-        return json({
-          issueTypes: [
-            { id: '10006', name: 'Epic', subtask: false, hierarchyLevel: 1 },
-            { id: '10007', name: 'Subtask', subtask: true, hierarchyLevel: -1 },
-            { id: '10008', name: 'Task', subtask: false, hierarchyLevel: 0 },
-          ],
-        })
-      if (path === '/rest/api/3/issueLinkType')
-        return json({
-          issueLinkTypes: [
-            { id: '10000', name: 'Blocks', inward: 'is blocked by', outward: 'blocks' },
-          ],
-        })
-      return json({}, 404)
-    })
-    scripted([
-      'Jira Cloud',
-      'https://x.atlassian.net/',
-      'me@x.io',
-      'wrong',
-      'https://x.atlassian.net',
-      'me@x.io',
-      'right',
-      'nope',
-      'kan',
-      'Task',
-      'Subtask',
-      ['claude', 'codex'],
-      'auth-builtin',
-    ])
-    await init(config, fetchFn as unknown as typeof fetch)
-    expect(answers).toEqual([])
+    scripted(['auth-builtin', '9000'])
+    await init(config)
     const text = readFileSync(config, 'utf8')
-    expect(text).toContain('"project": "KAN"')
-    expect(text).toContain('"item": "10008", // Task')
-    expect(text).toContain('"task": "10007", // Subtask')
-    expect(text).toContain('"dependencyLinkType": "10000", // Blocks')
-    expect(text).toContain('"apiToken": "${JIRA_API_TOKEN}"')
-    expect(text).not.toContain('right')
+    expect(text).toContain('"port": 9000')
     expect(text).toContain('"@tasuki/auth-builtin"')
-    expect(text).toContain('"@tasuki/codex-cli"')
-    const env = join(config, '..', '.env')
-    expect(readFileSync(env, 'utf8')).toBe('JIRA_EMAIL=me@x.io\nJIRA_API_TOKEN=right\n')
-    expect(statSync(env).mode & 0o777).toBe(0o600)
   })
 
   it('writes nothing when cancelled', async () => {
     const config = configIn()
-    scripted(['sqlite', ['fake'], CANCEL])
+    scripted([CANCEL])
     await init(config)
     expect(existsSync(config)).toBe(false)
   })

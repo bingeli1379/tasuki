@@ -14,9 +14,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vite-plus/test'
 import { createLiveInstance } from './instance'
+import type { LiveAgents } from './agent-settings'
+import { createApprovals } from './approvals'
+import type { LiveTracker } from './tracker-settings'
+
+// The Tracker page is tested on its own; these pin the tracker they are handed.
+const PINNED = {} as LiveTracker
+const AGENTS = {} as LiveAgents
+const APPROVALS = createApprovals({ now: () => new Date() }, async () => {})
 import { createApp } from './app'
 import { createLiveFlow, DEFAULT_FLOW, loadFlow } from './flow'
-import { defaultPrompt } from './prompts'
+import { TEMPLATES } from './prompts'
 import { createRunTokens } from './run-tokens'
 
 const mapping: StatusMapping = {
@@ -63,7 +71,9 @@ const appWith = (): ReturnType<typeof createApp> =>
     store: memoryStore(),
     flow: liveFlow(mapping),
     instance: createLiveInstance({ pollSeconds: 5 }),
-    agents: [],
+    trackerSettings: PINNED,
+    agentSettings: AGENTS,
+    approvals: APPROVALS,
     tokens: createRunTokens(),
   })
 
@@ -313,7 +323,9 @@ describe('tasks', () => {
       store,
       flow: liveFlow(taskMapping),
       instance: createLiveInstance({ pollSeconds: 5 }),
-      agents: [],
+      trackerSettings: PINNED,
+      agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
     })
     const item = await tracker.createItem({ title: 'Item', body: '', status: 'split-review' })
@@ -431,7 +443,28 @@ describe("MCP for the user's AI client", () => {
       'add_attachment',
       'delete_attachment',
       'get_attachment',
+      'list_approvals',
+      'approve_permission',
+      'deny_permission',
     ])
+  })
+
+  it('answers a call an agent waits on, the same way the board does (D57, D107)', async () => {
+    const client = await connect()
+    const answered = APPROVALS.ask({
+      runId: 'r1',
+      item: 'T-1',
+      agent: 'claude',
+      tool: 'Bash',
+      input: { command: 'git push' },
+    })
+    const listed = JSON.parse(
+      text(await client.callTool({ name: 'list_approvals', arguments: {} })),
+    ) as { id: string; tool: string }[]
+    expect(listed).toMatchObject([{ item: 'T-1', tool: 'Bash', input: { command: 'git push' } }])
+    await client.callTool({ name: 'approve_permission', arguments: { id: listed[0]?.id } })
+    expect(await answered).toEqual({ behavior: 'allow', updatedInput: { command: 'git push' } })
+    expect(APPROVALS.pending()).toEqual([])
   })
 
   it('an item created through MCP is on the board', async () => {
@@ -549,7 +582,9 @@ describe('the flow settings (D91)', () => {
       store,
       flow,
       instance: createLiveInstance({ pollSeconds: 5 }),
-      agents: ['fake'],
+      trackerSettings: PINNED,
+      agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
     })
     return { app, tracker }
@@ -572,14 +607,8 @@ describe('the flow settings (D91)', () => {
       flow: DEFAULT_FLOW,
       agents: ['fake'],
       defaultMaxAttempts: 3,
-      prompts: {
-        split: defaultPrompt('split'),
-        execute: defaultPrompt('execute'),
-        dispatch: defaultPrompt('dispatch'),
-        rework: defaultPrompt('rework'),
-        review: defaultPrompt('review'),
-        custom: '',
-      },
+      // What a new rule starts from on the page (D109).
+      templates: TEMPLATES,
       // sqlite takes any key.
       trackerStatuses: null,
     })
@@ -628,11 +657,11 @@ describe('the flow settings (D91)', () => {
     const { app } = await setup()
     const res = await put(app, undefined, {
       ...DEFAULT_FLOW,
-      rules: [{ id: 'split', watch: 'ready-to-split', agent: 'claude', mode: 'split' }],
+      rules: [{ id: 'split', watch: 'ready-to-split', agent: 'claude' }],
     })
     expect(res.status).toBe(400)
     expect(await res.json()).toEqual({
-      error: `rules[0] (split).agent: no agent "claude" in the config file's agents`,
+      error: `rules[0] (split).agent: no agent "claude" on the Agents page`,
     })
   })
 
@@ -675,7 +704,9 @@ describe('the built board', () => {
       store: memoryStore(),
       flow: liveFlow(mapping),
       instance: createLiveInstance({ pollSeconds: 5 }),
-      agents: [],
+      trackerSettings: PINNED,
+      agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
       webDir,
     })
@@ -697,7 +728,9 @@ describe('instance settings (D105)', () => {
       store,
       flow,
       instance,
-      agents: ['fake'],
+      trackerSettings: PINNED,
+      agentSettings: AGENTS,
+      approvals: APPROVALS,
       tokens: createRunTokens(),
     })
     return { app, flow, instance }
@@ -755,7 +788,6 @@ describe('instance settings (D105)', () => {
       id: 'split',
       watch: 'ready-to-split',
       agent: 'fake',
-      mode: 'split',
       outcomes: { succeeded: 'split-review' },
     }
     const saved = await app.request('/api/flow', {

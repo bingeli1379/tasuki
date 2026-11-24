@@ -22,6 +22,7 @@ import { join } from 'node:path'
 import type { Limits } from './instance'
 import type { LiveFlow } from './flow'
 import { CONTRACT } from './prompts'
+import type { Approvals } from './approvals'
 import type { RunTokens } from './run-tokens'
 
 const TAIL_LINES = 20
@@ -38,9 +39,12 @@ export interface EngineDeps {
   workspaceRoot: string
   // Each Run's log is <logDir>/<run id>.log, on this machine whichever store holds the Run.
   logDir: string
-  // One per agent name in config.
-  runners: Readonly<Record<string, RunnerPort>>
+  // One per agent name, read at each Run's start: a save on the Agents page applies from the
+  // next Run (D107).
+  runners: () => Readonly<Record<string, RunnerPort>>
   tokens: RunTokens
+  // What its agents wait on a person for; denied once their Run is over (D107).
+  approvals: Approvals
   // Where agents reach the MCP facade.
   mcpUrl: string
   // What its heartbeat on the tracker says it is (D66).
@@ -80,7 +84,7 @@ export function createEngine(deps: EngineDeps): Engine {
     { run, rule }: Claimed,
     named: ReturnType<typeof itemStatusNames>,
   ): Promise<{ done: Promise<void> }> {
-    const runner = deps.runners[rule.agent]
+    const runner = deps.runners()[rule.agent]
     const token = tokens.issue(run.id, rule)
     const renew = setInterval(
       () => {
@@ -105,7 +109,6 @@ export function createEngine(deps: EngineDeps): Engine {
       const handle = runner.start({
         runId: run.id,
         target: run.target,
-        mode: rule.mode,
         workspace: run.workspace,
         mcp: { url: deps.mcpUrl, token },
         prompt: expandPrompt(`${CONTRACT}\n\n${rule.prompt}`, {
@@ -113,7 +116,6 @@ export function createEngine(deps: EngineDeps): Engine {
           ...(run.target === run.item ? {} : { task: run.target }),
           runId: run.id,
           workspace: run.workspace,
-          mode: rule.mode,
         }),
         ...(resume === undefined ? {} : { resume }),
         logPath,
@@ -138,6 +140,9 @@ export function createEngine(deps: EngineDeps): Engine {
         agents.delete(run.id)
         clearInterval(renew)
         tokens.revoke(run.id)
+        deps.approvals.drop(run.id)
+        if (result.denials !== undefined)
+          await store.recordDenials(run.id, result.denials).catch((e: unknown) => log(String(e)))
         await finishRun({ tracker, store, named }, rule, run.id, result, await logTail(logPath))
       }),
     }

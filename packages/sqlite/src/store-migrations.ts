@@ -160,4 +160,6 @@ export const STORE_MIGRATIONS: readonly string[] = [
   );
   INSERT INTO settings_version SELECT 'flow', version, flow, saved_by, saved_at FROM flow_version;
   DROP TABLE flow_version;`,
+  // W8 (D107): what the agent's CLI refused it, as JSON, once the Run is over.
+  `ALTER TABLE run ADD COLUMN denials TEXT;`,
 ]

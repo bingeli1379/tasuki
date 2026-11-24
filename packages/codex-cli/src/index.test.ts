@@ -51,14 +51,13 @@ function setup(fake = '', extra: Record<string, unknown> = {}) {
   const out = join(dir, 'out.jsonl')
   const runner = plugin.runner?.(ctx, {
     command,
-    env: { FAKE: fake, FAKE_OUT: out },
     ...extra,
+    env: { FAKE: fake, FAKE_OUT: out, ...(extra['env'] as object | undefined) },
   }) as RunnerPort
   const sessions: string[] = []
   const spec = (more: Partial<RunSpec> = {}): RunSpec => ({
     runId: 'run-1',
     target: 'T-1',
-    mode: 'split',
     workspace: dir,
     mcp: { url: 'http://127.0.0.1:8787/agent-mcp', token: 'secret-token' },
     prompt: 'Split T-1.',
@@ -118,18 +117,37 @@ describe('codex-cli runner', () => {
   it("hands the agent its Run and options.env, never the engine's own secrets", async () => {
     process.env['JIRA_API_TOKEN'] = 'tracker-secret'
     try {
-      const t = setup('', { model: 'gpt-5', sandbox: 'read-only', inheritSettings: true })
+      const t = setup('', { model: 'gpt-5', inheritSettings: true })
       await t.runner.start(t.spec()).exit
       const [call] = t.calls()
       expect(call?.env).toMatchObject({ TASUKI_RUN_ID: 'run-1', TASUKI_TARGET: 'T-1' })
       expect(call?.env['JIRA_API_TOKEN']).toBeUndefined()
       const args = call?.args.join(' ') ?? ''
       expect(args).toContain('--model gpt-5')
-      expect(args).toContain('--sandbox read-only')
       expect(args).not.toContain('--ignore-user-config')
     } finally {
       delete process.env['JIRA_API_TOKEN']
     }
+  })
+
+  it.each([
+    ['auto', ['--approve-for-me'], ['--sandbox', 'approval_policy']],
+    ['bypass', ['--dangerously-bypass-approvals-and-sandbox'], ['--sandbox', 'approval_policy']],
+  ])('permissions %s passes %j and none of %j', async (permissions, has, hasNot) => {
+    const t = setup('', { permissions })
+    await t.runner.start(t.spec()).exit
+    const args = t.calls()[0]?.args.join(' ') ?? ''
+    for (const a of has) expect(args).toContain(a)
+    for (const a of hasNot) expect(args).not.toContain(a)
+  })
+
+  it("puts the agent's base prompt after the engine's, and drops an API key it is not signed in with", async () => {
+    const t = setup('', { appendSystemPrompt: 'Commit when done.' })
+    await t.runner.start(t.spec()).exit
+    expect(t.calls()[0]?.stdin).toBe('Split T-1.\n\nCommit when done.')
+    const kept = setup('', { env: { CODEX_API_KEY: 'k' } })
+    await kept.runner.start(kept.spec()).exit
+    expect(kept.calls()[0]?.env['CODEX_API_KEY']).toBeUndefined()
   })
 
   it('ends the whole process tree on terminate', async () => {
@@ -153,9 +171,9 @@ describe('codex-cli runner', () => {
     expect(make({ auth: 'oauth-token' })).toThrow('options.auth must be inherit-login or api-key')
     expect(make({ auth: 'api-key' })).toThrow('needs options.env.CODEX_API_KEY')
     expect(make({ auth: 'api-key', env: { CODEX_API_KEY: 'k' } })).not.toThrow()
-    expect(make({ allowedTools: ['Read'] })).toThrow('set options.sandbox')
+    expect(make({ allowedTools: ['Read'] })).toThrow('set options.permissions')
     expect(make({ requires: { skills: ['x'] } })).toThrow('options.requires')
-    expect(make({ sandbox: 'open' })).toThrow('options.sandbox must be')
+    expect(make({ permissions: 'open' })).toThrow('options.permissions must be')
     expect(make({ env: { A: 1 } })).toThrow('options.env must map names to strings')
   })
 })

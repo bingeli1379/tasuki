@@ -52,14 +52,15 @@ export default definePlugin({
 
 - 有提供的角色才寫那個 key（`tracker`、`store`、`runner`、`auth`），一個套件可以寫多個。
 - `store` 工廠回傳 `StorePort`，engine 啟動時呼叫一次。資料放哪裡、migration 怎麼跑都是 plugin 的事；內建的 sqlite 開 `<dataDir>/store.db`，跟 tracker 的 `tracker.db` 分開。Run 的 log 不歸 store 管，engine 自己寫在 `<dataDir>/logs/`。
-- `runner` 工廠回傳 `RunnerPort`。engine 對每個 config 裡的 agent 呼叫一次工廠，`options` 是那個 agent 的 `options`。內建的 `@tasuki/fake-runner` 是最小的例子：它跟真的 agent 一樣用 HTTP 打 MCP facade（D63）。`@tasuki/claude-cli` 是第一個真的 runner（S8，D76）：spawn `claude -p`，自己一個 process group，`terminate` 對整個 group 送訊號。
+- `runner` 工廠回傳 `RunnerPort`。engine 對 Agents 頁上的每個 agent 呼叫一次工廠，存檔時重新呼叫，`options` 是那個 agent 的 `options`（D107）。內建的 `@tasuki/fake-runner` 是最小的例子：它跟真的 agent 一樣用 HTTP 打 MCP facade（D63）。`@tasuki/claude-cli` 是第一個真的 runner（S8，D76）：spawn `claude -p`，自己一個 process group，`terminate` 對整個 group 送訊號。
 - `ctx` 是 engine 注入的東西：`Clock`、config 所在的資料夾 `configDir`（options 裡的相對路徑對它解析）、解析成絕對路徑的 `dataDir`、`statuses`（邏輯名與 tracker 端 status key 的雙向對照）。plugin 不自己取時間，也不自己決定資料放哪裡。port 進出的 status 一律是邏輯名，翻成 tracker 的 key 是 plugin 的事。logger 等第一個需要它的切片再加。
-- `options` 是 config 裡該 plugin 的 `options`，`${VAR}` 已經展開。
+- `options` 是 config 裡該 plugin 的 `options`，`${VAR}` 已經展開；tracker 與 runner 的 `options` 從 store 來，不展開，secret 已經解開。
 - 工廠用函式而不是 class，因為注入點就是參數，第三方不用繼承 `core` 的任何東西。
+- `forms.tracker` 選填，描述 Tracker 頁要畫的表單（D111）：`fields` 每一欄是 `key`（options 裡的點路徑，例如 `issueTypes.item`）、`label`、`type`（`text`、`textarea`、`secret`、`select`、`list`、`json`；`list` 是字串陣列，頁面上一行一個，`json` 是任意 JSON）、`required`、`description`、`placeholder`、`choices`（不用查就知道的 `select` 選項）；`secret` 的欄位 engine 會加密存放、不再顯示（D106）。`forms.runner` 一樣，畫在 Agents 頁上（W7）。`choices(options)` 選填，用填到一半的 options 查出 `select` 欄位的選項，例如 Jira 用網址、token 與 project 查 issue type；查不到就丟 `Error`，訊息給填表的人看。沒有 `forms.tracker` 的 tracker plugin，Tracker 頁沒有欄位可填，只能用預設的 options。
 
 ## config 怎麼指定
 
-config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），找不到再從 engine 自己安裝的位置解析，再用 `import()` 載入。內建的 plugin 是 CLI 的依賴，全域裝 CLI 就一起裝好；第三方的裝在 config 旁邊，同名時 config 旁邊的優先（D98）。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
+tracker 在 Tracker 頁、其他角色在 config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解析套件（跟那個資料夾的專案解析自己的相依一樣），找不到再從 engine 自己安裝的位置解析，再用 `import()` 載入。內建的 plugin 是 CLI 的依賴，全域裝 CLI 就一起裝好；第三方的裝在 config 旁邊，同名時 config 旁邊的優先（D98）。plugin 自己的設定放在同一層的 `options`，engine 不看內容，原封不動交給工廠。
 
 ```jsonc
 "tracker": {
@@ -79,7 +80,7 @@ config 用 npm 套件名指定 plugin，engine 從 config 所在的資料夾解�
 這些文件裡完全沒有，也沒有被確認過，實作前要先問作者。
 
 1. （已定，D96）plugin 的 options 由 plugin 在工廠裡自己驗，不對就丟錯，走「載入失敗」。給編輯器補全的 JSON Schema 跟 config 的一起決定（plan.md 待釐清 13）。
-2. （已定，D95）`doctor` 怎麼把檢查委派給 plugin：`TrackerPort` 與 `RunnerPort` 各有選用的 `doctor`，回傳 `{ level, message }[]`。tracker 拿到規則會走的轉移（邏輯名），自己判斷 workflow 允不允許；runner 自己檢查 CLI 與 `requires`。前綴（哪個 plugin、哪個 agent）由 engine 加。沒實作就是沒東西要檢查。心跳也是 tracker 的選用方法（`readHeartbeat`、`writeHeartbeat`），sqlite 不實作。
+2. （已定，D95）`doctor` 怎麼把檢查委派給 plugin：`TrackerPort` 與 `RunnerPort` 各有選用的 `doctor`，回傳 `{ level, message, fix? }[]`，`fix` 是讓人自己複製去跑的指令，例如 CLI 的安裝指令（D108）。tracker 拿到規則會走的轉移（邏輯名），自己判斷 workflow 允不允許；runner 自己檢查 CLI 與 `requires`。前綴（哪個 plugin、哪個 agent）由 engine 加。沒實作就是沒東西要檢查。心跳也是 tracker 的選用方法（`readHeartbeat`、`writeHeartbeat`），sqlite 不實作。
 3. （已定，D96）`apiVersion` 要求完全相等。
 4. （已定，D96）第三方套件取 `tasuki-plugin-<名字>` 或 `@<scope>/tasuki-plugin-<名字>`，`@tasuki/` 留給內建的。
 5. （已定，D89）`auth` 的內建實作是 `@tasuki/auth-builtin` 與 `@tasuki/auth-http` 兩個套件；不登入是省略 `auth`，不是一個套件。builtin 讀寫 store 裡的帳號與密碼 hash，所以 `auth` 工廠拿到的 `ctx` 多一個 `store`（`AuthContext`）。

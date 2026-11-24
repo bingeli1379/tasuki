@@ -1,7 +1,6 @@
 import { DEFAULT_WORKFLOW, InvalidInput } from '@tasuki/core'
 import { describe, expect, it } from 'vite-plus/test'
 import { DEFAULT_FLOW, parseFlow } from './flow'
-import { defaultPrompt } from './prompts'
 
 const ctx = { agents: ['fake'], defaultMaxAttempts: 3 }
 const parse = (raw: unknown) => parseFlow(raw, ctx)
@@ -22,7 +21,6 @@ const split = {
   watch: 'ready-to-split',
   claim: 'splitting',
   agent: 'fake',
-  mode: 'split',
   outcomes: { succeeded: 'split-review', needs_input: 'needs-answers' },
 }
 
@@ -157,14 +155,16 @@ describe('parseFlow', () => {
     ])
   })
 
-  it('reads rules, filling maxAttempts from the file and the prompt from the mode', () => {
+  it('reads rules, filling maxAttempts from the file, both switches off and no prompt (D109)', () => {
     expect(parse(withRules([split])).rules).toEqual([
       {
         ...split,
         // From the failure role.
         outcomes: { ...split.outcomes, failed: 'blocked', max_attempts: 'blocked' },
         maxAttempts: 3,
-        prompt: defaultPrompt('split'),
+        dispatch: false,
+        needsFeedback: false,
+        prompt: '',
         session: 'fresh',
       },
     ])
@@ -182,23 +182,21 @@ describe('parseFlow', () => {
     expect(flow.holdLabel).toBe('tasuki-hold')
   })
 
-  it('reads a review rule: its own outcomes as declared, then the ones every rule has', () => {
+  it('reads its own outcomes as declared, then the ones every rule has', () => {
     const review = {
       id: 'ai-review',
       watch: 'in-review',
       agent: 'fake',
-      mode: 'review',
-      outcomes: { approve: 'done', changes: 'ready-to-rework' },
+      outcomes: { succeeded: 'done', changes: 'ready-to-rework' },
     }
     const [rule] = parse(withRules([review])).rules
     expect(Object.entries(rule?.outcomes ?? {})).toEqual([
-      ['approve', 'done'],
+      ['succeeded', 'done'],
       ['changes', 'ready-to-rework'],
       ['needs_input', 'blocked'],
       ['failed', 'blocked'],
       ['max_attempts', 'blocked'],
     ])
-    expect(rule?.prompt).toBe(defaultPrompt('review'))
   })
 
   it.each([
@@ -207,25 +205,23 @@ describe('parseFlow', () => {
       'rules[0] (split).watch: status "ready" is not in workflow.statuses',
     ],
     [{ ...split, claim: 'ready-to-split' }, 'rules[0] (split).claim must differ from watch'],
-    [
-      { ...split, agent: 'claude' },
-      `rules[0] (split).agent: no agent "claude" in the config file's agents`,
-    ],
-    [
-      { ...split, mode: 'judge' },
-      'rules[0] (split).mode must be one of split, execute, dispatch, rework, review, custom',
-    ],
+    [{ ...split, agent: 'claude' }, `rules[0] (split).agent: no agent "claude" on the Agents page`],
+    // A rule saved before D109 meets the ordinary check, nothing that reads its mode.
+    [{ ...split, mode: 'split' }, 'rules[0] (split).mode: not a rule field'],
     [
       { ...split, outcomes: { needs_input: 'needs-answers' } },
-      'rules[0] (split).outcomes.succeeded is required in split mode',
+      'rules[0] (split).outcomes.succeeded is required',
     ],
+    [{ ...split, dispatch: 'yes' }, 'rules[0] (split).dispatch must be true or false'],
     [
-      { ...split, mode: 'execute', outcomes: { succeeded: 'in-review' } },
-      'rules[0] (split).outcomes.blocked_manual is required in execute mode',
-    ],
-    [
-      { ...split, mode: 'review', outcomes: { needs_input: 'blocked' } },
-      'rules[0] (split).outcomes must name at least one way for the agent to finish',
+      {
+        ...split,
+        claim: undefined,
+        dispatch: true,
+        needsFeedback: true,
+        outcomes: { succeeded: 'split-review', blocked_manual: 'blocked' },
+      },
+      'rules[0] (split).needsFeedback: a dispatch rule runs the tasks there are',
     ],
     [
       { ...split, outcomes: { ...split.outcomes, cancelled: 'done' } },
@@ -244,41 +240,14 @@ describe('parseFlow', () => {
       'rules[0] (split).maxAttempts must be a whole number of at least 1',
     ],
     [{ ...split, session: 'always' }, 'rules[0] (split).session must be one of fresh, per-item'],
-    [{ ...split, prompt: '' }, 'rules[0] (split).prompt is required'],
+    [{ ...split, prompt: 3 }, 'rules[0] (split).prompt must be text'],
     // The default has no splitting: a rule claiming it needs a station for it.
     [split, 'rules[0] (split).claim: status "splitting" is not in workflow.statuses', DEFAULT_FLOW],
   ])('refuses a rule that cannot work: %j', (rule, message, base: object = { workflow }) => {
     expect(() => parse({ ...base, rules: [rule] })).toThrow(message)
   })
 
-  it('refuses split and rework rules when the task statuses their tasks start in are not mapped', () => {
-    const tasksAt = (ids: string[], rule: object) => ({
-      workflow: stations(ids, { taskStatuses: { 'to-do': 'T' } }),
-      rules: [rule],
-    })
-    expect(() =>
-      parse(
-        tasksAt(
-          ['refining', 'ready-to-split', 'splitting', 'split-review', 'needs-answers', 'blocked'],
-          split,
-        ),
-      ),
-    ).toThrow('workflow.taskStatuses must map manual: rule split makes tasks')
-    const rework = {
-      ...split,
-      id: 'rework',
-      watch: 'ready-to-rework',
-      mode: 'rework',
-      outcomes: { succeeded: 'split-review', needs_input: 'blocked' },
-    }
-    expect(() =>
-      parse(
-        tasksAt(['refining', 'ready-to-rework', 'splitting', 'split-review', 'blocked'], rework),
-      ),
-    ).toThrow('workflow.taskStatuses must map manual: rule rework makes tasks')
-  })
-
-  it('refuses an execute rule unless every task status is mapped', () => {
+  it('refuses any rule but a dispatch one unless every task status is mapped, since its agent may make and walk tasks (D109)', () => {
     const raw = {
       workflow: stations(['refining', 'in-progress', 'in-review', 'blocked'], {
         taskStatuses: { 'to-do': 'T', manual: 'M', done: 'D' },
@@ -288,7 +257,6 @@ describe('parseFlow', () => {
           id: 'execute',
           watch: 'in-progress',
           agent: 'fake',
-          mode: 'execute',
           outcomes: { succeeded: 'in-review', needs_input: 'blocked', blocked_manual: 'blocked' },
         },
       ],
@@ -298,40 +266,18 @@ describe('parseFlow', () => {
     )
   })
 
-  it('reads a custom rule with no prompt as no prompt, and maps every task status for it (D92)', () => {
-    const custom = {
-      id: 'custom',
-      watch: 'in-progress',
-      agent: 'fake',
-      mode: 'custom',
-      outcomes: { succeeded: 'in-review', done_for_now: 'in-review' },
-    }
-    expect(parse(withRules([custom])).rules[0]).toMatchObject({ mode: 'custom', prompt: '' })
-    expect(() =>
-      parse(withRules([{ ...custom, outcomes: { done_for_now: 'in-review' } }])),
-    ).toThrow('rules[0] (custom).outcomes.succeeded is required in custom mode')
-    expect(() =>
-      parse({
-        workflow: stations(['refining', 'in-progress', 'in-review', 'blocked'], {
-          taskStatuses: { 'to-do': 'T', manual: 'M', done: 'D' },
-        }),
-        rules: [custom],
-      }),
-    ).toThrow('workflow.taskStatuses must map in-progress, in-review: rule custom runs tasks')
-  })
-
   it('keeps a dispatch rule to what the engine can reach, and maps the four task statuses it moves (D102)', () => {
     const dispatch = {
       id: 'dispatch',
       watch: 'in-progress',
       agent: 'fake',
-      mode: 'dispatch',
+      dispatch: true,
       outcomes: { succeeded: 'in-review', blocked_manual: 'blocked' },
     }
-    expect(parse(withRules([dispatch])).rules[0]).toMatchObject({
-      mode: 'dispatch',
-      prompt: defaultPrompt('dispatch'),
-    })
+    expect(parse(withRules([dispatch])).rules[0]).toMatchObject({ dispatch: true, prompt: '' })
+    expect(() => parse(withRules([{ ...dispatch, outcomes: { succeeded: 'in-review' } }]))).toThrow(
+      'rules[0] (dispatch).outcomes.blocked_manual is required on a dispatch rule',
+    )
     expect(() => parse(withRules([{ ...dispatch, claim: 'refining' }]))).toThrow(
       'rules[0] (dispatch).claim: a dispatch rule keeps the item in watch',
     )
@@ -388,8 +334,8 @@ describe('parseFlow', () => {
     ])
   })
 
-  it('sends work back to the status the rework rule watches, and only one', () => {
-    const rework = { ...split, id: 'rework', watch: 'ready-to-rework', mode: 'rework' }
+  it('sends work back to the status the rule that needs feedback watches, and only one', () => {
+    const rework = { ...split, id: 'rework', watch: 'ready-to-rework', needsFeedback: true }
     const raw = (rules: unknown[]) => ({
       workflow: stations([...splitStations, 'ready-to-rework', 'redo']),
       rules,
@@ -397,7 +343,7 @@ describe('parseFlow', () => {
     expect(parse(raw([split])).workflow.roles.rework).toBeUndefined()
     expect(parse(raw([split, rework])).workflow.roles.rework).toBe('ready-to-rework')
     expect(() => parse(raw([rework, { ...rework, id: 'again', watch: 'redo' }]))).toThrow(
-      'rules: rework rules must watch one status, not ready-to-rework, redo',
+      'rules: rules that need feedback must watch one status, not ready-to-rework, redo',
     )
   })
 })

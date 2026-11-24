@@ -33,7 +33,6 @@ function start(runner: RunnerPort, resume?: string): Started {
   const spec: RunSpec = {
     runId: 'run-1',
     target: 'T-1',
-    mode: 'split',
     workspace: dir,
     mcp: { url: 'http://127.0.0.1:1/agent-mcp', token: 'run-token' },
     prompt: 'Split T-1.',

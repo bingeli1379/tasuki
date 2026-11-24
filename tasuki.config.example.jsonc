@@ -18,50 +18,18 @@
   // auth-http asks another system instead; the first person in raises themselves with it.
   // "auth": { "plugin": "@tasuki/auth-http", "options": { "url": "https://sso.example.com/verify" } },
 
-  // refPrefix: sqlite refs become TSK-1, TSK-2... Default "TSK".
-  "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
+  // The tracker is not in this file: it is picked on the Tracker page under the gear, for an
+  // admin, sqlite until then. A Jira token typed there is kept encrypted with a key made in
+  // dataDir, or TASUKI_SECRET_KEY (D105, D106).
 
-  // The statuses, the rules and the hold label are not in this file: they live in the store
-  // and are edited on the settings page (the gear on the board), for an admin or a
-  // maintainer. A store never saved to runs the default statuses with no rules, so the
-  // engine leaves every item alone until a rule is added there (D91).
+  // The statuses, the rules and the hold label are not in this file either: they live in the
+  // store and are edited on the Workflow page, for an admin or a maintainer. A store never
+  // saved to runs the default statuses with no rules, so the engine leaves every item alone
+  // until a rule is added there (D91).
 
-  // Jira Cloud instead; put JIRA_EMAIL and JIRA_API_TOKEN in .env.
-  // Every Jira value below is an id, not a name, and ids differ per project.
-  // "tracker": {
-  //   "plugin": "@tasuki/jira-cloud",
-  //   "options": {
-  //     "baseUrl": "https://example.atlassian.net",
-  //     "email": "${JIRA_EMAIL}",
-  //     "apiToken": "${JIRA_API_TOKEN}",
-  //     "project": "PROJ",
-  //     "issueTypes": { "item": "10009", "task": "10007" },   // task is a sub-task type
-  //     "dependencyLinkType": "10000"                        // the "Blocks" issue link type
-  //   }
-  // },
-  // On Jira, pick each status's Jira status on the settings page; until every one is picked
-  // the board says so and no agent starts.
-
-  // Agents are runner plugins, given the same way as the tracker. The fake runner stands in
-  // for an agent so the engine can be tried without an LLM. A title with [fake:needs_input], [fake:failed], [fake:blocked_manual], [fake:hang] or
-  // [fake:no_tasks] picks what it does; anything else makes two tasks and succeeds after
-  // `seconds`, [fake:manual] making the second one manual. Executing, it walks every task it
-  // can to done and reports blocked_manual when only manual ones are left.
-  //
-  // Rules on the settings page pick one of these by name. Point one at "claude" to run the real CLI with this machine's login. It may
-  // use the tasuki tools and allowedTools only; nobody is there to approve anything else.
-  // It loads none of this machine's Claude settings: give it what it needs with "plugins",
-  // "mcpServers" and "appendSystemPromptFile" (its standing instructions). A stage that needs
-  // different ones gets an agent of its own.
-  "agents": {
-    "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } },
-    "claude": {
-      "plugin": "@tasuki/claude-cli",
-      "options": {
-        "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git:*)", "Bash(node:*)"],
-      },
-    },
-  },
+  // The agents are not in this file either: they are on the Agents page under the gear, for
+  // an admin. A store never saved to has claude and codex, each on this machine's login, and
+  // the page says when a CLI is missing and how to install it (D107, D108, D110).
 
   // The poll interval and the limits are on the General page (the gear on the board), for an
   // admin: 5 seconds on sqlite, 30 on Jira, until someone saves another.

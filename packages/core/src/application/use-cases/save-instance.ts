@@ -11,10 +11,11 @@ export function assertEditsInstance(actor: Account): void {
 // value is already checked by the engine; expected is the version the editor started from.
 export async function saveInstance(
   store: StorePort,
+  doc: 'instance' | 'tracker' | 'agents',
   actor: Account,
   expected: number | undefined,
   value: unknown,
 ): Promise<SettingsVersion> {
   assertEditsInstance(actor)
-  return store.saveSettings('instance', expected, value, actor.displayName)
+  return store.saveSettings(doc, expected, value, actor.displayName)
 }

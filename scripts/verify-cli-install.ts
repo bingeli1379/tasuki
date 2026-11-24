@@ -20,13 +20,10 @@ const run = (cmd: string, args: string[], cwd: string): string =>
 run('node', [join(root, 'scripts', 'pack-cli.ts'), app], root)
 const tasuki = join(app, 'node_modules', '.bin', 'tasuki')
 
+// Its own data folder: left out, it would be ~/.tasuki, the person's own instance (D105).
 writeFileSync(
   join(instance, 'tasuki.config.jsonc'),
-  JSON.stringify({
-    server: { port: PORT },
-    poll: { intervalSeconds: 1 },
-    agents: { fake: { plugin: '@tasuki/fake-runner', options: { seconds: 0 } } },
-  }),
+  JSON.stringify({ dataDir: './data', server: { port: PORT } }),
 )
 console.log(run(tasuki, ['doctor'], instance))
 

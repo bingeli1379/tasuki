@@ -20,7 +20,9 @@ export type JiraRequest = <T>(method: string, path: string, body?: unknown) => P
 // at its own attachment URL); without a limit the board would hang with it.
 const TIMEOUT_MS = 30_000
 
-export function createFetch(options: JiraOptions): JiraFetch {
+export function createFetch(
+  options: Pick<JiraOptions, 'baseUrl' | 'email' | 'apiToken'>,
+): JiraFetch {
   const auth = `Basic ${Buffer.from(`${options.email}:${options.apiToken}`).toString('base64')}`
   return async (path, init = {}) => {
     const headers = new Headers(init.headers)

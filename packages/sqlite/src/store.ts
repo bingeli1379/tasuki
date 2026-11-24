@@ -52,6 +52,9 @@ function toRun(row: Row): Run {
       questions: Number(row['produced_questions']),
       tasks: Number(row['produced_tasks']),
     },
+    ...(typeof row['denials'] === 'string'
+      ? { denials: JSON.parse(row['denials']) as NonNullable<Run['denials']> }
+      : {}),
     ...optional('cancelRequestedAt', row['cancel_requested_at']),
     ...(optional('cancelMode', row['cancel_mode']) as { cancelMode?: CancelMode }),
     ...(optional('cancelRequestedBy', row['cancel_requested_by']) as {
@@ -150,6 +153,9 @@ export function createSqliteStore(db: DatabaseSync, clock: Clock): StorePort {
     },
     async recordSession(id, sessionId) {
       db.prepare('UPDATE run SET session_id = ? WHERE id = ?').run(sessionId, id)
+    },
+    async recordDenials(id, denials) {
+      db.prepare('UPDATE run SET denials = ? WHERE id = ?').run(JSON.stringify(denials), id)
     },
     async report(id, verdict, summary) {
       const { changes } = db

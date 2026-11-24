@@ -16,16 +16,17 @@ import {
   type TrackerPort,
 } from '@tasuki/core'
 import { z } from 'zod'
+import type { Answer } from './approvals'
 
 export interface AgentMcpDeps {
   tracker: TrackerPort
   store: StorePort
   run: Run
-  // The rule that started the Run. Its mode picks the tools: splitters build the task graph,
-  // executors walk it, reviewers only read and comment, custom gets all of it (agent-contract.md,
-  // the tool table).
-  // Its outcomes are what the agent can report.
+  // The rule that started the Run. Every agent gets every tool but a dispatched one, which
+  // works one task the engine moves (D102, D109). Its outcomes are what the agent can report.
   rule: Rule
+  // Asks a person whether the agent may make a call, on the board (D107).
+  ask: (call: { tool: string; input: unknown }, signal: AbortSignal) => Promise<Answer>
 }
 
 // What a model takes as an image; any other file goes out as a resource.
@@ -41,13 +42,12 @@ const json = (value: unknown): { content: { type: 'text'; text: string }[] } => 
 // The MCP facade for an agent the engine started. Bound to one Run by its token, so every
 // tool works on that Run's item and nothing else; there is no tool that moves the item
 // (agent-contract.md).
-export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps): McpServer {
-  const { mode } = rule
+export function createAgentMcpServer({ tracker, store, run, rule, ask }: AgentMcpDeps): McpServer {
+  const { dispatch } = rule
   // A dispatch worker's run.target is its task, the default it comments on (D102).
-  const targetHint =
-    mode === 'dispatch'
-      ? "Your task's ref (default), the item's, or another of its tasks"
-      : "The item's ref (default) or one of its tasks"
+  const targetHint = dispatch
+    ? "Your task's ref (default), the item's, or another of its tasks"
+    : "The item's ref (default) or one of its tasks"
   const server = new McpServer({ name: 'tasuki-agent', version: '0.0.0' })
   // A person asked this Run to stop: its writes are refused so the agent winds down
   // (agent-contract.md). run is read afresh for every request.
@@ -75,7 +75,7 @@ export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps
     },
     async () => json(await listTasks(tracker, run.item)),
   )
-  if (mode === 'split' || mode === 'rework' || mode === 'custom')
+  if (!dispatch)
     server.registerTool(
       'create_task',
       {
@@ -183,7 +183,7 @@ export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps
       )
     },
   )
-  if (mode === 'execute' || mode === 'custom')
+  if (!dispatch)
     server.registerTool(
       'set_task_status',
       {
@@ -207,6 +207,25 @@ export function createAgentMcpServer({ tracker, store, run, rule }: AgentMcpDeps
         return json(await setTaskStatus(tracker, run, input))
       },
     )
+  // The CLI's --permission-prompt-tool, not the model's: the shape is Claude Code's (D107).
+  server.registerTool(
+    'ask_permission',
+    {
+      description:
+        'Used by your CLI to ask a person before it runs a tool you are not allowed on your own. ' +
+        'Do not call it yourself.',
+      inputSchema: {
+        tool_name: z.string(),
+        input: z.unknown(),
+        tool_use_id: z.string().optional(),
+      },
+    },
+    async ({ tool_name, input }, extra) => {
+      writable()
+      const answer = await ask({ tool: tool_name, input }, extra.signal)
+      return { content: [{ type: 'text', text: JSON.stringify(answer) }] }
+    },
+  )
   server.registerTool(
     'report_result',
     {

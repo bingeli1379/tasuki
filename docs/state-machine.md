@@ -5,7 +5,7 @@ Jira / sqlite 的實際名稱靠流程設定的 status mapping 對應，這份�
 
 名詞以 glossary.md 為準，欄位細節以 data-model.md 為準。
 
-下面的十站是預設流程。站可以在設定頁的流程設定裡自己列（D91），程式只認角色不認名字（D78、D81）：`entry` 是 `refining`、`failure` 是 `blocked`。`ready-to-rework` 的「打回要先寫回饋」來自 rework 規則盯它，不是角色（D86）。這份文件寫到站名的地方，換了流程就讀成扮演那個角色的站。
+下面的十站是預設流程。站可以在設定頁的流程設定裡自己列（D91），程式只認角色不認名字（D78、D81）：`entry` 是 `refining`、`failure` 是 `blocked`。`ready-to-rework` 的「打回要先寫回饋」來自打開 `needsFeedback` 的規則盯它，不是角色（D86、D109）。這份文件寫到站名的地方，換了流程就讀成扮演那個角色的站。
 
 ## Item
 

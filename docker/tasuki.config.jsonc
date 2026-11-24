@@ -8,20 +8,7 @@
   // anywhere else, set auth and publicUrl instead.
   "server": { "host": "0.0.0.0", "port": 8787, "allowInsecure": true },
 
-  "tracker": { "plugin": "@tasuki/sqlite", "options": { "refPrefix": "TSK" } },
-
-  // There is no login to inherit in here: the agent signs in with an API key from the Claude
-  // Console. "oauth-token" with CLAUDE_CODE_OAUTH_TOKEN in env is also accepted
-  // (security-and-auth.md).
-  "agents": {
-    "claude": {
-      "plugin": "@tasuki/claude-cli",
-      "options": {
-        "auth": "api-key",
-        "env": { "ANTHROPIC_API_KEY": "${ANTHROPIC_API_KEY}" },
-        "allowedTools": ["Read", "Edit", "Write", "Glob", "Grep", "Bash(git:*)", "Bash(node:*)"],
-      },
-    },
-    "fake": { "plugin": "@tasuki/fake-runner", "options": { "seconds": 10 } },
-  },
+  // There is no login to inherit in here: on the Agents page under the gear, set the claude
+  // agent's sign-in to an API key from the Claude Console, or to a token from claude
+  // setup-token, and paste it there; it is kept encrypted in /data (D106, D107).
 }

@@ -5,8 +5,10 @@ import {
   ApiError,
   attachmentUrl,
   call,
+  callText,
   messageOf,
   sendJson,
+  type Approval,
   type Attachment,
   type Comment,
   type Item,
@@ -35,8 +37,17 @@ const props = defineProps<{
   seen: string
   columns: { status: string; displayName: string; outcomes: string[] }[]
   roles: Roles
+  // Calls an agent on this item waits on a person for (D107).
+  approvals: Approval[]
+  // Allowing a call for good changes the agent, which only an admin does.
+  isAdmin: boolean
 }>()
-const emit = defineEmits<{ updated: [item: Item]; move: [to: string]; deleted: [ref: string] }>()
+const emit = defineEmits<{
+  updated: [item: Item]
+  move: [to: string]
+  deleted: [ref: string]
+  answered: []
+}>()
 const open = defineModel<boolean>('open', { required: true })
 
 const detail = ref<ItemDetail>()
@@ -381,6 +392,28 @@ const size = (bytes: number): string =>
     : bytes < 1024 * 1024
       ? `${(bytes / 1024).toFixed(1)} KB`
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+const answering = ref('')
+async function answer(a: Approval, decision: 'allow' | 'allow-always' | 'deny'): Promise<void> {
+  answering.value = a.id
+  try {
+    await call(`/api/approvals/${a.id}`, sendJson('POST', { decision }))
+    toast.add({
+      title:
+        decision === 'deny'
+          ? 'Denied: the agent asks on the item instead'
+          : decision === 'allow'
+            ? 'Allowed once: the agent carries on'
+            : `Allowed for good on ${a.agent}: the agent carries on`,
+      color: decision === 'deny' ? 'neutral' : 'success',
+    })
+    emit('answered')
+  } catch (e) {
+    toast.add({ title: messageOf(e), color: 'error' })
+  } finally {
+    answering.value = ''
+  }
+}
+
 const outcomeColor = (r: Run): 'primary' | 'success' | 'warning' | 'error' | 'neutral' =>
   r.outcome === undefined
     ? 'primary'
@@ -764,6 +797,55 @@ const authorOf = (c: Comment): string =>
                 </p>
               </section>
 
+              <section
+                v-if="approvals.length > 0"
+                aria-labelledby="approvals-heading"
+                class="flex flex-col gap-2 rounded-lg bg-warning/10 p-3"
+              >
+                <h3 id="approvals-heading" class="text-sm font-semibold text-highlighted">
+                  Waiting for you
+                </h3>
+                <div
+                  v-for="a in approvals"
+                  :key="a.id"
+                  :aria-label="`${a.agent} asks to use ${a.tool}`"
+                  class="flex flex-col gap-2 text-sm"
+                >
+                  <p>
+                    <code class="font-mono">{{ a.agent }}</code> asks to use
+                    <code class="font-mono">{{ a.tool }}</code>
+                  </p>
+                  <pre
+                    class="max-h-32 overflow-auto rounded bg-default p-2 font-mono text-xs whitespace-pre-wrap"
+                    >{{ callText(a.input) }}</pre>
+                  <span class="flex flex-wrap gap-2">
+                    <UButton
+                      label="Approve"
+                      size="sm"
+                      :loading="answering === a.id"
+                      @click="answer(a, 'allow')"
+                    />
+                    <UButton
+                      v-if="isAdmin"
+                      label="Always allow"
+                      size="sm"
+                      color="neutral"
+                      variant="outline"
+                      :disabled="answering === a.id"
+                      @click="answer(a, 'allow-always')"
+                    />
+                    <UButton
+                      label="Deny"
+                      size="sm"
+                      color="error"
+                      variant="ghost"
+                      :disabled="answering === a.id"
+                      @click="answer(a, 'deny')"
+                    />
+                  </span>
+                </div>
+              </section>
+
               <section aria-labelledby="runs-heading" class="flex flex-col gap-2">
                 <h3 id="runs-heading" class="text-sm font-semibold text-highlighted">Runs</h3>
                 <p v-if="detail.runs.length === 0" class="text-sm text-muted">
@@ -811,6 +893,19 @@ const authorOf = (c: Comment): string =>
                         />
                       </template>
                     </span>
+                    <ul
+                      v-if="r.denials && r.denials.length > 0"
+                      :aria-label="`Refused to run ${r.rule}`"
+                      class="flex flex-col gap-0.5 text-xs text-error"
+                    >
+                      <li v-for="(d, i) in r.denials" :key="i" class="flex gap-1">
+                        <UIcon name="i-lucide-ban" class="mt-0.5 size-3 shrink-0" />
+                        <span
+                          >Refused {{ d.tool }}:
+                          <code class="font-mono break-all">{{ callText(d.input) }}</code></span
+                        >
+                      </li>
+                    </ul>
                     <time :datetime="r.startedAt" class="text-xs text-muted">
                       {{ new Date(r.startedAt).toLocaleString() }}
                     </time>
