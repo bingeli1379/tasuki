@@ -787,7 +787,7 @@ test('a call the agent asks about lights the card, and Approve or Deny on the it
   const asked = dialog.getByRole('region', { name: 'Waiting for you' })
   await expect(asked).toContainText('git push')
   await asked.getByRole('button', { name: 'Approve' }).click()
-  await expect(page.getByText('Allowed once: the agent carries on')).toBeVisible()
+  await expect(page.getByText('Allowed once: the agent carries on', { exact: true })).toBeVisible()
   await dialog.getByRole('button', { name: 'Close' }).first().click()
   await expect(
     page.getByRole('region', { name: /^Split Review/ }).getByRole('article', { name: approved }),
@@ -798,7 +798,9 @@ test('a call the agent asks about lights the card, and Approve or Deny on the it
     .getByRole('region', { name: 'Waiting for you' })
     .getByRole('button', { name: 'Deny' })
     .click()
-  await expect(page.getByText('Denied: the agent asks on the item instead')).toBeVisible()
+  await expect(
+    page.getByText('Denied: the agent asks on the item instead', { exact: true }),
+  ).toBeVisible()
   await expect(dialog.getByRole('listitem', { name: 'Run split attempt 1' })).toContainText(
     'needs_input',
     { timeout: 60_000 },
