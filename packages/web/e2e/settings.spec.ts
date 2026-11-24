@@ -177,7 +177,7 @@ test('the Agents page adds a claude agent in auto and never shows its token', as
   await page.getByRole('option', { name: 'A token from claude setup-token' }).click()
   await dialog.getByLabel('OAuth token').fill('sk-ant-oat-e2e')
   await dialog.getByRole('button', { name: 'Save' }).click()
-  await expect(page.getByText('Saved: the next Run uses it')).toBeVisible()
+  await expect(page.getByText('Saved: the next Run uses it', { exact: true })).toBeVisible()
 
   await page.reload()
   await page.getByRole('button', { name: 'Settings' }).click()
@@ -190,7 +190,7 @@ test('the Agents page adds a claude agent in auto and never shows its token', as
   // Taken off again, so the board tests keep running on the fake one alone.
   await dialog.getByRole('button', { name: 'Remove claude-auto' }).click()
   await dialog.getByRole('button', { name: 'Save' }).click()
-  await expect(page.getByText('Saved: the next Run uses it').last()).toBeVisible()
+  await expect(page.getByText('Saved: the next Run uses it', { exact: true }).last()).toBeVisible()
   await expect(dialog.getByRole('button', { name: 'claude-auto' })).toHaveCount(0)
   // The fake agent has no form; saving the page kept the options it was given.
   const { agents } = (await (await request.get('/api/agents')).json()) as {
